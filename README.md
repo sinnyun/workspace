@@ -32,13 +32,15 @@
 | [docs/04-roadmap.md](docs/04-roadmap.md) | 里程碑与任务表(完成条件 + 状态 + 证据)、风险登记、明确不做清单 |
 | [docs/05-decisions.md](docs/05-decisions.md) | 关键选型表与决策记录:理由、代价、后果 |
 | [docs/06-open-source-stack.md](docs/06-open-source-stack.md) | 分层开源方案选型清单(后端 Rust / 前端 React / 工具链):推荐库 + 理由 + 隔离层原则 |
+| [docs/07-cordis-api-memo.md](docs/07-cordis-api-memo.md) | cordis-core API 事实备忘(签名/生命周期/panic 语义);依赖源码仅作 API 参考 |
+| [docs/08-plugin-catalog.md](docs/08-plugin-catalog.md) | 插件目录与库分布:每个开源库归到哪个插件/层、插件清单与 manifest 草案、实现顺序 |
 | [docs/00-handover.md](docs/00-handover.md) | **开发交接文档**:当前进度快照、已验证证据、在跑任务、剩余任务流程、关键坑与命令 |
 
 ---
 
 ## 当前仓库状态
 
-代码工程已初始化并跑通主链路(不再是"只有文档")。双工作区(cargo + pnpm)就位,后端内核/能力层、前端基座/插槽/加载器、manifest/SDK/契约/权限、首个全栈插件 file-history 均已落地并有测试或浏览器证据。实现进度与逐项证据以 [docs/04-roadmap.md](docs/04-roadmap.md) 为准;新对话接手请先读 [docs/00-handover.md](docs/00-handover.md)。
+代码工程已初始化并跑通主链路(不再是"只有文档")。双工作区(cargo + pnpm)就位,后端内核/能力层、前端基座/插槽/加载器、manifest/SDK/契约/权限、首个全栈插件 file-history 均已落地并有测试或浏览器证据。实现进度与逐项证据以 [docs/04-roadmap.md](docs/04-roadmap.md) 为准;**后续要建的插件生态与库分布见 [docs/08-plugin-catalog.md](docs/08-plugin-catalog.md)**;新对话接手请先读 [docs/00-handover.md](docs/00-handover.md)。
 
 ```
 workspace/
@@ -48,7 +50,8 @@ workspace/
 ├── pnpm-workspace.yaml      # pnpm 工作区
 ├── core-shared/             # contracts(Rust) / kernel(Rust) / plugin-sdk(TS)
 ├── apps/                    # host(Tauri Rust) / shell-ui(React 前端)
-└── plugins/plugin-file-history/  # 首个全栈插件(backend Rust + frontend ESM + manifest)
+├── plugins/plugin-file-history/  # 首个全栈插件(backend Rust + frontend ESM + manifest)
+└── plugins/(规划)file-browser、file-ops、search、preview-*、archive、storage-analysis … 见 08
 ```
 
 常用命令:

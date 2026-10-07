@@ -19,6 +19,8 @@
 > 证实;前端基座与插件加载由 `vite dev` 浏览器实测证实(共享单例 + 运行时 `import()`);NSIS 安装包由
 > `tauri build` 产出。**Tauri 窗口内的可视化验证在本环境(无显示器)未做**,相关项标 🟡 而非 ✅。
 > API 事实参考见 [07-cordis-api-memo.md](07-cordis-api-memo.md)。
+>
+> **Phase 6 已立**:2026-10-08 开源库使用审计后,把 [06](06-open-source-stack.md) 的既定选型逐项转成可执行任务(6A 能力 / 6B 前端插件 / 6C 工具链 / 6D cordis 运行时),后续开发按 Phase 6 接入并使用这些库。审计中 cordis-rs 侧发现的**已声明未用**依赖(`cordis-loader`/`cordis-timer`)不删除,由 P6-41/P6-42 转正启用。
 
 ---
 
@@ -32,6 +34,7 @@
 | **Phase 3** | 插件规范固化 + SDK | manifest schema、plugin-sdk/contracts、权限模型、脚手架 | P1,P2 |
 | **Phase 4** | 首个全栈插件打通 | file-history 前后端 + 全链路数据流验证 | P3 |
 | **Phase 5** | 加固与打包 | 错误隔离、可观测、tauri build、契约冻结 v1 | P4 |
+| **Phase 6** | 既定开源栈落地 | 把 [06](06-open-source-stack.md) 选型接入:能力扩展 / 功能插件 / 质量工具链 / cordis 运行时补全 | P4(基座可用即可并行推进) |
 
 ---
 
@@ -111,6 +114,76 @@
 | P5-3 | 日志/可观测 | 接入内核生命周期诊断并转发到统一日志管道;关键事件可追踪 | ✅ | host 初始化 `tracing_subscriber`(EnvFilter,info 默认);fm-kernel `logger.rs` 用 cordis 原生 `Logger`/`add_exporter` 面把 Runtime 诊断(contained panic、dispatch/lifecycle/effect 错误)桥接为 `tracing` 事件,`LogBridgePlugin` 作为首个 fiber 发布;无头测试 `logger_bridge` 证实经同一 `add_exporter` 注册的 exporter 能收到带 level/channel/text 的记录。未引入独立 logger crate(cordis 自带面已足够) |
 | P5-4 | 打包 | `tauri build` 产出可运行安装包;前端插件分发目录约定明确 | ✅ | `npx tauri build` 成功: `target/release/bundle/nsis/File Manager_0.1.0_x64-setup.exe`(~3.9MB), `fm-host.exe` 16.9MB;`dist/shared/*` 9 文件随包产出;插件分发目录见 [03-project-layout.md](03-project-layout.md) |
 | P5-5 | 契约冻结 v1 | manifest/SDK/能力/事件契约标为 v1,文档回填,后续变更走版本流程 | ✅ | [02-plugin-spec.md](02-plugin-spec.md) §7.1 冻结 v1(manifest `schemaVersion==1` / 能力名 / 事件+负载 / DTO 形状)并声明变更走版本流程;`contract:check` 退出 0(事件名/负载、能力名、DTO 字段 TS↔Rust 一致)作为漂移回归 |
+
+---
+
+## Phase 6 · 既定开源栈落地(能力扩展 + 功能插件 + 工具链)
+
+> 目的:把 [06-open-source-stack.md](06-open-source-stack.md) 已选型的开源库**真正接入**,而不是停在清单。每项注明**用哪个库**、**装在哪(隔离层)**、**完成条件**。新增后端能力一律落在 `core-shared/kernel/src/capabilities/*`(对外只经 `db.<store>.*` / 能力名契约);新增前端功能一律做成**插件**(运行时 `import()`),共享依赖走 import map 单例。跨层新数据形状先加 `core-shared/contracts`↔`plugin-sdk` 并跑 `contract:check`。
+>
+> **这些库按插件的分布(哪个插件拉起哪些 P6 任务、占哪些插槽、声明哪些能力/事件)见 [08-plugin-catalog.md](08-plugin-catalog.md)。** 下面 6A/6B/6C/6D 是"按库/任务"视角,08 是"按插件"视角,同一批工作两种切面。
+
+### 6A · 后端能力层扩展(Rust,走 capabilities 隔离层)
+
+| # | 能力 / 任务 | 采用库 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P6-1 | 并行目录遍历 + 大目录基准(收口 P1-7) | `ignore`(尊重 gitignore)或 `jwalk`(纯并行更快) + `rayon` | `fs.list` 并行遍历;10万级目录基准达预期;`fs.readChunk`/`hash.compute` 流式分块 | 🔵 |
+| P6-2 | 回收站删除 | `trash` | 能力 `fs.trash`(跨平台回收站,非硬删) | 🔵 |
+| P6-3 | 复制 / 移动 + 进度 | `fs_extra`(目录级)+ 自写分块进度 | 能力 `fs.copy`/`fs.move`,大文件进度事件 | 🔵 |
+| P6-4 | 文件名自然排序 | `natord` | 列表/排序 "2 file" < "10 file" | 🔵 |
+| P6-5 | 磁盘/系统信息 | `sysinfo` | 能力 `sys.disk`(剩余空间、占用统计) | 🔵 |
+| P6-6 | 类型识别(MIME) | `infer`(魔数)+ `mime_guess`(扩展名兜底) | 能力 `file.kind`,供预览/图标插件消费 | 🔵 |
+| P6-7 | 图像缩略图 | `image` + `fast_image_resize` | 能力 `thumb.image`(解码+高质量缩放);重依赖,按需启用 | 🔵 |
+| P6-8 | 文本编码探测 | `encoding_rs` + `chardetng` | `fs.readText` 非 UTF-8 正确预览 | 🔵 |
+| P6-9 | 全文检索(内容搜索插件) | `tantivy`(大)/ SQLite **FTS5**(小数据,零额外依赖) | 搜索插件后端索引 + `search.query` 能力;**先评估 FTS5 是否够用**再定 tantivy | ⚪ |
+| P6-10 | 归档浏览 | `zip` / `tar`+`flate2` / `sevenz-rust` | 只读浏览/解压能力,封进归档插件 | 🔵 |
+| P6-11 | 文本差异(file-history 内容 diff) | `similar` | 后端算行 diff,前端 `react-diff-view`(见 P6-20)展示 | 🔵 |
+| P6-12 | DB schema 迁移 + 并发池 | `refinery`(版本化迁移)+ `r2d2_sqlite`(多线程池) | 当出现 schema 演进即引入 refinery;当前 rusqlite 单连接直连为已知延后项 | 🔵 |
+| P6-13 | 增量版本存储(块级历史,可选) | `fastcdc`(内容定义分块) | 仅在做块级去重历史时启用;否则不引 | ⚪ |
+
+### 6B · 前端功能插件(React + Mantine 生态 + 专用库)
+
+| # | 功能 / 任务 | 采用库 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P6-14 | 命令面板(Ctrl+Shift+P) | `@mantine/spotlight` | 基座命令总线 + 插件可注册命令 | 🔵 |
+| P6-15 | 大文件列表虚拟滚动 | `@tanstack/react-virtual` | 十万级列表不卡 | 🔵 |
+| P6-16 | 表格视图(排序/列/选择) | `@tanstack/react-table` | 详情列表模式 | 🔵 |
+| P6-17 | 目录树 | `react-arborist`(或 TanStack Virtual 自绘) | 虚拟化树 + DnD/重命名/键盘 | 🔵 |
+| P6-18 | 拖拽(移动/排序) | `@dnd-kit/core`(+`sortable`) | 拖文件到目录;无障碍 | 🔵 |
+| P6-19 | 快捷键 | `react-hotkeys-hook` | 基座级键位,插件可声明 | 🔵 |
+| P6-20 | 图标 | `lucide-react`(+ 文件类型图标 `@vscode/codicons`) | 基座与插件统一图标源,替换现有内联/emoji | 🔵 |
+| P6-21 | 日期 & 文件大小格式化 | `dayjs` + `pretty-bytes` | 时间线/列表展示 | 🔵 |
+| P6-22 | 代码/文本查看器(预览插件) | `@uiw/react-codemirror`(CodeMirror 6)+ `shiki`(静态高亮) | 只读预览插件;需 VS Code 级编辑再上 Monaco(重,独立插件) | 🔵 |
+| P6-23 | 版本 diff 面板 | `react-diff-view` | 消费 P6-11 后端 diff | 🔵 |
+| P6-24 | Markdown / PDF / 图片预览 | `react-markdown`+`remark-gfm` / `react-pdf`(`pdfjs-dist`)/ `react-photo-view` | 各做成独立预览插件按需装载 | 🔵 |
+| P6-25 | 磁盘占用 treemap | `echarts`(`echarts-for-react`) | 消费 P6-5 `sys.disk` + 遍历数据 | 🔵 |
+| P6-26 | i18n | `i18next` + `react-i18next` | 基座+插件文案 | 🔵 |
+| P6-27 | 模态 / 表单 | `@mantine/modals` + `@mantine/form` | 设置面板、重命名对话框等 | 🔵 |
+| P6-28 | 系统级通知 | `tauri-plugin-notification` | 长任务完成通知(应用内通知已用 `@mantine/notifications`) | 🔵 |
+| P6-29 | 窗口状态记忆 / 单实例 | `tauri-plugin-window-state` / `tauri-plugin-single-instance` | 记住尺寸位置;禁多开 | 🔵 |
+| P6-30 | 用默认程序打开(增强) | `tauri-plugin-opener`(已装)+ `tauri-plugin-dialog`(已装) | 系统关联打开、原生对话框——验证并接线到能力层 | 🟡 |
+
+### 6C · 质量 / 构建 / 发布工具链(06 §3)
+
+| # | 任务 | 采用工具 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P6-31 | 前端 lint + format | `Biome` | 配 `biome.json`,纳入 typecheck 脚本与 CI;统一 fmt 门禁 | 🔵 |
+| P6-32 | Rust lint + format 门禁 | `clippy` + `rustfmt` | CI 阻断 clippy warning / fmt diff | 🔵 |
+| P6-33 | 前端单测 | `Vitest` + `@testing-library/react` | 补 **`PluginSlot` 错误边界**渲染测(当前 P5-1 前端无测);基座关键组件覆盖 | 🔵 |
+| P6-34 | 后端测试运行器 | `cargo-nextest` | 本地/CI 用 nextest 跑快、分组好 | 🔵 |
+| P6-35 | CI | GitHub Actions(`actions/checkout`+`Swatinem/rust-cache`+`pnpm`+`tauri-action`) | PR 触发:clippy/fmt/`cargo test`/`contract:check`/`pnpm typecheck`/SDK test;发布 job 出跨平台包 | 🔵 |
+| P6-36 | 供应链 / 许可审计 | `cargo-deny`(+`cargo-audit`)、`pnpm audit` | `deny.toml` 进 CI,拦漏洞与不合规许可 | 🔵 |
+| P6-37 | 提交前钩子 | `lefthook` | pre-commit 跑 fmt+lint+typecheck | 🔵 |
+| P6-38 | 版本 / 变更日志 | `changesets` | 前端包与发布说明的版本流程 | 🔵 |
+| P6-39 | E2E(桌面) | `WebDriverIO` + `tauri-driver`(官方),备选 Playwright 连 WebView2 CDP | 端到端冒烟;需显示环境(与 P0-2 类同环境限制) | ⚪ |
+| P6-40 | 包体积分析 | `rollup-plugin-visualizer` / `size-limit` | 控插件/宿主产物体积;可选 | ⚪ |
+
+### 6D · cordis 运行时补全(已声明未用的依赖在此转正)
+
+| # | 任务 | 采用库 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P6-41 | 声明式加载计划 / 注册表生成 | `cordis-loader`(当前在 workspace 声明但**无引用**) | 落地 roadmap P3-5:扫描 manifest 自动生成后端加载计划,消手写 `registry` 漂移;启用后即从"死声明"转为在用 | 🔵 |
+| P6-42 | fiber 作用域定时 | `cordis-timer`(当前在 workspace 声明但**无引用**) | 用于 watch debounce / 定期清理 / 进度节流等需要 fiber 生命周期定时器的场景;启用后进代码 | 🔵 |
 
 ---
 

@@ -26,49 +26,52 @@ my-file-manager/
 ├── pnpm-workspace.yaml
 │
 ├── apps/
-│   ├── host/                      # Tauri v2 宿主(Rust)
-│   │   ├── Cargo.toml             # 依赖各后端插件 crate + core-shared/contracts
-│   │   ├── build.rs               # 扫描 plugins/*/manifest.json → 生成后端注册表与加载计划
+│   ├── host/                      # Tauri v2 宿主(薄壳,可执行体 fm-host)
+│   │   ├── Cargo.toml             # 依赖 fm-kernel + fm-contracts + tauri*
+│   │   ├── build.rs               # tauri_build(注册表生成见 P3-5/P6-41 规划)
 │   │   ├── tauri.conf.json        # frontendDist 指向 apps/shell-ui/dist
-│   │   └── src/
-│   │       ├── main.rs            # Tauri 入口 + setup 引导
-│   │       ├── capabilities/      # 原子能力:fs / hash / db / watch(#[tauri::command])
-│   │       ├── kernel/            # cordis-rs:Context 引导、loader 接入、fiber 管理
-│   │       ├── bridge/            # 事件桥:cordis Event ↔ Tauri emit ↔ 前端总线
-│   │       └── pluginsrv/         # 前端插件下发:扫描目录 + plugin:// 协议 + 权限校验
+│   │   ├── src/
+│   │   │   ├── main.rs            # Tauri 入口
+│   │   │   ├── lib.rs             # setup 引导:起内核 + 注册插件/命令/协议/桥
+│   │   │   ├── commands.rs        # #[command] invoke_capability → 转调内核能力
+│   │   │   ├── bridge.rs          # 事件桥:cordis Event ↔ Tauri emit ↔ 前端总线
+│   │   │   └── pluginsrv.rs       # 前端插件发现 + plugin:// 下发 + 路径校验
+│   │   └── tests/manifest_schema.rs
 │   │
 │   └── shell-ui/                  # 前端基座(React 19 + Vite)
 │       ├── package.json
 │       ├── index.html             # 含 import map:react/react-dom/@mantine/* → 宿主单例
+│       ├── vite.config.ts         # 共享单例伺服 + dev-plugins + dev import map 改写
+│       ├── scripts/build-shared.mjs # 预构建共享单例两套变体(prod/dev)
 │       └── src/
 │           ├── main.tsx
-│           ├── layout/            # 侧边栏 / 顶栏 / 主视图区骨架
-│           ├── PluginSlot.tsx     # 通用插槽组件
+│           ├── App.tsx            # 布局骨架 + 插槽挂载
+│           ├── PluginSlot.tsx     # 通用插槽组件(含错误边界)
 │           ├── loader.ts          # 读 manifest → import() 前端插件 → 挂载
 │           ├── eventbus.ts        # 前端事件总线(含 Tauri 事件订阅)
-│           ├── host.ts            # 构造注入给插件的 PluginHost
-│           └── state.ts           # 全局元状态(currentFileId ...)
+│           ├── host.ts            # 构造注入给插件的 PluginHost(权限 gating)
+│           ├── slots.ts           # slotId → 组件注册表
+│           └── state.ts           # 全局元状态(currentFileId,zustand)
 │
 ├── core-shared/
-│   ├── plugin-sdk/                # TS 契约包(pnpm):PluginHost / SlotProps / 事件负载类型
-│   │   ├── package.json           # 包名 @my-file-manager/plugin-sdk
-│   │   └── src/index.ts
-│   └── contracts/                 # Rust 契约包(cargo):Event / Capability 类型、Service 定义
-│       ├── Cargo.toml
-│       └── src/lib.rs
+│   ├── contracts/                 # Rust 契约包(Event/Capability/DTO/manifest + fm-contract-dump)
+│   ├── kernel/                    # fm-kernel:**无 Tauri 依赖**的后端内核
+│   │   └── src/
+│   │       ├── capabilities/      # 原子能力:fs / hash / db / watch(第三方库唯一落位)
+│   │       ├── kernel.rs          # cordis Context 引导、provider fiber、boot/teardown
+│   │       ├── registry.rs        # 静态后端插件注册表(待 P6-41 由 loader/build.rs 生成)
+│   │       └── logger.rs          # cordis Logger → tracing 桥
+│   └── plugin-sdk/                # TS 契约包:PluginHost / SlotProps / 事件负载 / validate/permission
 │
 ├── plugins/
-│   └── plugin-file-history/
-│       ├── manifest.json
-│       ├── backend/               # Rust crate(cargo workspace 成员,静态编进 host)
-│       │   ├── Cargo.toml         # 依赖 core-shared/contracts + cordis-rs
-│       │   └── src/lib.rs         # impl Plugin
-│       └── frontend/              # React ESM(pnpm workspace 成员,Vite lib 构建)
-│           ├── package.json       # 依赖 plugin-sdk;react/@mantine/* 为 external
-│           ├── vite.config.ts     # build.lib → dist/index.js(ESM),externalize react/@mantine
-│           └── src/
-│               ├── index.tsx      # export activate + 具名组件
-│               └── HistoryPanel.tsx
+│   ├── plugin-file-history/       # ✅ 首个全栈插件(后端 fiber + 前端 ESM)
+│   │   ├── manifest.json
+│   │   ├── backend/src/lib.rs     # cargo 成员,静态编进 host
+│   │   └── frontend/              # pnpm 成员,Vite lib 构建 ESM,externalize react/@mantine
+│   └── (规划,见 08)plugin-file-browser / file-ops / search / preview-text / preview-markdown /
+│       preview-image / preview-pdf / media / archive / storage-analysis / details / settings
+│       # 每个前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
+│       # 全栈插件再加 backend/(cargo 成员,只依赖 fm-contracts + cordis,经能力契约)
 │
 └── docs/                          # 本文档集(事实源)
 ```
@@ -93,7 +96,7 @@ my-file-manager/
 > 各层具体用哪些开源库(遍历/哈希/DB/UI 组件/虚拟化/查看器…)见 [06-open-source-stack.md](06-open-source-stack.md);本节只讲构建方式。
 
 ### 4.1 后端(Rust)
-- **cargo workspace** 统一构建。`apps/host` 依赖每个 `plugins/*/backend` crate。
+- **cargo workspace** 统一构建。`core-shared/kernel`(`fm-kernel`)的 `registry` 依赖每个 `plugins/*/backend` crate;`apps/host` 依赖 `fm-kernel`。
 - **启用/禁用**:后端插件以 cargo **feature** 门控(如 `plugin-file-history`),构建期决定哪些插件编入;运行期的启用/禁用(已编入的插件)由 cordis-loader 的加载计划 + fiber dispose 完成。
 - **注册表生成**:`apps/host/build.rs` 扫描 `plugins/*/manifest.json`,生成"manifest 名 → Plugin 构造 + 默认 config"的注册表,以及 loader 的加载计划。避免手写、防漂移。
 - **无 tsup / 无 Node**:后端不产出 JS,不涉及任何 JS 打包器。

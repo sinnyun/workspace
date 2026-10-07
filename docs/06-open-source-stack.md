@@ -92,7 +92,7 @@
 | 插件运行时 | `cordis-rs` + `cordis-core` | ★ cordis-rs | 见 [05-decisions.md](05-decisions.md) D1 |
 | 插件加载/配置 | `cordis-rs-loader`、`cordis-rs-include` | ★ loader | 声明式加载计划 |
 | 热重组 | `cordis-rs-hmr` | ★ hmr | 事务式热替换 |
-| 日志 | `tracing` + `tracing-subscriber` + `cordis-rs-logger-console` | ★ tracing | 结构化日志 |
+| 日志 | `tracing` + `tracing-subscriber` | ★ tracing | 结构化日志。**定案(2026-10-08)**:不引 `cordis-rs-logger-console`;cordis-core 不发 `tracing`/`log`,诊断走其原生 `Logger`/`add_exporter`(Runtime 级 exporter),用一层 exporter 桥接(见 `fm-kernel/logger.rs`)把 cordis 记录转发进 `tracing`。 |
 | 计时器 | `cordis-rs-timer` | ★ timer | fiber 作用域定时 |
 | 错误 | `thiserror`(库)/ `anyhow`(应用) | ★ 二者搭配 | |
 | 序列化 | `serde` + `serde_json` + `toml` | ★ serde | |
@@ -239,7 +239,7 @@
 
 延续"倾向大颗粒依赖 + 加隔离层"的方针:
 
-1. **能力层即隔离层**:所有第三方 Rust 库(rusqlite/tantivy/image/notify...)只在 `apps/host/src/capabilities/` 内被直接引用;对外只暴露稳定的 `domain.action` 能力契约。换库(如 rusqlite→sqlx)不波及插件。
+1. **能力层即隔离层**:所有第三方 Rust 库(rusqlite/tantivy/image/notify...)只在 `core-shared/kernel/src/capabilities/` 内被直接引用(该 crate 无 Tauri 依赖,可无头测试);对外只暴露稳定的 `domain.action` 能力契约。换库(如 rusqlite→sqlx)不波及插件。
 2. **前端只经 host/SDK**:前端插件不直接依赖 Tauri/React 内部,只经 `PluginHost` 与 `plugin-sdk`;React 与 **Mantine** 作为共享单例经 import map 提供,插件直接用 Mantine 组件保证风格统一。UI/虚拟化库的替换由基座吸收。
 3. **契约先行**:跨层的数据形状定义在 `core-shared`(TS `plugin-sdk` + Rust `contracts`),库是实现细节。
 4. **重依赖做成插件**:ffmpeg、pdfium、Monaco、tantivy 这类体积/复杂度大的,封进独立能力或独立插件,不进核心路径,按需启用。
@@ -258,3 +258,28 @@
 | DB | ✅ rusqlite + WAL | 若强烈需要异步 + 编译期 SQL 校验再切 sqlx |
 | 全文检索 | ✅ tantivy | 数据量小、想少依赖可退回 SQLite FTS5 |
 | 视频缩略图/转码(ffmpeg-next) | ⚪ 待评估 | 依赖系统 ffmpeg、体积大,做成独立媒体插件按需启用 |
+
+### 6.1 落地状态(2026-10-08 开源库使用审计)
+
+审计=以本文为基线,比对全部 `Cargo.toml`/`package.json` 与真实 `use`/`import`。结论:核心垂直切片所需库已接入且经隔离层;其余**尚未引入的多因对应功能未建**,已逐项转成 roadmap **Phase 6** 可执行任务(见 [04-roadmap.md](04-roadmap.md) Phase 6),后续开发据此启用。
+
+| 选型 | 当前落地 | 归属任务 |
+|---|---|---|
+| cordis-core / tokio / futures / serde / thiserror / anyhow / parking_lot | ✅ 在用 | — |
+| blake3 + sha2 | ✅ 在用(`hash.rs`,流式) | P6-1 收尾并行/大文件 |
+| rusqlite(bundled) | ✅ 在用(`db.rs`) | **r2d2 池 / refinery 迁移尚未引**→ P6-12 |
+| notify + notify-debouncer-full | ✅ 在用(`watch.rs`,专用线程 WatchHub) | — |
+| tracing + tracing-subscriber | ✅ 在用 | cordis 原生 Logger→tracing 桥已落(`fm-kernel/logger.rs`),**不引 logger-console** |
+| tauri 2 + http + tauri-plugin-fs/dialog/opener | ✅ 已注册并使用 | 接线到能力层→ P6-30 |
+| Tauri path resolver(app_data_dir) | ✅ 在用(未引 `directories`) | — |
+| React 19 + Vite + TS + zustand + @tauri-apps/api | ✅ 在用 | — |
+| Mantine `core` + `notifications` | ✅ 在用 | `spotlight/dates/modals/form` 未引 → P6-14/27 |
+| 并行遍历 `ignore`/`jwalk` + `rayon` | ❌ 未引(`fs.list` 现同步 `read_dir`) | P6-1 |
+| `trash`/`fs_extra`/`natord`/`sysinfo`/`infer`/`mime_guess`/`image`/`fast_image_resize`/`encoding_rs`/`chardetng`/`similar`/`tantivy`/`zip`/`tar`/`sevenz-rust`/`fastcdc` | ❌ 未引 | P6-1…13(对应功能建时接入) |
+| 前端功能库(TanStack Virtual/Table、react-arborist、dnd-kit、react-hotkeys-hook、lucide-react、codemirror、shiki、react-diff-view、react-markdown、react-pdf、react-photo-view、echarts、dayjs、pretty-bytes、i18next) | ❌ 未引 | P6-14…27(功能插件化时接入) |
+| `tauri-plugin-notification`/`-window-state`/`-single-instance` | ❌ 未引 | P6-28/29 |
+| 工具链:Biome / Vitest / nextest / cargo-deny / lefthook / changesets / GitHub Actions+tauri-action / WebDriverIO+tauri-driver | ❌ 全无(现仅 `cargo test`、`node --test`、手写 `contract-check`) | P6-31…40 |
+| `cordis-loader`、`cordis-timer` | ⚠️ **在 workspace 声明但零引用**(死声明) | 不删除,由 P6-41/P6-42 转正启用 |
+| `cordis-hmr`、`cordis-rs-include` | ❌ 未声明/未用 | 热替换需求出现时再评估 |
+
+> **库 → 插件的具体分布**(每个库归到基座 / 能力层 / 哪个业务插件 / 前端共享单例 / 前端插件自带 dist)见 [08-plugin-catalog.md](08-plugin-catalog.md);归属分层的**规则**见 [01-architecture.md](01-architecture.md) §8。本文只定"用哪个库",08 定"用在哪个插件的哪一层"。

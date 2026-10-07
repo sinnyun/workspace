@@ -88,9 +88,12 @@ Tauri 窗口内的可视化与跨进程段尚未跑通验证,相关项在 04 里
 
 ### 剩余任务(建议顺序)
 
+> **既定开源栈接入 backlog = roadmap Phase 6**(见 [04-roadmap.md](04-roadmap.md)):2026-10-08 审计把 [06-open-source-stack.md](06-open-source-stack.md) 的选型逐项转成可执行任务(6A 后端能力 / 6B 前端功能插件 / 6C 质量工具链 / 6D cordis 运行时)。**这些库按插件的分布、要建哪些插件见 [08-plugin-catalog.md](08-plugin-catalog.md)**(库归属分层规则见 [01-architecture.md](01-architecture.md) §8)。以后开发**按 Phase 6 / 08 选用对应开源库**,不自研轮子;新增能力落 `kernel/capabilities` 隔离层、新功能做成前端插件、新契约先两侧同步再跑 `contract:check`。
+
 1. **窗口内端到端(P0-2/P0-6/P1-1/P1-3/P1-4/P4-3/P5-1 前端边界)**:这是**本环境(无显示器)唯一无法验证的一类**。有显示环境时 `cd apps/host && npx tauri dev`,验证 `plugin://` 下发、真 invoke 往返、真实文件改动→watcher→`file:changed`→后端写历史→`history:updated`→Tauri emit→前端总线→Timeline 自动刷新,并加载一个故意抛错的示例插件确认 `PluginErrorBoundary` 只降级该插槽。这是把 §3 里 🟡 项转 ✅ 的唯一途径。
-2. **工程化补票(P3-5/P3-6)**:`build.rs` 扫描 manifest 自动生成后端注册表(去掉手写 `registry` 的潜在漂移;当前仅 1 个后端插件,收益有限故暂缓);插件脚手架模板。
-3. **产品功能扩展**:基座文件浏览器是最小可用版,首个插件是 file-history。后续按 04 之外新立任务——复制/移动/删除、多标签、预览、搜索等——均应以**插件**形式落地以持续验证架构(前端走运行时 `import()`,后端若需新原子能力则在能力层加、并同步契约两侧)。
+2. **工程化补票(P6-41 / P3-5 / P3-6)**:用 `cordis-loader` 生成声明式加载计划 + `build.rs` 扫描 manifest 自动生成后端注册表(去掉手写 `registry` 漂移;当前仅 1 个后端插件收益有限故暂缓),插件脚手架模板。注:`cordis-loader`/`cordis-timer` 现已在 workspace 声明但**零引用**,这两项转正后消除死声明。
+3. **质量工具链(P6-31…40)**:目前**无任何 CI / 提交钩子 / 前端 lint / 依赖审计**。优先补两项——前端 `Biome`(lint+format)与 GitHub Actions(clippy/fmt/`cargo test`/`contract:check`/`typecheck`,发布用 `tauri-action`);再补 `Vitest` 测 `PluginSlot` 错误边界、`cargo-deny` 审计、`lefthook` 钩子。
+4. **产品功能扩展(6A + 6B)**:基座文件浏览器是最小可用版,首个插件是 file-history。复制/移动/删除(`trash`/`fs_extra`)、并行遍历(`ignore`+`rayon`)、缩略图(`image`+`fast_image_resize`)、搜索(`tantivy` 或 SQLite FTS5)、预览(`codemirror`/`shiki`/`react-markdown`)、大列表/树(`@tanstack/react-virtual`/`react-arborist`)、命令面板(`@mantine/spotlight`)等——均应以**插件**形式落地并接入 Phase 6 指定库,持续验证架构。
 
 > 注:`tauri.conf.json` 里**没有** `build.windows.staticVCRuntime` 键(该 CLI 版本不接受;`STATIC_VCRUNTIME` 警告是 tauri-build 自身默认,无害)。
 

@@ -157,3 +157,24 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 - **权限**:每个插件在 manifest 声明所需能力与事件;基座/内核在装载与调用时校验白名单。未声明的能力调用一律拒绝。
 - **错误隔离**:前端插件运行时的异常不得击穿基座(装载失败降级为空插槽 + 记录);后端插件的 fiber panic/错误由内核捕获并 dispose,不影响其它插件与主进程。
 - **样式隔离**:UI 组件库统一用 **Mantine**(作为共享单例提供),前端插件自定义样式走 CSS Modules;**不用 Shadow DOM 包裹插槽**——Mantine 的 Modal/Menu/Tooltip/Notifications 经 portal 渲染到 `document.body`,Shadow DOM 会导致浮层丢样式。主题一致性由 Mantine CSS 变量保证。
+
+---
+
+## 8. 插件分解与库归属
+
+规划期选定的一大票开源库(见 [06](06-open-source-stack.md))不是一股脑装进基座,而是**每个库必先归入下列五层之一**再落地。具体"哪个库进哪个插件"见 [08-plugin-catalog.md](08-plugin-catalog.md);本节只定**归属规则**(与 §6 红线一致):
+
+| 落位 | 判据 | 隔离方式 |
+|---|---|---|
+| **A 基座** | 跨一切插件共用 / 属应用外壳、零业务 | React + Mantine 共享单例;`PluginHost` 注入 |
+| **B 能力层**(`kernel/capabilities`) | 重第三方库、可多插件复用、原子无策略 | 只经 `domain.action` 能力契约对外;换库不外溢 |
+| **C 后端插件** | 有业务语义、静态内置(R4) | 只 `ctx.on/emit` + DI 拿能力句柄,不 `use` 他插件 |
+| **D 前端共享单例**(import map) | **多消费者 + 必须单例**(hooks) | 仅 react/react-dom/@mantine/*/plugin-sdk |
+| **E 前端插件自带 bundle** | **单消费者**、无单例约束 | 打进该插件 ESM dist,保持 drop-in 自包含 |
+
+要点:
+- **D/E 的分界是"是否多消费者且要求单例"**。功能库(哪怕大,如 CodeMirror/echarts/arborist)只要单插件用,就打进插件自己的 dist,**不进共享集**;共享集永远只放框架 + Mantine。
+- **B/C 的分界是"原子 vs 业务"**。`image` 缩放是能力(B);"何时给哪些文件生成缩略图"是业务(C 或前端插件用 B)。
+- **重依赖(ffmpeg/pdfium/tantivy/monaco)默认做成独立能力 + 独立插件**,按需启用,不占核心路径。
+- 新增前端功能一律**插件化**以持续 dogfood 架构;新能力落 B 后**同步 `core-shared/contracts`↔`plugin-sdk` 两侧并跑 `contract:check`**;新事件先冻结进 02 §7.1。
+- 插槽由基座预留、插件只注入;元状态仅 `currentFileId`/selection,业务数据由插件自持(见 §6.2)。

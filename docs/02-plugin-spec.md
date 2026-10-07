@@ -25,6 +25,8 @@ plugin-<name>/
 - **纯前端插件**:只有 UI、复用已内置能力(如一个纯展示的主题面板)。
 - **全栈插件**:前后端都有(如 file-history)。前后端**不共享代码/内存**,只经事件与能力契约通信。
 
+> **要建哪些插件、每个插件用哪些开源库**,见 [08-plugin-catalog.md](08-plugin-catalog.md);库该归"基座 / 能力层 / 后端插件 / 前端共享单例 / 前端插件自带"哪一层的规则,见 [01-architecture.md](01-architecture.md) §8。本文只定**单个插件怎么写**(manifest、契约、权限)。
+
 ---
 
 ## 2. manifest.json 规范
