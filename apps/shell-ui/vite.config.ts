@@ -57,8 +57,28 @@ function sharedVendor(): Plugin {
     "/shared": fileURLToPath(new URL("./shared-dist/", import.meta.url)),
     "/shared-dev": fileURLToPath(new URL("./shared-dist-dev/", import.meta.url)),
   };
+  // Dev only: the bare specifiers resolve to external `/shared[-dev]/*.js` urls.
+  // Vite's dev server ignores `external` and still tries to LOAD that id for the
+  // module graph (pre-transform of main.tsx), which fails against the filesystem
+  // and throws "Failed to load url /shared-dev/react.js". Feed it the prebuilt
+  // file here so the graph can load it; the browser still gets the same url from
+  // the middleware below, so there's a single instance. On build these are truly
+  // external and this hook is never hit for them.
   return {
     name: "shared-vendor",
+    load(id) {
+      const [prefix, dir] =
+        Object.entries(dirs).find(([p]) => id.startsWith(`${p}/`)) ?? [];
+      if (!prefix || !dir) return null;
+      const rel = id.slice(prefix.length + 1).split("?")[0];
+      const file = resolve(dir, rel);
+      if (!file.startsWith(dir)) return null;
+      try {
+        return readFileSync(file, "utf-8");
+      } catch {
+        return null;
+      }
+    },
     configureServer(server) {
       for (const [prefix, dir] of Object.entries(dirs)) {
         server.middlewares.use(prefix, (req, res, next) => {

@@ -18,3 +18,6 @@ apps/shell-ui/shared-dist-dev/
 *.log
 .DS_Store
 Thumbs.db
+
+# dev-start.bat runtime log
+dev-start.log
