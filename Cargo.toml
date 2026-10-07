@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "core-shared/contracts",
+    "core-shared/kernel",
+    "apps/host",
+    "spikes/cordis-boot",
+    "plugins/plugin-file-history/backend",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# cordis-rs runtime (Cordis v3, native Rust)
+cordis-core = "0.6"
+cordis-loader = "0.6"
+cordis-timer = "0.6"
+
+# async / util
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "fs"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# capability implementations (isolated inside apps/host/src/capabilities — docs/06 §5)
+blake3 = "1"
+sha2 = "0.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
+notify = "7"
+notify-debouncer-full = "0.4"
+parking_lot = "0.12"
+
+# tauri host
+tauri = { version = "2", features = ["protocol-asset", "unstable"] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+http = "1"
+
+# internal crates
+fm-contracts = { path = "core-shared/contracts" }
+fm-kernel = { path = "core-shared/kernel" }
+plugin-file-history-backend = { path = "plugins/plugin-file-history/backend" }

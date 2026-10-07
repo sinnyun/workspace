@@ -1,0 +1,20 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+# generated shared-singleton ESM (rebuild via `pnpm --filter shell-ui build:shared`)
+apps/shell-ui/shared-dist/
+apps/shell-ui/shared-dist-dev/
+
+# scratch / third-party reference clones
+.scratch/
+
+# logs & os
+*.log
+.DS_Store
+Thumbs.db

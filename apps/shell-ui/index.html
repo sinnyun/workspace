@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My File Manager</title>
+
+    <!--
+      Import map: the SINGLE resolution point for shared singletons.
+      Both the host bundle and every runtime-loaded plugin keep bare
+      `import 'react'` / `import { Button } from '@mantine/core'`, which land
+      here -> one React instance (hooks don't break) and one Mantine (theme +
+      portals stay consistent). Files are prebuilt by scripts/build-shared.mjs.
+      The map MUST precede any module script.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "/shared/react.js",
+          "react/jsx-runtime": "/shared/jsx-runtime.js",
+          "react/jsx-dev-runtime": "/shared/jsx-dev-runtime.js",
+          "react-dom": "/shared/react-dom.js",
+          "react-dom/client": "/shared/react-dom-client.js",
+          "@mantine/core": "/shared/mantine-core.js",
+          "@mantine/hooks": "/shared/mantine-hooks.js",
+          "@mantine/notifications": "/shared/mantine-notifications.js",
+          "@my-file-manager/plugin-sdk": "/shared/plugin-sdk.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

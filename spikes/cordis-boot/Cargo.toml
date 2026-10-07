@@ -1,0 +1,11 @@
+[package]
+name = "cordis-boot"
+description = "Phase 0 spike: prove cordis-core boot/emit/dispose before wiring into Tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+cordis-core = { workspace = true }
+tokio = { workspace = true }

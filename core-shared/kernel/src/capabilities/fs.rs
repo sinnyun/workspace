@@ -1,0 +1,83 @@
+//! Concrete `fs` capability implementation (atomic, no business logic — red
+//! line 3). Uses std/tokio fs; the isolation boundary means swapping the
+//! underlying crate never touches plugins (docs/06 §5).
+
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+use std::time::UNIX_EPOCH;
+
+use fm_contracts::capability::{CapabilityError, FsApi, ListEntry, ReadChunkOut, StatOut};
+
+/// std-fs backed implementation of [`FsApi`].
+pub struct StdFs;
+
+impl FsApi for StdFs {
+    fn list(&self, dir: &str) -> Result<Vec<ListEntry>, CapabilityError> {
+        let mut out = Vec::new();
+        for entry in fs::read_dir(dir).map_err(CapabilityError::from_io)? {
+            let entry = entry.map_err(CapabilityError::from_io)?;
+            let path = entry.path();
+            let meta = entry.metadata().map_err(CapabilityError::from_io)?;
+            let is_dir = meta.is_dir();
+            out.push(ListEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: path.to_string_lossy().into_owned(),
+                is_dir,
+                size: if is_dir { None } else { Some(meta.len()) },
+            });
+        }
+        Ok(out)
+    }
+
+    fn stat(&self, path: &str) -> Result<StatOut, CapabilityError> {
+        let meta = fs::metadata(path).map_err(CapabilityError::from_io)?;
+        let modified_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
+        Ok(StatOut {
+            path: path.to_owned(),
+            is_dir: meta.is_dir(),
+            size: meta.len(),
+            modified_ms,
+        })
+    }
+
+    fn read_chunk(
+        &self,
+        path: &str,
+        offset: u64,
+        len: u64,
+    ) -> Result<ReadChunkOut, CapabilityError> {
+        let mut file = fs::File::open(path).map_err(CapabilityError::from_io)?;
+        let total = file.metadata().map_err(CapabilityError::from_io)?.len();
+        use std::io::Seek;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .map_err(CapabilityError::from_io)?;
+        let mut buf = vec![0u8; len as usize];
+        let n = file.read(&mut buf).map_err(CapabilityError::from_io)?;
+        buf.truncate(n);
+        Ok(ReadChunkOut {
+            path: path.to_owned(),
+            offset,
+            data: buf,
+            total,
+        })
+    }
+
+    fn read_text(&self, path: &str) -> Result<String, CapabilityError> {
+        fs::read_to_string(path).map_err(CapabilityError::from_io)
+    }
+}
+
+/// Return the user's home directory as a canonical string (best effort).
+pub fn home_dir() -> String {
+    // Tauri's resolver is the canonical source at runtime; this is a portable
+    // fallback for headless tests and pre-window boot.
+    if let Some(h) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        return Path::new(&h).to_string_lossy().into_owned();
+    }
+    ".".to_owned()
+}

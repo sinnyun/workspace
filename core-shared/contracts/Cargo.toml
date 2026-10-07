@@ -1,0 +1,12 @@
+[package]
+name = "fm-contracts"
+description = "Cross-layer contracts: typed cordis Events + capability DTOs shared by backend plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cordis-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

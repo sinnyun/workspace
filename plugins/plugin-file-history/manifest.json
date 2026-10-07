@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-file-history",
+  "version": "0.1.0",
+  "displayName": "文件历史",
+  "description": "记录文件内容变更，提供历史时间线",
+  "author": "you",
+  "minHostVersion": "0.1.0",
+
+  "backend": {
+    "crate": "plugin-file-history-backend",
+    "enabledByDefault": true,
+    "config": { "maxEntriesPerFile": 100 }
+  },
+
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "file-sidebar-zone", "export": "HistoryPanel" }
+    ]
+  },
+
+  "permissions": {
+    "capabilities": ["fs.readText", "fs.stat", "hash.compute", "db.history.*"],
+    "events": {
+      "subscribe": ["file:changed", "selection:changed", "history:updated"],
+      "emit": ["history:updated"]
+    }
+  }
+}

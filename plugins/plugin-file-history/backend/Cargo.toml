@@ -1,0 +1,20 @@
+[package]
+name = "plugin-file-history-backend"
+description = "file-history backend plugin: records content-change snapshots via atomic capabilities"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "plugin_file_history_backend"
+path = "src/lib.rs"
+
+[dependencies]
+# The ONLY contract crate a backend plugin may depend on (red line 1).
+fm-contracts = { workspace = true }
+cordis-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

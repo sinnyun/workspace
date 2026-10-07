@@ -1,0 +1,14 @@
+{
+  "name": "my-file-manager",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter shell-ui dev",
+    "build:shared": "pnpm --filter shell-ui build:shared",
+    "build:plugins": "pnpm --filter \"./plugins/*/frontend\" build",
+    "build:shell": "pnpm --filter shell-ui build",
+    "typecheck": "pnpm -r typecheck",
+    "tauri": "tauri"
+  }
+}
