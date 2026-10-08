@@ -15,15 +15,16 @@ class EventBus {
   private unlistenTauri: Array<() => void> = [];
   private bridged = false;
 
-  on(event: string, handler: Handler): () => void {
+  on<T = unknown>(event: string, handler: (payload: T) => void): () => void {
     let set = this.handlers.get(event);
     if (!set) {
       set = new Set();
       this.handlers.set(event, set);
     }
-    set.add(handler);
+    const h = handler as Handler;
+    set.add(h);
     return () => {
-      set!.delete(handler);
+      set!.delete(h);
     };
   }
 

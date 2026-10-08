@@ -33,7 +33,7 @@ function baseName(path: string): string {
 }
 
 export function DetailsPanel({ host }: SlotProps) {
-  const [path, setPath] = useState<string | null>(host.getState().currentFileId);
+  const [path, setPath] = useState<string | null>(host.getState().focusRef?.id ?? null);
   const [stat, setStat] = useState<StatOut | null>(null);
   const [hash, setHash] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,8 +62,9 @@ export function DetailsPanel({ host }: SlotProps) {
 
   useEffect(() => {
     const offState = host.onStateChange((s) => {
-      setPath(s.currentFileId);
-      void reload(s.currentFileId);
+      const focused = s.focusRef?.id ?? null;
+      setPath(focused);
+      void reload(focused);
     });
     void reload(path);
     return offState;

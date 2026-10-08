@@ -4,10 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   matchesPermission,
+  slotPrefix,
   validateManifest,
   disposer,
+  errorMessage,
   Events,
   Capabilities,
+  BASE_SLOT_IDS,
 } from "../src/index.ts";
 
 test("matchesPermission: exact, prefix and wildcard", () => {
@@ -20,6 +23,19 @@ test("matchesPermission: exact, prefix and wildcard", () => {
   assert.equal(matchesPermission("fs.list", []), false);
 });
 
+test("matchesPermission: slot id patterns (colon instance suffix)", () => {
+  assert.equal(matchesPermission("pane-slot:2", ["pane-slot:*"]), true);
+  assert.equal(matchesPermission("pane-slot", ["pane-slot:*"]), false);
+  assert.equal(matchesPermission("detail-tab:history", ["detail-tab:*"]), true);
+  assert.equal(matchesPermission("nav-zone", ["nav-zone"]), true);
+});
+
+test("slotPrefix splits the instance suffix off a nested slot id", () => {
+  assert.equal(slotPrefix("pane-slot:2"), "pane-slot");
+  assert.equal(slotPrefix("detail-tab:history"), "detail-tab");
+  assert.equal(slotPrefix("nav-zone"), "nav-zone");
+});
+
 test("validateManifest accepts a minimal valid manifest", () => {
   const err = validateManifest({
     schemaVersion: 1,
@@ -29,6 +45,60 @@ test("validateManifest accepts a minimal valid manifest", () => {
     permissions: { capabilities: [], events: { subscribe: [], emit: [] } },
   });
   assert.equal(err, null);
+});
+
+test("validateManifest accepts the v1 additive slot fields", () => {
+  assert.equal(
+    validateManifest({
+      schemaVersion: 1,
+      name: "container",
+      version: "1.0.0",
+      frontend: {
+        entry: "frontend/dist/index.js",
+        slots: [{ id: "main-view-zone", export: "Panes" }],
+        provides: ["pane-slot"],
+      },
+      permissions: {
+        capabilities: [],
+        events: { subscribe: ["slot:registered"], emit: ["slot:reconfigured"] },
+        slots: { contribute: ["main-view-zone"] },
+      },
+    }),
+    null,
+  );
+});
+
+test("validateManifest treats a slot label as optional metadata", () => {
+  assert.equal(
+    validateManifest({
+      schemaVersion: 1,
+      name: "labeled",
+      version: "1.0.0",
+      frontend: {
+        entry: "frontend/dist/index.js",
+        slots: [{ id: "detail-tab:history", export: "HistoryPanel", label: "版本" }],
+      },
+      permissions: {
+        capabilities: [],
+        events: { subscribe: [], emit: [] },
+        slots: { contribute: ["detail-tab:history"] },
+      },
+    }),
+    null,
+  );
+  const base = {
+    name: "p",
+    version: "1.0.0",
+    permissions: { capabilities: [], events: { subscribe: [], emit: [] } },
+  };
+  assert.match(
+    validateManifest({
+      ...base,
+      schemaVersion: 1,
+      frontend: { entry: "x.js", slots: [{ id: "detail-tab:x", export: "C", label: "  " }] },
+    }),
+    /empty label/,
+  );
 });
 
 test("validateManifest rejects drift the type system cannot catch", () => {
@@ -52,6 +122,27 @@ test("validateManifest rejects drift the type system cannot catch", () => {
     }),
     /empty id\/export/,
   );
+  assert.match(
+    validateManifest({
+      ...base,
+      schemaVersion: 1,
+      frontend: { entry: "x.js", provides: ["  "] },
+    }),
+    /provides .* empty prefix/,
+  );
+  assert.match(
+    validateManifest({
+      ...base,
+      schemaVersion: 1,
+      frontend: { entry: "x.js" },
+      permissions: {
+        capabilities: [],
+        events: { subscribe: [], emit: [] },
+        slots: { contribute: [""] },
+      },
+    }),
+    /slots\.contribute .* empty entry/,
+  );
 });
 
 test("disposer runs teardowns in reverse and swallows throws", () => {
@@ -70,6 +161,30 @@ test("disposer runs teardowns in reverse and swallows throws", () => {
 test("well-known names are stable string literals", () => {
   assert.equal(Events.fileChanged, "file:changed");
   assert.equal(Events.historyUpdated, "history:updated");
+  assert.equal(Events.tabActivated, "tab:activated");
+  assert.equal(Events.sidebarSelectionChanged, "sidebar:selection:changed");
+  assert.equal(Events.focusChanged, "focus:changed");
+  assert.equal(Events.slotDisposed, "slot:disposed");
   assert.equal(Capabilities.fsList, "fs.list");
+  assert.equal(Capabilities.thumbImage, "thumb.image");
   assert.equal(Capabilities.watchSubscribe, "watch.subscribe");
+});
+
+test("BASE_SLOT_IDS is the outer-region grid the loader validates against", () => {
+  assert.deepEqual([...BASE_SLOT_IDS].sort(), [
+    "activity-rail-zone",
+    "bottom-drawer",
+    "command-palette",
+    "file-sidebar-zone",
+    "main-view-zone",
+    "nav-zone",
+    "statusbar-zone",
+    "topbar-zone",
+  ].sort());
+});
+
+test("errorMessage: provider text reaches the UI without the Error: class prefix", () => {
+  assert.equal(errorMessage(new Error("模拟读取失败")), "模拟读取失败");
+  assert.equal(errorMessage("直接字符串"), "直接字符串");
+  assert.equal(errorMessage(undefined), "undefined");
 });

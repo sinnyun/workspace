@@ -19,7 +19,7 @@ pub mod manifest;
 
 pub use capability::{
     CapabilityError, DbApi, DbCapability, FsApi, FsCapability, HashApi, HashCapability, HashAlgo,
-    ListEntry, ReadChunkOut, StatOut,
+    ListEntry, ReadChunkOut, StatOut, ThumbApi, ThumbCapability, ThumbOut,
 };
 pub use events::{FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs};
 pub use manifest::PluginManifest;

@@ -140,7 +140,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
    - 前端:插件之间、插件与基座之间禁止 `import ... from '../../another-plugin'`。所有交互只能通过前端事件总线与基座注入的 host API。
 
 2. **基座无状态化(Stateless Host)**
-   - 基座不知道"文件有历史版本""文件可上云"等业务概念。基座只维护 `currentFileId`/`focusRef`/`sidebarSelection` 这类**不透明全局元状态引用**(见 §9.2),不含业务语义。业务数据全部由插件订阅元状态后自行维护。
+   - 基座不知道"文件有历史版本""文件可上云"等业务概念。基座只维护 `activeTabId`/`activeSidebarView`/`sidebarSelection`/`focusRef`/`activeDetailTab` 这类**不透明全局元状态引用**(见 §9.2),不含业务语义。业务数据全部由插件订阅元状态后自行维护。
 
 3. **原子化 Rust(Atomic Rust)**
    - Rust 能力层只提供 `read_file_chunk`、`compute_hash`、`db_query` 等基础工具箱,**不写针对特定插件的业务逻辑**。业务策略全封在 cordis-rs 后端插件里。
@@ -175,15 +175,17 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 要点:
 - **D/E 的分界是"是否多消费者且要求单例"**。功能库(哪怕大,如 CodeMirror/echarts/arborist)只要单插件用,就打进插件自己的 dist,**不进共享集**;共享集永远只放框架 + Mantine。
 - **B/C 的分界是"原子 vs 业务"**。`image` 缩放是能力(B);"何时给哪些文件生成缩略图"是业务(C 或前端插件用 B)。
+- **缩略图只经 `thumb.image` 能力**(PNG data URL),不走 `file:`/asset URL:否则拿到路径就等于绕过 `permissions.capabilities` 读任意文件。前端按可见卡片懒取 + 负缓存(见 08 §5.1)。
+- **目录顺序由 provider 负责**:`fs.list` 返回自然序、忽略大小写(`natord`),并直接带 `modifiedMs`。浏览器拿到 10 万条时不再做任何排序,头部日期列也不产生 N 次 `fs.stat`。
 - **重依赖(ffmpeg/pdfium/tantivy/monaco)默认做成独立能力 + 独立插件**,按需启用,不占核心路径。
 - 新增前端功能一律**插件化**以持续 dogfood 架构;新能力落 B 后**同步 `core-shared/contracts`↔`plugin-sdk` 两侧并跑 `contract:check`**;新事件先冻结进 02 §7.1。
-- **插槽分两类**:基座预留的**外层区域槽**(见 §9),与容器插件提供的**嵌套槽**(如 `pane-slot:<n>`、`detail-tab:<name>`)。普通插件只注入;仅两个"容器插件"(分栏容器、详情容器)可**提供**嵌套槽,机制见 02 §4.5。元状态只存不透明引用(selection/focus 的 `{kind,id}`),业务数据由插件自持(见 §6.2)。
+- **插槽分两类**:基座预留的**外层区域槽**(见 §9),与容器插件提供的**嵌套槽**(如 `pane-slot:<paneId>`、`nav-panel:<viewId>`、`detail-tab:<name>`)。普通插件只注入;只有三个框架**容器插件**(分栏容器、视图互斥容器、详情容器)提供嵌套槽,机制见 02 §4.5。元状态只存不透明引用(selection/focus 的 `{kind,id,sourcePlugin}`),业务数据由插件自持(见 §6.2)。
 
 ---
 
 ## 9. 界面区域模型与级联状态
 
-界面是一台**级联的选择/派生状态机**,自上而下由"外层区域(基座) + 各区域内容(插件)"构成。本节定区域划分、级联关系与基座/插件归属;具体槽清单见 08 §2,嵌套槽机制见 02 §4.5。**颜色与组件一律复用 Mantine 主题,本节只定布局与状态。**
+界面是一台**级联的选择/派生状态机**,自上而下由"外层区域(基座) + 各区域内容(插件)"构成。本节定区域划分、级联关系与基座/插件归属;具体槽清单见 08 §2,嵌套槽机制见 02 §4.5。**颜色与组件一律复用 Mantine 主题(默认亮色,顶栏可切 跟随系统/亮色/暗色),本节只定布局与状态。**
 
 ### 9.1 区域网格(基座持有的外壳)
 
@@ -191,38 +193,41 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 ┌─────┬────────┬───────────────────────────────┬──────────────┐
 │LOGO │ 顶部多标签页 tabs(浏览会话)              │              │
 │     ├────────┼───────────────────────────────┤  D 详情容器   │
-│ A   │ 工具栏:导航+地址面包屑+topbar-zone 扩展位 │  (通高)      │
+│ A   │ 工具栏:面板开关 + topbar-zone 扩展位      │  (通高)      │
 │ 活动 ├────────┼───────────────────────────────┤  = 嵌套槽     │
 │ 栏  │ B 侧栏  │  C 主视图 = 分栏容器            │  detail-tab:* │
-│     │ (当前视 │  pane-slot:0..3(1/2/4 栏)      │  preview-zone │
-│ 图标│  图内容)│  每栏挂一个内容插件             │  file-ext-zone│
+│     │(nav-pane│  pane-slot:p0..p3(1/2/4 栏)   │  preview-zone │
+│ 图标│  l:<id>)│  每栏一个内容插件实例(独立地址栏)│  file-ext-zone│
 ├─────────────┴───────────────────────────────┴──────────────┤
 │ 状态栏 statusbar-zone                                          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **A 活动栏**:**侧栏视图的切换器**(不是浏览标签)。选哪个图标 → B 显示对应视图。底部固定"设置"入口。
-- **B 侧栏**:当前 A 视图的**面板内容**(文件树 / 收藏列表 / 标签列表 / 最近…)。每个视图是一个插件,向 `nav-zone` 注入面板、向 `activity-rail-zone` 注入图标。
-- **C 主视图**:B 选中项的**内容展开**(选中文件夹→该目录文件网格;选中标签→该标签下文件),外层由**分栏容器插件**包裹,可切 1 栏 / 左右 2 栏 / 2×2 四栏。
-- **D 详情容器**:焦点对象的**上下文检查器**,用 tab 承载。tab 条(信息 + 未来插件页)正交于**内容模板**(随焦点 kind 切换:程序信息 / 文件夹信息 / 标签列信息 / 文件详情+预览)。
-- **顶部多标签页**:独立的**浏览会话**层。每个会话各持一份 `{activeSidebarView, sidebarSelection, layoutMode, panes, focusRef, activeDetailTab}` 快照;切会话整组还原——这是"切换不混乱"的保证。
+- **A 活动栏**:**侧栏视图的切换器**(不是浏览标签)。选哪个图标 → B 显示对应视图。底部"设置"入口由 `plugin-settings` 自己贡献齿轮图标(基座不硬编码)。各视图插件向 `activity-rail-zone` 注入图标。
+- **B 侧栏**:当前 A 视图的**面板内容**(文件树 / 收藏列表 / 标签列表 / 设置 / 模拟数据…)。`nav-zone` 由**容器插件 `plugin-layout-views`** 占用,它向下提供 `nav-panel:<viewId>` 并**负责视图互斥**(只显示活动视图,其余隐藏);视图插件不得自己判断活动视图来 self-hide。
+- **C 主视图**:B 选中项的**内容展开**(选中文件夹→该目录文件列表;选中标签→该标签下文件)。外层由**分栏容器插件 `plugin-layout-panes`** 占用,可切 1 栏 / 左右 2 栏 / 2×2 四栏,向下提供 `pane-slot:<paneId>`;`plugin-file-browser` 按 outlet 自动为每栏注入一个独立实例(各自目录与**独立历史栈**(后退/前进/上级/刷新)、列表或网格模式、选择)。容器头部显示中文 `栏 N`,槽 id 只作悬停提示。
+- **栏高不变量由容器 owner 强制**:`plugin-layout-panes` 把每个栏渲染成**有界 flex 列**(栅格行轨 `minmax(0,1fr)` + 栏 `display:flex/min-height:0`),outlet 只 `overflow:hidden` **不滚动**——滚动权属于内容插件。这样插件里的虚拟滚动(见 08 §5.1)天然拿到确定视口高度,内容插件无须各自猜测父容器高度。
+- **D 详情容器**:焦点对象的**上下文检查器**,由 `plugin-inspector` 占用 `file-sidebar-zone`,用 tab 承载。顶部是**焦点标题条**(名称 / 整路径 / 类型徽标);tab 条 = 基座"信息" + `contributedSlots("detail-tab")` 扫到的插件页,**标题取贡献者自己声明的 `host.slotLabel(id)`**(容器不硬编码他插件的名字);正交于**内容模板**(随焦点 kind 切换:文件 = 扩展区+预览+信息 / 文件夹 = 扩展区+信息 / 其他 = 仅信息),空区域显示中文占位。
+- **顶部多标签页**:独立的**浏览会话**层。每个会话各持一份 `{activeSidebarView, sidebarSelection, focusRef, activeDetailTab}` 元状态快照,分栏容器另持该会话的 `{mode, ids, colPct, rowPct}`;切会话整组还原——这是"切换不混乱"的保证。分栏**面板实例按会话隔离**,两个会话不共享同一个 `pane-slot:p0`。
 
 ### 9.2 级联链(单向派生)
 
 ```
-activeSidebarView(A) → sidebarSelection(B) → 每栏 focusRef(C) → detailFocus(D)
+activeSidebarView(A) → sidebarSelection(B) → focusRef(C) → activeDetailTab(D)
 ```
 - 基座只搬运**不透明引用** `{kind, id, sourcePlugin}`,不解释 kind 的业务含义。
 - 每层订阅上游引用、渲染、并在用户交互时回写下游引用。区域插件各持**局部状态**,互不越界。
+- C 有多个栏时,`focusRef` 仍是**会话级单值**:用户在某栏点条目 → 该栏发布 `focus:changed` 并成为该会话的"最后交互栏";B 的 `sidebar:selection:changed` 只驱动这一栏,其余栏忽略(引用里的 `sourcePlugin`/`kind` 由插件自行解释,基座不枚举)。这套"谁最后交互谁接收"记在内容插件本地,不是基座状态。
+
 
 ### 9.3 基座 vs 插件(务实版边界)
 
 | 归属 | 内容 |
 |---|---|
-| **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限 |
-| **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<n>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`) |
-| **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` … 各贡献一个 A 图标 + 一个 B 面板 |
-| **内容插件(注入 pane-slot)** | `plugin-file-browser`(网格/列表)、search 结果、archive 等 |
-| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history)、`plugin-details`(信息表)、`preview-*`(preview-zone)、`plugin-file-ops`(操作按钮) |
+| **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、主题 provider(默认亮色 + 顶栏三态切换控件)、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限 |
+| **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<paneId>`)、`plugin-layout-views`(拥有 B 的视图互斥,提供 `nav-panel:<viewId>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`) |
+| **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` / `plugin-settings` … 各贡献一个 A 图标 + 一个 `nav-panel:<viewId>` 面板 |
+| **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格)、search 结果、archive 等 |
+| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history)、`plugin-file-details`(信息表 + BLAKE3,注入 detail-info-zone)、`plugin-preview-text`(preview-zone,纯文本;高亮待 P6-22)、`plugin-file-ops`(操作按钮) |
 
-要点:外层网格与总线**留在基座**(稳定、零业务),只把**多变的部分**插件化;分栏容器与详情容器是仅有的两个"提供嵌套槽"的框架插件。`layoutMode`/`panes`/`activeDetailTab` 属容器插件**局部状态**,不上基座;跨区协调只走 §9.2 的不透明引用。
+要点:外层网格与总线**留在基座**(稳定、零业务),只把**多变的部分**插件化;提供嵌套槽的框架容器目前就这三个(分栏 / 视图互斥 / 详情)。`layoutMode`/`panes`(每栏 id 与比例)属 `plugin-layout-panes` **局部状态**,不上基座;`activeDetailTab` 是级联终点、住在基座元状态里(D 容器读它、用户点 tab 时发 `detail:tab:changed`)。跨区协调只走 §9.2 的不透明引用。

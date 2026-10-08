@@ -36,6 +36,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 notify = "7"
 notify-debouncer-full = "0.4"
 parking_lot = "0.12"
+# image decoding + downscaling for the `thumb.image` capability (docs/06 §4)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
+base64 = "0.22"
+# natural (1 < 2 < 10) case-insensitive name ordering for directory listings
+natord = "1"
 
 # tauri host
 tauri = { version = "2", features = ["protocol-asset", "unstable"] }

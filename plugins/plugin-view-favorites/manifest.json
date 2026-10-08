@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-view-favorites",
+  "version": "0.1.0",
+  "displayName": "收藏视图",
+  "description": "侧栏视图：A 图标 + B 收藏/常用位置面板（本地自持），合并了原 plugin-file-nav 的快捷导航",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "activity-rail-zone", "export": "RailIcon" },
+      { "id": "nav-panel:favorites", "export": "FavoritesPanel" }
+    ]
+  },
+  "permissions": {
+    "capabilities": ["fs.home"],
+    "events": {
+      "subscribe": [],
+      "emit": ["sidebar:view:changed", "sidebar:selection:changed"]
+    },
+    "slots": {
+      "contribute": ["activity-rail-zone", "nav-panel:favorites"]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-settings",
+  "version": "0.1.0",
+  "displayName": "设置",
+  "description": "A 栏底部齿轮 + B 设置面板：主题（跟随系统 / 亮色 / 暗色），由 Mantine 记忆",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "activity-rail-zone", "export": "RailIcon" },
+      { "id": "nav-panel:settings", "export": "SettingsPanel" }
+    ]
+  },
+  "permissions": {
+    "capabilities": [],
+    "events": {
+      "subscribe": [],
+      "emit": ["sidebar:view:changed"]
+    },
+    "slots": { "contribute": ["activity-rail-zone", "nav-panel:settings"] }
+  }
+}

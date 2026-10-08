@@ -7,12 +7,16 @@ import "@mantine/notifications/styles.css";
 
 import { App } from "./App";
 import { bus } from "./eventbus";
+import { initCascadeBus } from "./state";
 import { loadPlugins } from "./loader";
 import { registerMocks } from "./dev-mocks";
 
 async function bootstrap() {
   // Browser-dev fallbacks so the shell is runnable without the Tauri host.
   registerMocks();
+
+  // The cascade store must own the coordination events before anything publishes.
+  initCascadeBus();
 
   // Mirror backend cordis events onto the frontend bus (no-op outside Tauri).
   await bus.bridgeBackend(["file:changed", "history:updated"]);
@@ -25,7 +29,7 @@ async function bootstrap() {
   const root = createRoot(document.getElementById("root")!);
   root.render(
     <React.StrictMode>
-      <MantineProvider defaultColorScheme="dark">
+      <MantineProvider defaultColorScheme="light">
         <Notifications position="top-right" />
         <App />
       </MantineProvider>

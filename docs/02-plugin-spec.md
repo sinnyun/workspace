@@ -51,7 +51,7 @@ plugin-<name>/
   "frontend": {
     "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "file-sidebar-zone", "export": "HistoryPanel" }
+      { "id": "detail-tab:history", "export": "HistoryPanel", "label": "历史" }
     ],
     "provides": []
   },
@@ -62,12 +62,12 @@ plugin-<name>/
       "subscribe": ["file:changed", "selection:changed"],
       "emit": ["history:updated"]
     },
-    "slots": { "contribute": ["file-sidebar-zone"] }
+    "slots": { "contribute": ["detail-tab:history"] }
   }
 }
 ```
 
-> `provides` 与 `permissions.slots` 是**容器/嵌套槽**才需要的字段(见 §4.5)。普通插件留空 `provides`,并只在 `permissions.slots.contribute` 里列它注入的基座槽。
+> `provides` 与 `permissions.slots` 是**容器/嵌套槽**才需要精确填写的字段(见 §4.5)。普通插件留空 `provides`;注入他插件提供的嵌套槽时,`permissions.slots.contribute` 列目标 id 或前缀通配(`pane-slot:*`)。外壳槽注入(`main-view-zone` 等)同样要在 `contribute` 里授权。
 
 ### 2.2 字段说明
 
@@ -82,8 +82,8 @@ plugin-<name>/
 | `backend.enabledByDefault` | | 是否默认启用(用户可在运行时禁用 → dispose fiber) |
 | `backend.config` | | 传给 `Plugin::prepare()` 的初始配置 |
 | `frontend.entry` | 前端插件✓ | ESM 入口相对路径(相对插件根) |
-| `frontend.slots[]` | | 声明要挂载的**基座外层槽**:`id`=槽名,`export`=从 entry 导出的组件名 |
-| `frontend.provides[]` | | **容器插件**声明它提供的**嵌套槽前缀**(如 `pane-slot`、`detail-tab`、`preview-zone`、`file-extension-zone`);普通插件省略或空数组 |
+| `frontend.slots[]` | | 声明要挂载的**基座外层槽**或**容器嵌套槽**:`id`=槽名,`export`=从 entry 导出的组件名,`label`=该贡献的**展示名**(可选,如 `"历史"`;容器用它给 tab/入口题名,见 §4.5) |
+| `frontend.provides[]` | | **容器插件**声明它提供的**嵌套槽前缀**(如 `pane-slot`、`nav-panel`、`detail-tab`、`preview-zone`、`file-extension-zone`);普通插件省略或空数组 |
 | `permissions.capabilities` | ✓ | 允许调用的能力白名单,支持 `*` 通配 |
 | `permissions.events.subscribe/emit` | ✓ | 允许订阅/发出的事件白名单 |
 | `permissions.slots.contribute[]` | | 允许注入的槽(含他插件提供的嵌套槽)前缀白名单;注入未声明的槽被拒 |
@@ -166,14 +166,22 @@ export const HistoryPanel: React.ComponentType<SlotProps>;
 ### 4.2 PluginHost API(基座注入)
 ```ts
 interface PluginHost {
+  readonly name: string;            // 本插件 manifest 名 = 发布 Ref 时的 sourcePlugin
+
   // —— UI:注入基座外层槽(既有)——
   registerSlot(slotId: string, component: React.ComponentType<SlotProps>): () => void;
 
   // —— UI:嵌套槽(容器插件提供 / 内容插件注入,见 §4.5)——
-  // 容器插件:声明并渲染一个动态槽出口(返回一个 React 出口组件),id 形如 `pane-slot:0`
+  // 容器插件:声明并渲染一个动态槽出口(返回一个 React 出口组件),id 形如 `pane-slot:p0`
   provideSlot(id: string): React.ComponentType<{ id: string }>;
   // 内容插件:把组件注入某个槽(基座外层槽或他插件的嵌套槽)
   contributeToSlot(id: string, component: React.ComponentType<SlotProps>): () => void;
+
+  // —— UI:运行时寻址(只返回槽 id 或标签字符串,不返回组件或数据)——
+  contributedSlots(prefix?: string): string[];   // 已有内容的槽(容器的 tab 条据此生成)
+  providedSlots(prefix?: string): string[];       // 容器当前已挂载的出口(内容插件据此逐栏注入)
+  onSlotsChange(cb: () => void): () => void;      // 注册表变化(挂载/卸载/注入/移除)
+  slotLabel(slotId: string): string | undefined;  // 贡献者为自己那个槽声明的显示名(manifest `slots[].label`)
 
   // —— 事件(前端总线,含桥接来的后端事件)——
   on<T = unknown>(event: string, handler: (payload: T) => void): () => void; // 返回退订
@@ -205,6 +213,7 @@ interface HostMetaState {
 - **能力受白名单约束**:`host.invoke` 的 capability 必须在 manifest `permissions.capabilities` 内,否则 reject。
 - **清理由自己负责**:`on` / `registerSlot` / `onStateChange` 返回的退订函数,必须在卸载钩子里调用。
 - **样式隔离**:UI 统一用 Mantine(共享单例);插件自定义样式走 CSS Modules。不用 Shadow DOM 包裹插槽(Mantine 浮层经 portal 渲染到 body,会丢样式)。
+- **主题**:亮/暗由基座的 `MantineProvider` 管(`defaultColorScheme="light"`),插件直接用 `useMantineColorScheme`——React/Mantine 是单例,所以插件与基座读的是**同一份**配色状态,无需自定义事件。颜色一律取 Mantine CSS 变量(`var(--mantine-color-body)`、`var(--mantine-color-dimmed)`…),**不得**写死亮色专属值(如 `--mantine-color-gray-0`),否则暗色下错位。
 
 ### 4.4 骨架示意
 ```tsx
@@ -232,26 +241,50 @@ export function HistoryPanel({ host }: SlotProps) {
 }
 ```
 
-### 4.5 嵌套槽与容器插件(务实版)
+### 4.5 嵌套槽与容器插件(已落地)
 
-默认模型是"基座预留外层槽、插件注入"(§4.1 的 `registerSlot`)。界面级联(01 §9)需要**容器插件再向下提供槽**给别的插件,故引入受控的**嵌套槽**——仅两个框架容器用到,不开放给一般业务插件滥用。
+默认模型是"基座预留外层槽、插件注入"(§4.1 的 `registerSlot`)。界面级联(01 §9)需要**容器插件再向下提供槽**给别的插件,故引入受控的**嵌套槽**——目前只有三个框架容器用到,不开放给一般业务插件滥用。
 
 **角色**
-- **容器插件**:在 manifest `frontend.provides` 声明它提供的**槽前缀**(如 `pane-slot`、`detail-tab`、`preview-zone`、`file-extension-zone`)。运行时用 `host.provideSlot('pane-slot:0')` 拿到一个出口组件并渲染;出口 id 可动态生成。
-- **内容插件**:用 `host.contributeToSlot('pane-slot:0', Comp)` 注入。目标槽若是他插件提供的嵌套槽,须在 `permissions.slots.contribute` 里列出该前缀,否则被拒。
+- **容器插件**:在 manifest `frontend.provides` 声明它提供的**槽前缀**(现为 `pane-slot`、`nav-panel`、`detail-tab`/`preview-zone`/`detail-info-zone`/`file-extension-zone`)。运行时用 `host.provideSlot('pane-slot:p0')` 拿到一个出口组件并渲染;出口 id 由容器自己生成并可动态增长。
+- **内容插件**:用 `host.contributeToSlot('pane-slot:p0', Comp)` 注入。目标槽若是他插件提供的嵌套槽,须在 `permissions.slots.contribute` 里列出该前缀(如 `pane-slot:*`),否则被拒。
 
 **生命周期事件(基座总线,前端内)**
 | 事件 | 源 | 负载 | 语义 |
 |---|---|---|---|
-| `slot:registered` | 容器 | `{ slotId }` | 出口挂载,内容插件可注入 |
-| `slot:reconfigured` | 容器 | `{ slotId, action:'add'\|'remove' }` | 分栏增删 / tab 增删 |
-| `slot:disposed` | 容器 | `{ slotId }` | 出口卸载,注入方须干净退场 |
+| `slot:registered` | **基座槽运行时**(随出口挂载) | `{ slotId }` | 出口已存在,内容插件可注入 |
+| `slot:disposed` | **基座槽运行时**(随出口卸载) | `{ slotId }` | 出口消失,注入方须干净退场 |
+| `slot:reconfigured` | **容器插件**(按意图) | `{ slotId, action:'add'\|'remove' }` | 分栏/tab 集合增删的**业务声明**;容器不需要订阅 registered/disposed,也不必在 manifest 里声明前两者 |
 
-**稳定 paneId 与子树迁移(切换不丢状态的关键)**
-- 分栏容器为每栏分配**稳定 `paneId`**;切换 `layoutMode`(1↔2↔4 栏)时按 `paneId` **复用/移动 React 子树**,不销毁重建 → 每栏局部状态(滚动、选择、当前路径)保留。
-- 关闭某栏 → 发 `slot:disposed`,该栏内容插件卸载;其余栏不受影响。这是"各区域各管各状态、切换不混乱"的落地保证。
+registered/disposed 由框架发(它们就是挂载事实),reconfigured 由容器发(它是容器意图)——两侧来源不同,内容插件因此只需观察挂载事实即可自动跟随,不需要理解容器的布局语义。
 
-**边界**:容器插件只管**几何与承载**(栏数、宽高、tab 条、出口),不碰内容插件的业务数据;内容插件不感知自己处在哪一分栏布局,只认 `slotId`。
+**发现而非轮询(内容插件的跟随模式)**
+```ts
+// plugin-file-browser:每栏一个独立实例
+const offs = [
+  host.on<SlotRegisteredArgs>(Events.slotRegistered, (e) => adopt(e.slotId)),
+  host.on<SlotDisposedArgs>(Events.slotDisposed, (e) => drop(e.slotId)),
+];
+for (const id of host.providedSlots("pane-slot")) adopt(id);   // 已存在的栏
+// adopt 内:slotPrefix(id) === host 授权前缀 且 id 尚未持有本插件实例时才注入
+```
+容器侧同理:`host.contributedSlots("detail-tab")` 生成 tab 条,`onSlotsChange` 驱动重渲染。**这三面只返回/通知槽地址,不暴露组件或数据**,内容插件不得反过来扒容器 React 内部。
+
+**标题由贡献者声明(不靠容器硬编码)**:tab/入口叫什么,是内容插件自己的元信息,写在 manifest `frontend.slots[].label`(可选,空白值装载期即拒),基座把它随注册项一起带进注册表,容器经 `host.slotLabel('detail-tab:history')` 取用;缺 `label` 时容器才回落槽名。这样**加一个 tab 不需要改容器**,而容器也无需读任何业务数据——标签是寻址层的元信息,不属于内容。同理,槽内**区域**的中文名(如 `插件预留`/`预览`/`属性信息`)由容器自己声明,因为那些区域是容器提供的。
+
+**出口按需挂载(lazy outlet)**
+容器**不得**预先把所有可能的出口都挂上(例如预建 4 个隐藏 `pane-slot`)。用户切到 2×2 时才 `provideSlot('pane-slot:p2'/'p3')`,并同时发 `slot:reconfigured{action:'add'}`;关闭栏时移出口并发 `{action:'remove'}`。隐藏 ≠ 未挂载:布局收缩期真正不可见的栏仍保留出口与实例,只是 `display:none`。
+
+**稳定 paneId 与子树迁移(切换不丢状态)**
+- 分栏容器为每栏分配**稳定 `paneId`**(`p0/p1/…`,只增不复用);状态里持久化 `ids[]` + `mode`,布局用**同一个 keyed 子节点数组**渲染所有活跃面板,由 `grid-area` 决定位置,不可见者靠 `display:none` 退出布局。React 按 key 移动子树而非销毁重建 → 每栏局部状态(滚动、选择、当前目录)保留。
+- 关闭某栏 → 该栏出口卸载并发 `slot:disposed`,其内容插件实例退场;其余栏不受影响。
+- **会话隔离**:面板出口集合按 `activeTabId` 归属(`key={tabId}` 的网格),两个会话不会共享同一个 `pane-slot:p0`;内容插件的每栏路径记忆也必须以 `会话|槽id` 为键,不然切会话会串。
+
+**互斥由容器负责,不靠面板 self-hide**
+B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责**:它渲染所有 `nav-panel:<viewId>` 出口,把 `meta.activeSidebarView` 之外的一律 `display:none`。视图插件**不得**再写 `if (view !== "…") return null`——那种写法一旦有插件忘写就破坏互斥,且互斥规则散落在各插件里。同理 D 的 tab 显隐由 `plugin-inspector` 负责。
+
+**边界**:容器插件只管**几何与承载**(栏数、宽高、tab 条、出口),不碰内容插件的业务数据;内容插件不感知自己处在哪一分栏布局,只认 `slotId`。基座红线 2(不持业务状态)要求下,地址栏、目录列表、选择集一类的内容状态必须住在内容插件里(如 `plugin-file-browser` 的 `fm.file-browser.v1`),而非基座。
+
 
 ---
 
@@ -264,15 +297,20 @@ export function HistoryPanel({ host }: SlotProps) {
 ### 5.1 命名与初始清单(基座内置)
 | 能力 | 前端 invoke 名 | 参数 | 返回 | 说明 |
 |---|---|---|---|---|
-| 读分块 | `fs.readChunk` | `{path, offset, len}` | `bytes/base64` | 大文件分块读 |
-| 列目录 | `fs.list` | `{path, recursive?}` | `Entry[]` | 多线程遍历 |
+| 主目录 | `fs.home` | `{}` | `path` | 起始目录(provider 决定) |
+| 列目录 | `fs.list` | `{path, recursive?}` | `Entry[]` | **provider 负责顺序**(自然序、忽略大小写)与 `modifiedMs`,浏览器不再排序 |
 | 文件元信息 | `fs.stat` | `{path}` | `Stat` | size/mtime/... |
+| 读分块 | `fs.readChunk` | `{path, offset, len}` | `bytes/base64` | 大文件分块读 |
+| 读文本 | `fs.readText` | `{path}` | `text` | 二进制格式直接 reject,由 UI 显示中文错误 |
 | 计算哈希 | `hash.compute` | `{path, algo}` | `hex` | 流式分块,md5/blake3... |
+| 缩略图 | `thumb.image` | `{path, edge}` | `ThumbOut{dataUrl,mime,edge}` | 内核 `image` 解码 + 等比缩放 → PNG data URL;扩展名白名单外的格式 reject |
 | 监听变更 | `watch.subscribe` | `{path}` | 建立监听,变更走 `file:changed` 事件 | 基于 notify |
 | DB 查询 | `db.<store>.list/get` | store 相关 | JSON | 各插件的存储分区 |
 | DB 写入 | `db.<store>.put/append` | store 相关 | ack | |
 
 > `db.<store>.*` 中的 `<store>` 是插件命名空间(如 `db.history.*`),由内核做存储隔离与权限校验。能力清单会随基座演进;**新增能力属于基座变更,需重新构建宿主**。
+>
+> 图片预览一律走 `thumb.image`(受 `permissions.capabilities` 门控),**不用 `file:`/asset URL**——否则任何插件拿到路径就能绕过权限读取任意文件。
 
 ### 5.2 约束
 - 能力函数**必须无副作用策略**:只做 IO/计算,不做"如果是历史插件就……"这类判断。
@@ -311,7 +349,8 @@ export function HistoryPanel({ host }: SlotProps) {
 | `sidebar:selection:changed` | B 侧栏 | `Ref \| null` | B 选中项 → 驱动 C |
 | `focus:changed` | C 主视图 | `Ref \| null` | 最后交互对象 → 驱动 D |
 | `detail:tab:changed` | D 容器 | `{ tabId }` | D 当前 tab |
-| `slot:registered` / `slot:reconfigured` / `slot:disposed` | 容器插件 | 见 §4.5 | 嵌套槽生命周期 |
+| `slot:registered` / `slot:disposed` | 基座槽运行时(出口挂载/卸载) | `{ slotId }` | 嵌套槽生命周期事实,见 §4.5 |
+| `slot:reconfigured` | 容器插件 | `{ slotId, action }` | 容器声明的分栏/tab 集合增删意图 |
 
 `Ref = { kind, id, sourcePlugin }`。`kind` 的取值(`file`/`folder`/`tag`/`collection`/`program`…)是**业务语义**,由解释它的插件约定,基座不枚举。
 
@@ -331,15 +370,16 @@ export function HistoryPanel({ host }: SlotProps) {
 | 契约面 | v1 冻结内容 | 事实源(改代码即改这里) |
 |---|---|---|
 | manifest 结构 | `schemaVersion == 1`;字段见 §2.2 | Rust `fm_contracts::manifest::SCHEMA_VERSION` + `PluginManifest::validate`;TS `MANIFEST_SCHEMA_VERSION` + `validateManifest` |
-| 能力名 | `fs.home`/`fs.list`/`fs.stat`/`fs.readChunk`/`fs.readText`/`hash.compute`/`watch.subscribe`/`db.<store>.*` | Rust `fm_contracts::capability::names`;TS SDK `Capabilities` |
+| 能力名 | `fs.home`/`fs.list`/`fs.stat`/`fs.readChunk`/`fs.readText`/`hash.compute`/`thumb.image`/`watch.subscribe`/`db.<store>.*` | Rust `fm_contracts::capability::names`;TS SDK `Capabilities` |
 | 事件名 + 负载 | `file:changed`、`history:updated`(前端另有 `selection:changed`) | Rust `fm_contracts::events`(`Service`/`Event` 的 `const NAME` + args 结构);TS SDK 事件类型 |
-| DTO 形状 | `ListEntry`/`StatOut`/`ReadChunkOut`(camelCase) | Rust serde 结构;TS SDK 接口 |
+| DTO 形状 | `ListEntry`(含 `modifiedMs`)/`StatOut`/`ReadChunkOut`/`ThumbOut`(camelCase) | Rust serde 结构;TS SDK 接口 |
 
 **漂移防护**:`apps/shell-ui/scripts/contract-check.mjs`(`pnpm -C apps/shell-ui contract:check`)以 Rust `fm-contract-dump` 为权威、静态解析 TS SDK,比对事件名/负载、能力名、DTO 字段;不一致即退出非零。新增/改名契约项时,两侧同步后跑该命令作为冻结回归。
 
 **v1 内的向后兼容增补**(不升 `schemaVersion`,但 `validate` 须接受其缺省):
 - manifest 新增可选字段 `frontend.provides`、`permissions.slots.contribute`(缺省=空)。
 - `HostMetaState` 由 `{ currentFileId }` 扩为 `{ activeTabId, activeSidebarView, sidebarSelection, focusRef, activeDetailTab }`(§4.2);`selection:changed` 保留。
+- `PluginHost` 加**只寻址**的发现面 `name`/`contributedSlots(prefix?)`/`providedSlots(prefix?)`/`onSlotsChange(cb)`(§4.2、§4.5);它们不改变任何已冻结形状,容器与内容插件靠它们跟随动态槽,无需理解彼此内部。
 - §6.4 的**级联协调事件**与 §4.5 的**嵌套槽生命周期事件**是**前端总线专用**,只在 `plugin-sdk`(TS)定义,不进 Rust 契约、不参与 `contract:check`(该命令只管跨 IPC 的能力/领域事件/DTO)。
 
 ---

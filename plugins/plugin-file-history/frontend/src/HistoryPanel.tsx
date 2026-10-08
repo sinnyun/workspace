@@ -19,7 +19,7 @@ import {
   Code,
   ScrollArea,
 } from "@mantine/core";
-import type { SlotProps } from "@my-file-manager/plugin-sdk";
+import type { HostMetaState, SlotProps } from "@my-file-manager/plugin-sdk";
 import { Events } from "@my-file-manager/plugin-sdk";
 
 interface HistoryEntry {
@@ -28,8 +28,13 @@ interface HistoryEntry {
   size?: number;
 }
 
+/** History is a per-FILE panel: only a `file` focus reference selects one. */
+function focusedFileId(s: HostMetaState): string | null {
+  return s.focusRef?.kind === "file" ? s.focusRef.id : null;
+}
+
 export function HistoryPanel({ host }: SlotProps) {
-  const [path, setPath] = useState<string | null>(host.getState().currentFileId);
+  const [path, setPath] = useState<string | null>(focusedFileId(host.getState()));
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -56,10 +61,11 @@ export function HistoryPanel({ host }: SlotProps) {
   );
 
   useEffect(() => {
-    // Selection changes drive which file's history we show.
+    // The cascade's focus reference drives which file's history we show.
     const offState = host.onStateChange((s) => {
-      setPath(s.currentFileId);
-      void reload(s.currentFileId);
+      const fileId = focusedFileId(s);
+      setPath(fileId);
+      void reload(fileId);
     });
     // Backend-driven refresh: a new snapshot was recorded.
     const offUpdated = host.on<{ path: string }>(Events.historyUpdated, (p) => {

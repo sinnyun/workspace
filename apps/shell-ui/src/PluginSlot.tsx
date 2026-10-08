@@ -1,20 +1,30 @@
 /**
- * <PluginSlot slotId="..."> — renders every component registered for that slot,
- * in registration order. Degrades to nothing when no plugin has mounted there
- * (docs/02 §4.2, roadmap P2-2). Each child gets the same host-bound SlotProps.
+ * Slot renderers.
+ *
+ * `<PluginSlot slotId>` renders every component registered for that slot, in
+ * registration order, each with **its own** gated host (P6-45) — never a shared
+ * base host. Degrades to nothing when no plugin has mounted there (docs/02 §4.2).
+ *
+ * `<SlotOutlet>` is the nested-slot half: a container plugin renders the component
+ * it got from `host.provideSlot('pane-slot:0')`; mounting it announces
+ * `slot:registered`, unmounting `slot:disposed` (docs/02 §4.5).
  *
  * No Shadow DOM: Mantine overlays portal to document.body and would lose styles
  * inside a shadow root; isolation is Mantine CSS vars + CSS Modules instead
  * (docs/01 §7).
  */
-import { Component, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import type { SlotProps } from "@my-file-manager/plugin-sdk";
+import {
+  Component,
+  useEffect,
+  useSyncExternalStore,
+  type ComponentType,
+  type ReactNode,
+} from "react";
+import { slotPrefix, type SlotOutletProps, type SlotProps } from "@my-file-manager/plugin-sdk";
 import { slotRegistry } from "./slots";
 
 interface Props {
   slotId: string;
-  /** Props passed to each mounted plugin component (includes its host). */
-  slotProps: SlotProps;
 }
 
 /** Per-plugin render isolation (roadmap P5-1): a component that throws during
@@ -45,7 +55,7 @@ class PluginErrorBoundary extends Component<
   }
 }
 
-export function PluginSlot({ slotId, slotProps }: Props) {
+export function PluginSlot({ slotId }: Props) {
   const version = useSyncExternalStore(
     (cb) => slotRegistry.subscribe(cb),
     () => slotRegistry.getVersion(),
@@ -61,6 +71,7 @@ export function PluginSlot({ slotId, slotProps }: Props) {
     <>
       {registrations.map((reg, i) => {
         const C = reg.component as ComponentType<SlotProps>;
+        const slotProps: SlotProps = { host: reg.host, slotId };
         return (
           <PluginErrorBoundary key={`${reg.plugin}-${i}`} plugin={reg.plugin}>
             <C {...slotProps} />
@@ -69,4 +80,35 @@ export function PluginSlot({ slotId, slotProps }: Props) {
       })}
     </>
   );
+}
+
+/** One live nested slot: registers on mount, disposes on unmount, renders what
+ *  other plugins contributed to it. */
+export function SlotOutlet({ slotId, provider }: { slotId: string; provider: string }) {
+  useEffect(() => {
+    slotRegistry.provide(provider, slotId);
+    return () => slotRegistry.unprovide(provider, slotId);
+  }, [provider, slotId]);
+  return <PluginSlot slotId={slotId} />;
+}
+
+/** Build the outlet component a container gets from `host.provideSlot(id)`.
+ *  Identity-stable per (provider, id) — the host caches these, so a container
+ *  re-rendering never churns the outlet into an unmount/remount cycle.
+ *
+ *  A runtime `id` may re-target the outlet only WITHIN the authorized prefix
+ *  (`pane-slot:0` -> `pane-slot:7`); anything else falls back to the bound id, so
+ *  a container can never render a base slot or another plugin's nested slot
+ *  through an outlet it was only granted for its own prefix (docs/02 §8). */
+export function makeSlotOutlet(
+  provider: string,
+  slotId: string,
+): ComponentType<SlotOutletProps> {
+  const boundPrefix = slotPrefix(slotId);
+  const Outlet = ({ id }: SlotOutletProps) => {
+    const target = id && slotPrefix(id) === boundPrefix ? id : slotId;
+    return <SlotOutlet slotId={target} provider={provider} />;
+  };
+  Outlet.displayName = `SlotOutlet(${slotId})`;
+  return Outlet;
 }

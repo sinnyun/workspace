@@ -13,6 +13,8 @@ apps/shell-ui/shared-dist-dev/
 
 # scratch / third-party reference clones
 .scratch/
+# agent evidence (screenshots / probes), not project assets
+.artifacts/
 
 # logs & os
 *.log

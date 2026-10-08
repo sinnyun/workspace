@@ -9,7 +9,7 @@
 
 use fm_contracts::capability::names;
 use fm_contracts::{
-    FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs, ListEntry, StatOut,
+    FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs, ListEntry, StatOut, ThumbOut,
 };
 use cordis_core::Event;
 use serde::Serialize;
@@ -35,6 +35,7 @@ fn main() {
             names::FS_READ_CHUNK,
             names::FS_READ_TEXT,
             names::HASH_COMPUTE,
+            names::THUMB_IMAGE,
             names::WATCH_SUBSCRIBE,
         ],
         "dtos": {
@@ -43,12 +44,18 @@ fn main() {
                 path: String::new(),
                 is_dir: false,
                 size: None,
+                modified_ms: None,
             }),
             "StatOut": fields(&StatOut {
                 path: String::new(),
                 is_dir: false,
                 size: 0,
                 modified_ms: None,
+            }),
+            "ThumbOut": fields(&ThumbOut {
+                data_url: String::new(),
+                mime: String::new(),
+                edge: 0,
             }),
         },
     });

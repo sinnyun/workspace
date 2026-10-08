@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-preview-text",
+  "version": "0.1.0",
+  "displayName": "文本预览",
+  "description": "跟随级联焦点，把文本文件的内容填进 D 信息页的 preview-zone",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [{ "id": "preview-zone", "export": "TextPreview" }]
+  },
+  "permissions": {
+    "capabilities": ["fs.readText"],
+    "events": {
+      "subscribe": [],
+      "emit": []
+    },
+    "slots": { "contribute": ["preview-zone"] }
+  }
+}

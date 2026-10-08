@@ -12,7 +12,20 @@ use fm_contracts::capability::{CapabilityError, FsApi, ListEntry, ReadChunkOut, 
 /// std-fs backed implementation of [`FsApi`].
 pub struct StdFs;
 
+/// Last-modification millis, or `None` when the platform reports no mtime
+/// (some network filesystems) or it predates the epoch.
+pub(crate) fn mtime_ms(meta: &fs::Metadata) -> Option<i64> {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+}
+
 impl FsApi for StdFs {
+    /// Non-recursive listing in natural, case-insensitive name order (`file 2`
+    /// before `file 10`). The provider owns the order so a browser never sorts
+    /// 100k names in the UI thread — see also `buildRows`, which groups by type
+    /// while preserving this order.
     fn list(&self, dir: &str) -> Result<Vec<ListEntry>, CapabilityError> {
         let mut out = Vec::new();
         for entry in fs::read_dir(dir).map_err(CapabilityError::from_io)? {
@@ -25,23 +38,22 @@ impl FsApi for StdFs {
                 path: path.to_string_lossy().into_owned(),
                 is_dir,
                 size: if is_dir { None } else { Some(meta.len()) },
+                modified_ms: if is_dir { None } else { mtime_ms(&meta) },
             });
         }
+        out.sort_by(|a, b| {
+            natord::compare_ignore_case(&a.name, &b.name).then_with(|| a.name.cmp(&b.name))
+        });
         Ok(out)
     }
 
     fn stat(&self, path: &str) -> Result<StatOut, CapabilityError> {
         let meta = fs::metadata(path).map_err(CapabilityError::from_io)?;
-        let modified_ms = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64);
         Ok(StatOut {
             path: path.to_owned(),
             is_dir: meta.is_dir(),
             size: meta.len(),
-            modified_ms,
+            modified_ms: mtime_ms(&meta),
         })
     }
 

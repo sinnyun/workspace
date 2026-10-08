@@ -109,6 +109,86 @@
 
 ---
 
+## D6 · 容器里的标题从哪来:贡献者声明 `label`(结构化),不靠容器硬编码
+
+**背景**:`plugin-inspector` 的 D 区 tab 条由 `contributedSlots("detail-tab")` 动态扫出,需要一个显示名;分栏头、区域占位同理。
+
+| 选项 | 加插件要改谁 | 权限代价 | 结构保证 | 结论 |
+|---|---|---|---|---|
+| 容器里写 `slotId→中文` 映射表 | **改容器** | 无 | 无(表会漏) | ✗ |
+| 组件导出第二个值(如 `HistoryPanel.label`) | 无 | 无 | 弱(entry 需额外约定,基座装载器不校验) | ✗ |
+| manifest `frontend.slots[].label` → 注册项携带 → `host.slotLabel(id)` | 无(插件自己声明) | **无**(标签是寻址层元信息,不是数据) | 强:装载期校验(空白即拒),容器只回落槽名 | ✓ **采用** |
+
+**决定**:槽的显示名是**贡献者的元数据**,写在 manifest `frontend.slots[].label`(可选);基座把它随注册项带进注册表,容器经 `host.slotLabel(slotId)` 读取,缺声明时回落槽名。容器自己拥有的**区域**(如 `插件预留`/`预览`/`属性信息`)的中文名留在容器里——谁提供谁命名。
+
+**理由**:符合"发现面只寻址不解释"的既有边界(02 §4.5):容器拿标题**不需要任何新权限**,也不读任何插件的业务数据;新增一个 tab 不触碰容器代码,规则由结构而非自觉保证(与 B 视图互斥交给容器同一取向)。
+
+**代价**:双端契约各加一个可选字段(TS `validateManifest` + Rust `SlotDecl.label`),声明式槽才带标签——`activate()` 里动态 `contributeToSlot` 的实例拿不到 label(现只有 `pane-slot` 用它,而分栏头不需要标题)。
+
+**后果**:`cargo test -p fm-contracts` 覆盖 label 往返/缺省为 Null/空白拒绝;SDK 单测覆盖同规则;D 的 tab 实测显示 `信息`/`历史`。
+
+**复核触发**:若出现"同一槽多个贡献者要各自标题"或需要本地化标题,再考虑 label 结构化(如 `{ "zh": … }`)并接 i18n(P6-26)。
+
+---
+
+## D7 · 亮/暗主题:直接用 Mantine 的 colorScheme,不自造主题层
+
+| 选项 | 代码量 | 插件侧一致性 | 结论 |
+|---|---|---|---|
+| **`MantineProvider defaultColorScheme="light"` + `useMantineColorScheme`** | 零额外依赖 | 插件与基座共用**同一个** Mantine 单例 → 天然同步 | ✓ **采用** |
+| 基座自写 CSS 变量 + 自定义"主题已切换"事件广播给插件 | 需自持监听/持久化/跟随系统 | 需要新契约与 gating | ✗ |
+| 引入 next-themes 之类第三方主题库 | 多一个依赖且与 Mantine 职责重叠 | — | ✗ |
+
+**决定**:主题能力**完全交给 Mantine**:基座设默认亮色并提供切换控件,`plugin-settings` 用同一个 hook 提供面板入口;持久化沿用 Mantine 的 `mantine-color-scheme-value`。插件颜色只允许取 Mantine CSS 变量。
+
+**理由**:"优先用开源库,不自研"(用户既定偏好);共享单例机制(D 落位)本就是为了让 `useMantineColorScheme` 在 host 与 plugin 里指向同一份状态——**跨入口同步不需要任何自定义事件**,这是架构既有能力的直接收益。
+
+**代价**:主题状态由 Mantine 持有,基座不把它放进级联元状态(它是外观,不是选择状态);写死色值(如 `--mantine-color-gray-0`)的旧样式在暗色下会错位,须逐个换成 `var(--mantine-color-body)` 一类语义变量。
+
+**后果**:`@mantine/*` 全线锁 `^7.17.8`(15 个包),**升版后必须重跑 `pnpm build:shared`** 重建两套单例变体,否则运行时与类型漂移(见 00 §4)。
+
+**复核触发**:若要做"每会话/每插件不同主题",再把 colorScheme 提进元状态并设计作用域。
+
+---
+
+## D8 · 图片预览:走 `thumb.image` 能力,不开 `file:`/asset URL
+
+| 选项 | 权限模型 | 结论 |
+|---|---|---|
+| 内核 `thumb.image` → PNG data URL(`image` 解码 + 等比缩放) | 与 `fs.*` 同一套 `permissions.capabilities` gating;返回的是**已缩放的图**,不是原文件 | ✓ **采用** |
+| `asset:` / `file:` 协议直出原图 | 拿到路径即可显示任意文件,权限形同虚设;缩放交给浏览器 CSS,大图全量解码 | ✗ |
+| 前端插件自行解码(自带 `image` 库) | 每个插件重复实现 + 无共享缓存 | ✗ |
+
+**决定**:缩略图是**能力(B)**;"何时向哪些条目要图"是**业务(C/前端)**——`plugin-file-browser` 只按当前可见卡片懒取,配共享 LRU 与**负缓存**(不支持的扩展名记 `null`,不再重复请求)。
+
+**理由**:权限边界不能被显示路径绕过(与 01 §8 "B/C 分界是原子 vs 业务"一致);按需取图让 50 万条目录的拉取成本仍只是一屏请求量。
+
+**代价**:data URL 比二进制响应体积大(base64 +33%),靠 edge 上限 512 与 mtime 键缓存压住。
+
+**复核触发**:若缩略图成为主要瓶颈(冷启动大量首屏),再评估自定义 Tauri protocol 直出**已缓存的缩略图文件**(仍不是原文件)。
+
+---
+
+## D9 · 目录顺序与 mtime 由 provider 负责,不由浏览器负责
+
+**决定**:`fs.list` 返回**自然序、忽略大小写**(`natord::compare_ignore_case`)的条目,并直接带 `modifiedMs`(目录为 `null`)。前端拿到即渲染,**不做排序、不逐行 `fs.stat`**。
+
+**理由**:10 万条名字在前端排序是 UI 线程上的固定成本,而 provider 侧排序是一次 Rust 计算;日期列若靠 `fs.stat` 补齐会变成 N 次往返。dev mock 的生成顺序与之对齐,保证浏览器 dev 与 Tauri 行为可对照。
+
+**代价**:前端要"按大小排序"之类的视图需要新契约(排序参数或前端二次排序),届时再设计,不提前预留。
+
+---
+
+## D10 · "栏高有界"是容器 owner 的不变量,不是每个内容插件的自检
+
+**决定**:`plugin-layout-panes` 保证每个栏是**有界 flex 列**——栅格行轨 `minmax(0,1fr)`、栏 `display:flex`+`min-height:0`、outlet `flex:1`+`overflow:hidden`(outlet 不滚动,滚动权属于内容插件)。内容插件只写 `height:100%`。
+
+**理由**:跨组件规则(虚拟滚动需要确定视口高度)由**容器**强制,而不是要求每个注入 `pane-slot` 的插件各自探测父高或补 `min-height`。反例实测:容器一旦退化成 `display:block`,`flex:1` 被忽略、outlet 长到内容高度,虚拟列表**静默挂载全部行**且被 `overflow:hidden` 裁掉——错误不响,只在大数据下爆内存。
+
+**后果**:该不变量写进 01 §9 与 08 §5.1 要点;React 侧的触发点(`display: hidden ? "none" : undefined` 会被当成"删除属性")记在 00 §4.19。
+
+---
+
 ## 决策速查
 
 | 维度 | 决定 |
@@ -121,3 +201,8 @@
 | 进程模型 | 单 Tauri 进程,无 sidecar/无 Node/无嵌入式 JS 引擎 |
 | 能力层 | Rust 原子命令(fs/hash/db/watch),无业务逻辑 |
 | 契约源 | `core-shared`(TS `plugin-sdk` + Rust `contracts`)+ 契约测试 |
+| 界面标题来源 | 贡献者 manifest `slots[].label` → `host.slotLabel`(容器不硬编码他插件名,见 D6) |
+| 亮/暗主题 | Mantine 内置 colorScheme(默认亮色;基座与插件共用单例,不自造主题层,见 D7) |
+| 图片预览 | 能力 `thumb.image` 出 PNG data URL + 前端按可见性懒取(不开 `file:`/asset URL,见 D8) |
+| 列表顺序/mtime | provider 在 `fs.list` 里排好(自然序)并带 `modifiedMs`,浏览器不排序(见 D9) |
+| 分栏几何不变量 | 容器 owner 保证"栏高有界 + outlet 不滚动",内容插件只写 `height:100%`(见 D10) |

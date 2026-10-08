@@ -17,8 +17,21 @@
   "permissions": {
     "capabilities": [],
     "events": {
-      "subscribe": ["selection:changed", "file:changed", "history:updated"],
+      "subscribe": [
+        "selection:changed",
+        "file:changed",
+        "history:updated",
+        "tab:activated",
+        "sidebar:view:changed",
+        "sidebar:selection:changed",
+        "focus:changed",
+        "detail:tab:changed",
+        "slot:registered",
+        "slot:reconfigured",
+        "slot:disposed"
+      ],
       "emit": []
-    }
+    },
+    "slots": { "contribute": ["bottom-drawer"] }
   }
 }

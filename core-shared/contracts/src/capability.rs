@@ -1,4 +1,4 @@
-//! Atomic capability contracts: `fs`, `hash`, `db`.
+//! Atomic capability contracts: `fs`, `hash`, `thumb`, `db`.
 //!
 //! Each capability is a **synchronous** API trait (no business logic — red line
 //! 3) plus a cordis [`Service`] marker the host publishes via DI. A backend
@@ -25,6 +25,7 @@ pub mod names {
     pub const FS_READ_CHUNK: &str = "fs.readChunk";
     pub const FS_READ_TEXT: &str = "fs.readText";
     pub const HASH_COMPUTE: &str = "hash.compute";
+    pub const THUMB_IMAGE: &str = "thumb.image";
     pub const WATCH_SUBSCRIBE: &str = "watch.subscribe";
     /// Prefix for the dynamic per-store db capabilities (`db.<store>.<op>`).
     pub const DB_PREFIX: &str = "db.";
@@ -69,6 +70,11 @@ pub struct ListEntry {
     pub is_dir: bool,
     /// Size in bytes; `None` for directories.
     pub size: Option<u64>,
+    /// Unix epoch millis of last modification; `None` for directories and
+    /// whenever the provider cannot read an mtime (a platform without mtimes,
+    /// or a metadata lookup that failed). Lists carry it so a browser can show
+    /// a column without one `fs.stat` per row.
+    pub modified_ms: Option<i64>,
 }
 
 /// Metadata returned by [`FsApi::stat`].
@@ -159,6 +165,52 @@ impl Service for HashCapability {
     const NAME: &'static str = "capability.hash";
 }
 
+// ───────────────────────────── thumb ─────────────────────────────
+
+/// A decoded + downscaled image, ready for an `<img>` `src`.
+///
+/// The payload is a `data:` URL rather than raw bytes because the browser
+/// plugin has no way to turn `Vec<u8>` into an image without a Blob/base64 step
+/// of its own — so the host does it once. That keeps thumbnails behind the same
+/// permission gate as every other capability (no `file://`/asset-protocol URL
+/// reaching past `permissions.capabilities`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbOut {
+    /// `data:<mime>;base64,<png>` of the downscaled image.
+    pub data_url: String,
+    pub mime: String,
+    /// Longest edge actually produced, in pixels (<= the requested one).
+    pub edge: u32,
+}
+
+/// Image thumbnails. Deliberately **not** part of `fs`: a directory listing must
+/// stay cheap, so decoding is opt-in per visible row and gated per plugin.
+pub trait ThumbApi: Send + Sync + 'static {
+    /// Decode the image at `path` and return it downscaled so its longest edge
+    /// is at most `edge` pixels. `InvalidArgument` for a non-image extension;
+    /// `Io` when the file cannot be read or decoded.
+    fn image(&self, path: &str, edge: u32) -> Result<ThumbOut, CapabilityError>;
+}
+
+/// cordis `Service` marker for the `thumb` capability.
+pub struct ThumbCapability {
+    api: Arc<dyn ThumbApi>,
+}
+
+impl ThumbCapability {
+    pub fn new(api: Arc<dyn ThumbApi>) -> Self {
+        Self { api }
+    }
+    pub fn api(&self) -> &Arc<dyn ThumbApi> {
+        &self.api
+    }
+}
+
+impl Service for ThumbCapability {
+    const NAME: &'static str = "capability.thumb";
+}
+
 // ───────────────────────────── db ─────────────────────────────
 
 /// Atomic per-store key/value + JSON-row storage. Each logical `store` is an
@@ -200,4 +252,84 @@ impl DbCapability {
 
 impl Service for DbCapability {
     const NAME: &'static str = "capability.db";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn keys<T: Serialize>(v: &T) -> Vec<String> {
+        match serde_json::to_value(v).unwrap() {
+            Value::Object(map) => {
+                let mut ks: Vec<String> = map.keys().cloned().collect();
+                ks.sort();
+                ks
+            }
+            other => panic!("expected an object, got {other}"),
+        }
+    }
+
+    /// The wire field names are the contract (`fm-contract-dump` publishes them,
+    /// the TS SDK mirrors them). An `Option` must stay present as `null` — adding
+    /// `skip_serializing_if` here would silently widen the TS interface.
+    #[test]
+    fn dto_field_names_are_camel_case_and_complete() {
+        assert_eq!(
+            keys(&ListEntry {
+                name: String::new(),
+                path: String::new(),
+                is_dir: false,
+                size: None,
+                modified_ms: None,
+            }),
+            vec!["isDir", "modifiedMs", "name", "path", "size"]
+        );
+        assert_eq!(
+            keys(&StatOut {
+                path: String::new(),
+                is_dir: false,
+                size: 0,
+                modified_ms: None,
+            }),
+            vec!["isDir", "modifiedMs", "path", "size"]
+        );
+        assert_eq!(
+            keys(&ThumbOut {
+                data_url: String::new(),
+                mime: String::new(),
+                edge: 0,
+            }),
+            vec!["dataUrl", "edge", "mime"]
+        );
+        assert_eq!(
+            serde_json::to_value(HashAlgo::Blake3).unwrap(),
+            json!("blake3")
+        );
+    }
+
+    #[test]
+    fn list_entry_round_trips_optional_metadata() {
+        let entry = ListEntry {
+            name: "a.txt".into(),
+            path: "/tmp/a.txt".into(),
+            is_dir: false,
+            size: Some(12),
+            modified_ms: Some(1_700_000_000_000),
+        };
+        let back: ListEntry = serde_json::from_str(&serde_json::to_string(&entry).unwrap()).unwrap();
+        assert_eq!(entry, back);
+
+        let dir = ListEntry {
+            name: "sub".into(),
+            path: "/tmp/sub".into(),
+            is_dir: true,
+            size: None,
+            modified_ms: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&dir).unwrap()["modifiedMs"],
+            Value::Null
+        );
+    }
 }

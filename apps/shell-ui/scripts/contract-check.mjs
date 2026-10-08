@@ -19,8 +19,19 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../../.."); // workspace root
 const sdkTs = resolve(root, "core-shared/plugin-sdk/src/index.ts");
 
-// Events the frontend owns alone (base meta-state); Rust has no counterpart.
-const FRONTEND_ONLY_EVENTS = new Set(["selection:changed"]);
+// Events the frontend owns alone (base meta-state + nested slots); Rust has no
+// counterpart, so these are excluded from the cross-language check (docs/02 §7.1).
+const FRONTEND_ONLY_EVENTS = new Set([
+  "selection:changed",
+  "tab:activated",
+  "sidebar:view:changed",
+  "sidebar:selection:changed",
+  "focus:changed",
+  "detail:tab:changed",
+  "slot:registered",
+  "slot:reconfigured",
+  "slot:disposed",
+]);
 
 function dumpRust() {
   const r = spawnSync("cargo", ["run", "-q", "-p", "fm-contracts", "--bin", "fm-contract-dump"], {

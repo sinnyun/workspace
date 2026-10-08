@@ -9,17 +9,19 @@
 pub mod db;
 pub mod fs;
 pub mod hash;
+pub mod thumb;
 pub mod watch;
 
 use std::sync::Arc;
 
 use cordis_core::Context;
 use cordis_core::service::ServicePublishError;
-use fm_contracts::capability::{DbCapability, FsCapability, HashCapability};
+use fm_contracts::capability::{DbCapability, FsCapability, HashCapability, ThumbCapability};
 
 pub use db::SqliteDb;
 pub use fs::{StdFs, home_dir};
 pub use hash::StreamingHash;
+pub use thumb::ImageThumbs;
 pub use watch::{FsWatcher, WatchError, WatchHub};
 
 /// The concrete capability implementations, built once at boot and shared
@@ -31,6 +33,8 @@ pub struct CapabilitySet {
     pub fs: Arc<StdFs>,
     /// Streaming hashing.
     pub hash: Arc<StreamingHash>,
+    /// Image thumbnails for grid views.
+    pub thumb: Arc<ImageThumbs>,
     /// Per-store SQLite storage.
     pub db: Arc<SqliteDb>,
 }
@@ -41,6 +45,7 @@ impl CapabilitySet {
         Ok(Self {
             fs: Arc::new(StdFs),
             hash: Arc::new(StreamingHash),
+            thumb: Arc::new(ImageThumbs::new()),
             db: Arc::new(SqliteDb::open(db_path)?),
         })
     }
@@ -59,6 +64,9 @@ impl CapabilitySet {
         let _hash =
             ctx.provide::<HashCapability>(Arc::new(HashCapability::new(self.hash.clone())))?;
         let _db = ctx.provide::<DbCapability>(Arc::new(DbCapability::new(self.db.clone())))?;
+        let _thumb = ctx.provide::<ThumbCapability>(Arc::new(ThumbCapability::new(
+            self.thumb.clone(),
+        )))?;
         Ok(())
     }
 }

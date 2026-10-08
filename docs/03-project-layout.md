@@ -2,7 +2,7 @@
 
 本文定义 Monorepo 的目标布局、双工作区(cargo + pnpm)、构建工具链与共享依赖策略。
 
-> 下面是**目标形态**,当前仓库尚未初始化任何工程。落地顺序见 [04-roadmap.md](04-roadmap.md)。
+> 下面是仓库当前的布局(与代码一致)。各阶段落地顺序见 [04-roadmap.md](04-roadmap.md)。
 
 ---
 
@@ -46,38 +46,47 @@ my-file-manager/
 │       └── src/
 │           ├── main.tsx
 │           ├── App.tsx            # 外层区域网格(A/B/C/D+工具栏+状态栏)+顶部会话容器+外层槽挂载
-│           ├── PluginSlot.tsx     # 通用插槽组件(含错误边界)
+│           ├── PluginSlot.tsx     # 插槽组件:每个注册项用自带的 gated host 渲染(含错误边界)+ SlotOutlet
 │           ├── loader.ts          # 读 manifest → import() 前端插件 → 挂载
 │           ├── eventbus.ts        # 前端事件总线(含 Tauri 事件订阅 + 级联协调事件)
 │           ├── host.ts            # 构造注入给插件的 PluginHost(权限 gating + provide/contributeSlot)
-│           ├── slots.ts           # 动态 slot registry:外层槽 + 容器插件提供的嵌套槽(pane-slot:<n>/detail-tab:*)+ slot 生命周期
-│           └── state.ts           # 级联元状态(activeTabId/activeSidebarView/sidebarSelection/focusRef/activeDetailTab,zustand)
+│           ├── slots.ts           # 动态 slot registry:外层槽 + 容器插件提供的嵌套槽(pane-slot:<paneId>/nav-panel:<viewId>/detail-tab:*)+ 出口挂载即 registered/disposed + 记录贡献者的槽标签
+│           ├── state.ts           # 级联元状态:每会话一份快照(activeTabId/activeSidebarView/sidebarSelection/focusRef/activeDetailTab,zustand)+ 总线单写路径
+│           ├── invoke.ts          # Tauri `invoke` / 浏览器 mock 分流
+│           ├── dev-mocks.ts       # 浏览器 dev 的能力 mock(含 `/stress` 真实感压力数据集与 `thumb.image` 的 canvas 实现)+ dev 插件索引(仅 dev)
 │
 ├── core-shared/
 │   ├── contracts/                 # Rust 契约包(Event/Capability/DTO/manifest + fm-contract-dump)
 │   ├── kernel/                    # fm-kernel:**无 Tauri 依赖**的后端内核
 │   │   └── src/
-│   │       ├── capabilities/      # 原子能力:fs / hash / db / watch(第三方库唯一落位)
+│   │       ├── capabilities/      # 原子能力:fs / hash / thumb / db / watch(第三方库唯一落位)
 │   │       ├── kernel.rs          # cordis Context 引导、provider fiber、boot/teardown
 │   │       ├── registry.rs        # 静态后端插件注册表(待 P6-41 由 loader/build.rs 生成)
 │   │       └── logger.rs          # cordis Logger → tracing 桥
 │   └── plugin-sdk/                # TS 契约包:PluginHost / SlotProps / 事件负载 / validate/permission
 │
 ├── plugins/
-│   ├── plugin-file-history/       # ✅ 首个全栈插件(后端 fiber + 前端 ESM)
+│   ├── plugin-file-history/       # ✅ 首个全栈插件(后端 fiber + 前端 ESM);前端注入 detail-tab:history
 │   │   ├── manifest.json
 │   │   ├── backend/src/lib.rs     # cargo 成员,静态编进 host
 │   │   └── frontend/              # pnpm 成员,Vite lib 构建 ESM,externalize react/@mantine
-│   ├── plugin-file-details/       # ✅ 基础信息:文件属性 + BLAKE3(file-sidebar-zone)
-│   ├── plugin-file-nav/           # ✅ 基础信息:快捷导航 + 面包屑(nav-zone)
-│   ├── plugin-mock-data/          # ✅ 开发期:模拟数据注入 + 窗口化压力列表(topbar/nav)
-│   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/事件捕获面板(bottom-drawer)
-│   │   # 上述 4 个为纯前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
-│   │   # 仅 6F 交付的演示/调试插件,只在浏览器 dev 的模拟索引里装载(见 08 §5.3)
-│   └── (规划,见 08)框架/布局:plugin-layout-panes / plugin-inspector / plugin-view-file-tree /
-│       plugin-view-favorites / plugin-view-tags
-│       业务:plugin-file-browser / file-ops / search / preview-text / preview-markdown /
-│       preview-image / preview-pdf / media / archive / storage-analysis / details / settings
+│   ├── plugin-layout-panes/       # ✅ 框架容器:C 分栏,占 main-view-zone,提供 pane-slot:<paneId>
+│   ├── plugin-layout-views/       # ✅ 框架容器:B 视图互斥,占 nav-zone,提供 nav-panel:<viewId>
+│   ├── plugin-inspector/          # ✅ 框架容器:D 详情,占 file-sidebar-zone,提供 detail-tab/preview-zone/detail-info-zone/file-extension-zone
+│   ├── plugin-file-browser/       # ✅ 内容插件:每栏一个独立实例(独立地址栏+历史前进后退/列表或网格/虚拟滚动),运行时注入 pane-slot:*
+│   ├── plugin-view-file-tree/     # ✅ A+B 侧栏视图:目录树(react-arborist,自写懒加载)
+│   ├── plugin-view-favorites/     # ✅ A+B 侧栏视图:主页 + 收藏
+│   ├── plugin-view-tags/          # ✅ A+B 侧栏视图:标签与成员
+│   ├── plugin-file-details/       # ✅ 基础信息:属性 + BLAKE3,注入 detail-info-zone
+│   ├── plugin-settings/           # ✅ A 栏底部齿轮 + B 设置面板(主题 跟随系统/亮色/暗色,走 Mantine 单例)
+│   ├── plugin-preview-text/       # ✅ 文本预览:随 focusRef 读 fs.readText 填 preview-zone(纯文本,高亮见 P6-22)
+│   ├── plugin-mock-data/          # ✅ 开发期:`/stress` 压力数据集的 B 区入口(activity-rail + nav-panel:stress)
+│   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/级联与槽事件捕获面板(bottom-drawer)
+│   ├── plugin-dev-slot-harness/   # ✅ 开发期:嵌套槽运行时验证夹具(bottom-drawer + 提供 dev-pane:<n>,含越权拒绝取证)
+│   │   # 除 file-history 外均为纯前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
+│   │   # 最后三个是开发期演示/调试插件,只在浏览器 dev 的模拟索引里装载(见 08 §5.3)
+│   └── (规划,见 08)业务:plugin-file-ops / search / preview-markdown /
+│       preview-image / preview-pdf / media / archive / storage-analysis
 │       # 每个前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │       # 全栈插件再加 backend/(cargo 成员,只依赖 fm-contracts + cordis,经能力契约)
 │
@@ -155,7 +164,7 @@ my-file-manager/
 | 能力 | `domain.action` | `fs.readChunk` / `db.history.list` |
 | 事件 | `domain:action`(过去式) | `file:changed` / `history:updated` |
 | 插槽(外层) | `<zone>-zone` 或语义名 | `file-sidebar-zone` / `nav-zone` |
-| 插槽(嵌套) | `<前缀>:<实例>` | `pane-slot:0` / `detail-tab:history` |
+| 插槽(嵌套) | `<前缀>:<实例>` | `pane-slot:p0` / `detail-tab:history` |
 
 ---
 

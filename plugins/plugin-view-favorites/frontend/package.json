@@ -1,5 +1,5 @@
 {
-  "name": "plugin-file-nav-frontend",
+  "name": "plugin-view-favorites-frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,10 @@
     "vite": "^5.4.0"
   },
   "peerDependencies": {
-    "@mantine/core": "^7.13.0",
+    "@mantine/core": "^7.17.8",
     "react": "^19.0.0"
+  },
+  "dependencies": {
+    "lucide-react": "^1.52.0"
   }
 }

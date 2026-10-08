@@ -18,7 +18,7 @@
 | 哈希 | `blake3`(+ `md-5`/`sha2` 兼容需求) |
 | 存储 | `rusqlite`(bundled SQLite,WAL)+ `refinery` 迁移 |
 | 检索 | `tantivy`(全文)+ SQLite FTS5(轻量场景) |
-| 类型/缩略图 | `infer` + `image` + `fast_image_resize` |
+| 类型/缩略图 | `image` + `base64`(已用,`thumb.image`)；`infer` + `fast_image_resize`(待评估) |
 | 后端插件运行时 | cordis-rs(+ loader/logger/timer) |
 | 前端框架 | React 19 + Vite + TypeScript |
 | UI 组件库 | **Mantine ★(已定)**:core/hooks/spotlight/notifications/dates/modals/form |
@@ -73,7 +73,7 @@
 |---|---|---|---|
 | MIME(按魔数) | `infer`、`tree_magic_mini` | ★ infer | 内容嗅探,快 |
 | MIME(按扩展名) | `mime_guess` | ★ mime_guess | 兜底 |
-| 图像/缩略图 | `image`、`fast_image_resize`、`thumbnailer` | ★ image + fast_image_resize | 解码 + 高质量快速缩放 |
+| 图像/缩略图 | `image`、`fast_image_resize`、`thumbnailer` | ★ image(`base64` 配套) | 已用 `image` 做 `thumb.image`(default-features off + 5 种格式,`FilterType::Triangle` 缩放);`fast_image_resize` 待评估:当前缩放质量与耗时够用 |
 | 视频缩略图 | `ffmpeg-next`(需系统 ffmpeg) | 可选 | 体积/依赖大,做成独立媒体插件 |
 | PDF 解析/渲染 | `pdfium-render`(需 pdfium 库)、`lopdf` | ★ pdfium-render(渲染)/ lopdf(纯解析) | 渲染走 pdfium;仅取元数据用 lopdf |
 | 文本编码探测 | `encoding_rs`、`chardetng` | ★ encoding_rs + chardetng | 非 UTF-8 文本预览 |
@@ -155,6 +155,8 @@
 | 虚拟滚动(列表/网格) | `@tanstack/react-virtual`、`react-window`、`react-virtuoso` | ★ TanStack Virtual | 十万级文件列表不卡;headless 易定制 |
 | 表格(排序/列/选择) | `@tanstack/react-table`、`ag-grid` | ★ TanStack Table | headless;ag-grid 太重 |
 | 目录树 | `react-arborist`、自绘(TanStack Virtual) | ★ react-arborist | 虚拟化树,内置 DnD/重命名/键盘 |
+
+> **react-arborist 3.16.0 实测约束(懒加载靠这些事实)**:v3 **没有** `loadChildren`/lazy API,展开时按需取数据要自己挂 `onToggle`。可展开性由**`children` 键的存在性**决定(`Node.isLeaf = !Array.isArray(children)`、`accessChildren = data.children ?? null`),所以未展开目录必须在数据里带 `children: []`(空数组也行)才出箭头,**叶子节点不得带该键**。"展开后为空"与"未展开"数据形状相同,故须用本地 `loaded`/`opened` 集合区分占位行:`(空目录)` 与 `(载入失败，重新展开重试)`(失败时从 `loaded` 移除,重新展开即重试)。`onToggle(id)` 对**叶子**也会触发,须先判 `isDir` 再加载。库自带 react-dnd/react-window/redux 且在模块作用域读 `process.env.NODE_ENV`,浏览器 ESM 场景要在 Vite 里 `define` 该常量。
 
 ### 2.3 状态 / 数据
 | 用途 | 候选 | 推荐 | 说明 |
@@ -273,10 +275,13 @@
 | tauri 2 + http + tauri-plugin-fs/dialog/opener | ✅ 已注册并使用 | 接线到能力层→ P6-30 |
 | Tauri path resolver(app_data_dir) | ✅ 在用(未引 `directories`) | — |
 | React 19 + Vite + TS + zustand + @tauri-apps/api | ✅ 在用 | — |
-| Mantine `core` + `notifications` | ✅ 在用 | `spotlight/dates/modals/form` 未引 → P6-14/27 |
+| Mantine `core`+`hooks`+`notifications`(**7.17.8**) | ✅ 在用(基座外壳与插件 UI 全走 Mantine:SegmentedControl/Tabs/ScrollArea/Table/Timeline/Badge…) | `spotlight/dates/modals/form` 未引 → P6-14/27;**改 `plugin-sdk` 源码或升 Mantine 版本后必须 `pnpm build:shared`**——插件运行时 import 的是 `shared-dist*/plugin-sdk.js` 预打包件,漏建会在加载时报 "does not provide an export named …" |
 | 并行遍历 `ignore`/`jwalk` + `rayon` | ❌ 未引(`fs.list` 现同步 `read_dir`) | P6-1 |
-| `trash`/`fs_extra`/`natord`/`sysinfo`/`infer`/`mime_guess`/`image`/`fast_image_resize`/`encoding_rs`/`chardetng`/`similar`/`tantivy`/`zip`/`tar`/`sevenz-rust`/`fastcdc` | ❌ 未引 | P6-1…13(对应功能建时接入) |
-| 前端功能库(TanStack Virtual/Table、react-arborist、dnd-kit、react-hotkeys-hook、lucide-react、codemirror、shiki、react-diff-view、react-markdown、react-pdf、react-photo-view、echarts、dayjs、pretty-bytes、i18next) | ❌ 未引 | P6-14…27(功能插件化时接入) |
+| `natord` | ✅ 在用(`fs.list` 出参自然序、忽略大小写) | — |
+| `image`(default-features off:png/jpeg/gif/bmp/webp/tiff)+ `base64` | ✅ 在用(`capabilities/thumb.rs` 解码 → 等比缩放 `FilterType::Triangle` → PNG data URL;带 mtime 键缓存) | `fast_image_resize` 未引:当前缩放质量足够,量大再评估 |
+| `trash`/`fs_extra`/`sysinfo`/`infer`/`mime_guess`/`encoding_rs`/`chardetng`/`similar`/`tantivy`/`zip`/`tar`/`sevenz-rust`/`fastcdc` | ❌ 未引 | P6-1…13(对应功能建时接入) |
+| 前端功能库:`@tanstack/react-virtual`、`react-arborist`、`lucide-react` | ✅ 在用(各自打进插件 dist,不进共享集):虚拟滚动=`plugin-file-browser` 列表+网格单条流;树=`plugin-view-file-tree`;图标=基座外壳 + browser + inspector | 剩余:P6-16/18/19/21/22 |
+| 前端功能库(TanStack Table、dnd-kit、react-hotkeys-hook、codemirror、shiki、react-diff-view、react-markdown、react-pdf、react-photo-view、echarts、dayjs、pretty-bytes、i18next) | ❌ 未引 | P6-14…27(功能插件化时接入) |
 | `tauri-plugin-notification`/`-window-state`/`-single-instance` | ❌ 未引 | P6-28/29 |
 | 工具链:Biome / Vitest / nextest / cargo-deny / lefthook / changesets / GitHub Actions+tauri-action / WebDriverIO+tauri-driver | ❌ 全无(现仅 `cargo test`、`node --test`、手写 `contract-check`) | P6-31…40 |
 | `cordis-loader`、`cordis-timer` | ⚠️ **在 workspace 声明但零引用**(死声明) | 不删除,由 P6-41/P6-42 转正启用 |

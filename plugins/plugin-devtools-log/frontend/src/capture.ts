@@ -97,6 +97,15 @@ const TRACED_EVENTS: readonly string[] = [
   Events.fileChanged,
   Events.historyUpdated,
   Events.selectionChanged,
+  // Cascade + nested-slot traffic (P6-44/45), so the drawer shows who drove what.
+  Events.tabActivated,
+  Events.sidebarViewChanged,
+  Events.sidebarSelectionChanged,
+  Events.focusChanged,
+  Events.detailTabChanged,
+  Events.slotRegistered,
+  Events.slotReconfigured,
+  Events.slotDisposed,
 ];
 
 /** Log whitelisted bus events through the host (gated by manifest). */

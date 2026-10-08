@@ -10,7 +10,7 @@
   "frontend": {
     "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "file-sidebar-zone", "export": "DetailsPanel" }
+      { "id": "detail-info-zone", "export": "DetailsPanel" }
     ]
   },
 
@@ -19,6 +19,7 @@
     "events": {
       "subscribe": ["selection:changed"],
       "emit": []
-    }
+    },
+    "slots": { "contribute": ["detail-info-zone"] }
   }
 }

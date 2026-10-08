@@ -13,7 +13,7 @@ use tauri::{Runtime, State};
 use crate::pluginsrv::PluginServer;
 use fm_contracts::capability::HashAlgo;
 use fm_contracts::capability::names;
-use fm_contracts::{FsApi, HashApi};
+use fm_contracts::{FsApi, HashApi, ThumbApi};
 use fm_kernel::capabilities::{CapabilitySet, WatchHub};
 use fm_kernel::kernel::Kernel;
 
@@ -143,6 +143,22 @@ pub async fn invoke_capability(
                     .file(&path, algo)
                     .map_err(|e| e.to_string())
                     .map(Value::String)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+        names::THUMB_IMAGE => {
+            let path = arg(&args, "path")?.to_owned();
+            let edge = args
+                .get("edge")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(256)
+                .min(u64::from(u32::MAX)) as u32;
+            tokio::task::spawn_blocking(move || {
+                caps.thumb
+                    .image(&path, edge)
+                    .map_err(|e| e.to_string())
+                    .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
             })
             .await
             .map_err(|e| e.to_string())?

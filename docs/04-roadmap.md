@@ -22,7 +22,11 @@
 >
 > **Phase 6 已立**:2026-10-08 开源库使用审计后,把 [06](06-open-source-stack.md) 的既定选型逐项转成可执行任务(6A 能力 / 6B 前端插件 / 6C 工具链 / 6D cordis 运行时 / 6E 界面框架与布局 / 6F 开发期演示与调试插件),后续开发按 Phase 6 接入并使用这些库。审计中 cordis-rs 侧发现的**已声明未用**依赖(`cordis-loader`/`cordis-timer`)不删除,由 P6-41/P6-42 转正启用。
 >
-> **6F 已交付(2026-10-08)**:在 6E 框架布局落地前,先用现有外层槽跑通"参考界面基础信息展示 + 大数据渲染性能观察 + 运行时错误/性能捕获",4 个插件已在 `vite dev` 浏览器实测(见 P6-49~52)。**6E(P6-43~48)仍未实现**,分栏/详情容器与级联元状态仍是目标形态。
+> **6F 已交付(2026-10-08)**:跑通"参考界面基础信息展示 + 大数据渲染性能观察 + 运行时错误/性能捕获",dev 索引里的演示/调试插件已在 `vite dev` 浏览器实测(见 P6-49~53);6E 容器交付后其挂载点已迁到容器提供的嵌套槽(`detail-info-zone`/`detail-tab:history`/`nav-panel:stress`)。
+>
+> **6E 框架布局已交付 P6-43~48(2026-10-08)**:基座渲染六区外层网格 + 顶部会话容器(每会话一份级联快照、可折叠、宽度记忆),级联元状态经协调事件总线单一路径写入,嵌套槽运行时 `provideSlot`/`contributeToSlot` + `slot:*` 生命周期 + manifest gating;C 分栏容器 `plugin-layout-panes`、D 详情容器 `plugin-inspector`、B 互斥容器 `plugin-layout-views`、侧栏视图 `plugin-view-file-tree`/`-favorites`/`-tags`、主浏览能力外置 `plugin-file-browser` 全部在 `vite dev` 浏览器实测(见各任务证据)。6F 演示插件已迁到容器化挂载点(`detail-tab:*`/`nav-zone` 视图),基座不再持有任何业务状态(红线 2)。
+>
+> **6E 第二轮交付 P6-56~60(2026-10-08,对照 `docs/界面布局.jpg` 收口)**:基座外壳改全 Mantine 组件并以**亮色**为默认(`MantineProvider defaultColorScheme="light"`),顶栏三态主题切换(跟随系统/亮色/暗色)与 `plugin-settings` 面板操作同一份 Mantine 配色值;新增**槽标签发现面**(manifest `frontend.slots[].label` → `host.slotLabel`),D 的 tab 标题由贡献者自己声明、容器零硬编码;`plugin-file-browser` 每栏拿到**独立地址栏 + 后退/前进/上级/刷新历史栈**与 列表/网格 双模式(统一 `@tanstack/react-virtual` 流、文件夹/文件分组、类型图标);D 增焦点标题条、A/B/C/D 文案与状态栏全中文;新增 `plugin-settings`、`plugin-preview-text`。全 14 个 dev 插件加载 0 控制台错误。
 
 ---
 
@@ -132,10 +136,10 @@
 | P6-1 | 并行目录遍历 + 大目录基准(收口 P1-7) | `ignore`(尊重 gitignore)或 `jwalk`(纯并行更快) + `rayon` | `fs.list` 并行遍历;10万级目录基准达预期;`fs.readChunk`/`hash.compute` 流式分块 | 🔵 |
 | P6-2 | 回收站删除 | `trash` | 能力 `fs.trash`(跨平台回收站,非硬删) | 🔵 |
 | P6-3 | 复制 / 移动 + 进度 | `fs_extra`(目录级)+ 自写分块进度 | 能力 `fs.copy`/`fs.move`,大文件进度事件 | 🔵 |
-| P6-4 | 文件名自然排序 | `natord` | 列表/排序 "2 file" < "10 file" | 🔵 |
+| P6-4 | 文件名自然排序 | `natord` | 列表/排序 "2 file" < "10 file" | ✅(`fs.list` 出参按 `natord::compare_ignore_case` 排好,provider 负责顺序,浏览器不再排序;dev mock 生成序与之对齐) |
 | P6-5 | 磁盘/系统信息 | `sysinfo` | 能力 `sys.disk`(剩余空间、占用统计) | 🔵 |
 | P6-6 | 类型识别(MIME) | `infer`(魔数)+ `mime_guess`(扩展名兜底) | 能力 `file.kind`,供预览/图标插件消费 | 🔵 |
-| P6-7 | 图像缩略图 | `image` + `fast_image_resize` | 能力 `thumb.image`(解码+高质量缩放);重依赖,按需启用 | 🔵 |
+| P6-7 | 图像缩略图 | `image`(default-features off:png/jpeg/gif/bmp/webp/tiff)+ `base64` | 能力 `thumb.image`:内核解码 → 等比缩放(`FilterType::Triangle`,edge ≤ 512)→ PNG data URL,按 mtime 键缓存(`capabilities/thumb.rs`,3 个单测);不走 `file:`/asset URL,权限仍由 `permissions.capabilities` 门控 | ✅(`fast_image_resize` 未引:当前缩放质量与耗时足够,量大再评估) |
 | P6-8 | 文本编码探测 | `encoding_rs` + `chardetng` | `fs.readText` 非 UTF-8 正确预览 | 🔵 |
 | P6-9 | 全文检索(内容搜索插件) | `tantivy`(大)/ SQLite **FTS5**(小数据,零额外依赖) | 搜索插件后端索引 + `search.query` 能力;**先评估 FTS5 是否够用**再定 tantivy | ⚪ |
 | P6-10 | 归档浏览 | `zip` / `tar`+`flate2` / `sevenz-rust` | 只读浏览/解压能力,封进归档插件 | 🔵 |
@@ -148,14 +152,14 @@
 | # | 功能 / 任务 | 采用库 | 完成条件 | 状态 |
 |---|---|---|---|---|
 | P6-14 | 命令面板(Ctrl+Shift+P) | `@mantine/spotlight` | 基座命令总线 + 插件可注册命令 | 🔵 |
-| P6-15 | 大文件列表虚拟滚动 | `@tanstack/react-virtual` | 十万级列表不卡 | 🔵 |
+| P6-15 | 大文件列表虚拟滚动 | `@tanstack/react-virtual` | 十万级列表不卡 | ✅(已接进 `plugin-file-browser`:列表与网格合并成**一条**虚拟化流,`estimateSize` 按行/头/卡片区分;浏览器实测 50 万条目常驻 DOM ~200(列表)/~500(网格)节点,见 P6-62) |
 | P6-16 | 表格视图(排序/列/选择) | `@tanstack/react-table` | 详情列表模式 | 🔵 |
-| P6-17 | 目录树 | `react-arborist`(或 TanStack Virtual 自绘) | 虚拟化树 + DnD/重命名/键盘 | 🔵 |
+| P6-17 | 目录树 | `react-arborist`(或 TanStack Virtual 自绘) | 虚拟化树 + DnD/重命名/键盘 | 🟡(虚拟化树 + 自写懒加载已交付并实测,见 P6-48;DnD/重命名未做) |
 | P6-18 | 拖拽(移动/排序) | `@dnd-kit/core`(+`sortable`) | 拖文件到目录;无障碍 | 🔵 |
 | P6-19 | 快捷键 | `react-hotkeys-hook` | 基座级键位,插件可声明 | 🔵 |
-| P6-20 | 图标 | `lucide-react`(+ 文件类型图标 `@vscode/codicons`) | 基座与插件统一图标源,替换现有内联/emoji | 🔵 |
-| P6-21 | 日期 & 文件大小格式化 | `dayjs` + `pretty-bytes` | 时间线/列表展示 | 🔵 |
-| P6-22 | 代码/文本查看器(预览插件) | `@uiw/react-codemirror`(CodeMirror 6)+ `shiki`(静态高亮) | 只读预览插件;需 VS Code 级编辑再上 Monaco(重,独立插件) | 🔵 |
+| P6-20 | 图标 | `lucide-react`(+ 文件类型图标 `@vscode/codicons`) | 基座与插件统一图标源,替换现有内联/emoji | 🟡(基座顶栏/折叠/会话、D 焦点标题、browser 文件类型图标已用 lucide;A 栏活动图标仍是 emoji) |
+| P6-21 | 日期 & 文件大小格式化 | `dayjs` + `pretty-bytes` | 时间线/列表展示 | 🔵(现为插件内自写 `toLocaleString`/`formatSize`) |
+| P6-22 | 代码/文本查看器(预览插件) | `@uiw/react-codemirror`(CodeMirror 6)+ `shiki`(静态高亮) | 只读预览插件;需 VS Code 级编辑再上 Monaco(重,独立插件) | 🟡(`plugin-preview-text` 已交付纯文本只读预览并接 `preview-zone`,见 P6-58;CodeMirror/Shiki 高亮未接) |
 | P6-23 | 版本 diff 面板 | `react-diff-view` | 消费 P6-11 后端 diff | 🔵 |
 | P6-24 | Markdown / PDF / 图片预览 | `react-markdown`+`remark-gfm` / `react-pdf`(`pdfjs-dist`)/ `react-photo-view` | 各做成独立预览插件按需装载 | 🔵 |
 | P6-25 | 磁盘占用 treemap | `echarts`(`echarts-for-react`) | 消费 P6-5 `sys.disk` + 遍历数据 | 🔵 |
@@ -191,27 +195,44 @@
 
 > 务实边界:**外层网格 + 元状态总线留在基座**,只把多变部分插件化;分栏容器与详情容器是仅有的两个"提供嵌套槽"的框架插件。区域与级联状态定义见 01 §9,嵌套槽机制见 02 §4.5,插件清单见 08 §5.1。
 
-| # | 任务 | 落位 | 完成条件 | 状态 |
-|---|---|---|---|---|
-| P6-43 | 外层区域网格 + 顶部会话容器 | 基座 `shell-ui`(App.tsx) | 渲染 A/B/C/D + 工具栏 + 状态栏六区;顶部多标签会话,每会话持一份级联快照;面板可折叠、宽度记忆 | 🔵 |
-| P6-44 | 级联元状态 + 协调事件 | 基座 `state.ts`/`eventbus.ts` + SDK | `HostMetaState` 扩为 `{activeTabId,activeSidebarView,sidebarSelection,focusRef,activeDetailTab}`(不透明 `Ref`);发 `tab:activated`/`sidebar:view:changed`/`sidebar:selection:changed`/`focus:changed`/`detail:tab:changed` | 🔵 |
-| P6-45 | 嵌套槽运行时 | 基座 `slots.ts` + SDK `PluginHost` | `provideSlot`/`contributeToSlot`;`slot:registered/reconfigured/disposed` 生命周期;manifest `provides`/`permissions.slots.contribute` gating | 🔵 |
-| P6-46 | `plugin-layout-panes`(C 分栏容器) | 前端插件 | 提供 `pane-slot:<n>`;切 1/左右2/2×2 栏;**稳定 paneId + 按 id 迁移子树**不丢每栏局部状态;分隔条可调 | 🔵 |
-| P6-47 | `plugin-inspector`(D 详情容器) | 前端插件 | 占用 `file-sidebar-zone`,提供 `detail-tab:*`/`preview-zone`/`detail-info-zone`/`file-extension-zone`;tab 条 + 焦点 kind 模板(程序/文件夹/标签/文件) | 🔵 |
-| P6-48 | 侧栏视图插件化(A+B) | 前端插件 `view-file-tree`/`view-favorites`/`view-tags` | 各贡献 `activity-rail-zone` 图标 + `nav-zone` 面板;A 切换 → B 内容随之换;选中标项 → `sidebar:selection:changed` 驱动 C | 🔵 |
+| # | 任务 | 落位 | 完成条件 | 状态 | 证据 |
+|---|---|---|---|---|---|
+| P6-43 | 外层区域网格 + 顶部会话容器 | 基座 `shell-ui`(App.tsx) | 渲染 A/B/C/D + 工具栏 + 状态栏六区;顶部多标签会话,每会话持一份级联快照;面板可折叠、宽度记忆 | ✅ | `vite dev` 实测(`.scratch/6e-shell-regions.png`):六区齐备(A 活动栏 / B 侧栏 / C 工具栏+主视图 / D 详情 / 顶部会话条 / 底部状态栏);新建会话 2 切到 `/demo` 后会话 1 仍为 `/demo/src`(按 `tabId` 隔离目录视图与级联快照);`◧侧栏`/`详情◨` 收起后重载仍记忆(`fm.shell.layout.v1`,含拖拽宽度);关闭活动会话自动激活相邻会话并还原其快照,最后一个标签不可关 |
+| P6-44 | 级联元状态 + 协调事件 | 基座 `state.ts`/`eventbus.ts` + SDK | `HostMetaState` 扩为 `{activeTabId,activeSidebarView,sidebarSelection,focusRef,activeDetailTab}`(不透明 `Ref`);发 `tab:activated`/`sidebar:view:changed`/`sidebar:selection:changed`/`focus:changed`/`detail:tab:changed` | ✅ | SDK 新增 `Ref`/`HostMetaState` + 5 个事件名,Rust `HostMetaState` 镜像随 `cargo test -p fm-contracts` 通过;`initCascadeBus()` 把 5 事件接成唯一写入路径(基座 UI 也只用 `publish*`/`activateTab`,不改 store);`pnpm contract:check` = contract OK(9 个前端专有事件列入豁免)。浏览器实测:点选文件 → `focus:changed` 驱动 D 面板、状态栏计数、调试台事件行 |
+| P6-45 | 嵌套槽运行时 | 基座 `slots.ts` + SDK `PluginHost` | `provideSlot`/`contributeToSlot`;`slot:registered/reconfigured/disposed` 生命周期;manifest `provides`/`permissions.slots.contribute` gating | ✅ | 每个注册项携带**自己的 gated host**(修掉插件组件拿到未授权基座 host 的越权路径);`provide`/`unprovide` 随 React 挂载/卸载发 `slot:registered`/`slot:disposed`。dev 专用 `plugin-dev-slot-harness` 实测:两个 `dev-pane:<n>` outlet 正常渲染并被级联 `focusRef` 驱动;越权注入 `file-sidebar-zone` 与 `provideSlot("forbidden-prefix:0")` 均被拒并在调试台出现 `[host:plugin-dev-slot-harness] … denied (not in manifest permissions)` |
+| P6-46 | `plugin-layout-panes`(C 分栏容器) | 前端插件 | 提供 `pane-slot:<n>`;切 1/左右2/2×2 栏;**稳定 paneId + 按 id 迁移子树**不丢每栏局部状态;分隔条可调 | ✅ | `vite dev` 实测:`mode=4` 时 `localStorage fm.layout-panes.v1` 为 `{"mode":4,"ids":["p0","p1","p2","p3"],"seq":4}`,DOM grid-area 为 `a1/a2/a3/a4` + 2 竖 1 横分隔条;四栏各自路径互不干扰(`/demo/src`、`/demo/src`、`/demo`、`/demo`);4→1→4 后 p1 仍停在 `/demo/src`(单一 keyed 数组 + 隐藏不卸载);拖拽分隔条 `colPct 50→57.09`;`closePane` → `{"mode":2,"ids":["p0","p1","p2"]}` 且只剩 3 个 `<section>`。**按需挂载**:切模式才新增 outlet 并发 `slot:reconfigured{action:'add'}`,容器只管几何 |
+| P6-47 | `plugin-inspector`(D 详情容器) | 前端插件 | 占用 `file-sidebar-zone`,提供 `detail-tab:*`/`preview-zone`/`detail-info-zone`/`file-extension-zone`;tab 条 + 焦点 kind 模板(程序/文件夹/标签/文件) | ✅ | `vite dev` 实测:文件焦点下 tab 条 = `信息` + `contributedSlots("detail-tab")` 扫到的 `历史`(标题取贡献者 manifest `label`,见 P6-60),点历史发 `detail:tab:changed` 并只切换显隐(挂载不卸载,切回时状态保留);空槽渲染中文占位(`插件预留：暂无插件注入` 等);folder 焦点走 `file-extension-zone`+`detail-info-zone` 模板(不预览);焦点标题条显示 名称/整路径/类型徽标 |
+| P6-48 | 侧栏视图插件化(A+B) | 前端插件 `view-file-tree`/`view-favorites`/`view-tags` | 各贡献 `activity-rail-zone` 图标 + `nav-panel:<viewId>` 面板;A 切换 → B 内容随之换;选中标项 → `sidebar:selection:changed` 驱动 C | ✅ | `vite dev` 实测:A 栏 `目录树/收藏/标签/压力列表` 四图标,同一时刻 B 只有一个可见面板(`H:目录树 \| V:收藏 \| H:标签 \| H:压力列表`),互斥由容器 `plugin-layout-views` 保证而非面板 self-hide;树为 react-arborist 懒加载:未开目录带 `children:[]` 才出箭头,展开才 `fs.list`,空目录显示 `(空目录)`,读失败显示 `(载入失败，重新展开重试)` 且重新展开会重试,文件行 `aria-expanded=false`;切 A 视图往返后 9 个已展开目录仍展开 |
+| P6-54 | `plugin-layout-views`(B 互斥容器) | 前端插件 | 占 `nav-zone`,按 `meta.activeSidebarView` 从 `nav-panel:<viewId>` 出口里选一个显示,其余隐藏;**互斥是容器职责**,视图插件不写 self-hide 判断 | ✅ | `plugin-layout-views` 渲染全部已挂载出口并以 `display:none` 隐藏非活动项,活动视图缺失时回落首个面板,`onSlotsChange` 驱动重渲染;三个 `view-*` 插件源码内已无 `if (view !== …) return null` 分支;证据见 P6-48 的可见面板断言 |
+| P6-55 | 主浏览能力外置 `plugin-file-browser` | 前端插件 | 基座不含浏览逻辑;`activate` 扫 `providedSlots("pane-slot")` + 订 `slot:registered/disposed`,每栏注入一个独立实例(各自路径/选择/地址栏) | ✅ | `vite dev` 实测:2×2 四栏各有一个独立浏览器实例(地址栏 4 个,路径见 P6-46);后创建的 `pane-slot:p2/p3` 无需重载即被自动注入;基座 `App.tsx` 零业务状态(无地址栏/目录列表/条目计数),`state.ts` 只有 `activateTab` + `initCascadeBus` 两条写入路径;每栏路径按会话记忆在 `fm.file-browser.v1`(`会话\|槽id` 为键),切会话不互串 |
+| P6-56 | 基座外壳 Mantine 化 + 亮色默认与主题切换 | 基座 `shell-ui`(`App.tsx`/`main.tsx`) | 外壳控件一律 Mantine(会话标签、折叠 `ActionIcon`、主题 `SegmentedControl`、`Divider`、状态栏);`MantineProvider defaultColorScheme="light"`;亮/暗/跟随系统即时生效并持久化 | ✅ | `vite dev` 实测:切「暗色」→ `data-mantine-color-scheme=dark`、body `rgb(255,255,255)`→`rgb(36,36,36)`,切回亮色还原;持久化键 `mantine-color-scheme-value`;`shell-ui` 与 14 个插件 frontend(共 15 包)统一到 `@mantine/* ^7.17.8`,`pnpm build:shared` 重建两套变体后插件仍共用同一 Mantine 实例(hooks 无多实例错,控制台 0 错误) |
+| P6-57 | `plugin-settings`(A 齿轮 + B 设置面板) | 前端插件 | 主题三选(跟随系统/亮色/暗色)外置给插件;插件用 `useMantineColorScheme` 直接操作基座的那份配色状态 | ✅ | 实测:点基座顶栏「暗色」后,设置面板内 `input[value=dark].checked===true`,两处控件读同一 Mantine 配色值(`localStorage mantine-color-scheme-value=dark`)——**共享单例的直接收益,不需要任何自定义事件**;齿轮固定在 A 栏底部(`marginTop:auto`) |
+| P6-58 | `plugin-preview-text`(文本预览进 D) | 前端插件 | 随级联 `focusRef` 经 gated `fs.readText` 读文本,填 inspector 的 `preview-zone`;超长截断(20 万字符) | ✅ | 实测:焦点 `/demo/src/main.rs` → 信息 tab 内 `预览` 区显示该文件内容;`file-extension-zone` 无注入时显示中文占位 `插件预留：暂无插件注入`;manifest 只授权 `fs.readText`,越权能力路径未变 |
+| P6-59 | `plugin-file-browser` 增强:每栏历史导航 + 列表/网格 + 统一虚拟滚动 | 前端插件 | 每栏独立历史栈(后退/前进/上级/刷新)、列表或网格按 `会话\|槽id` 持久化、文件夹/文件分组带整路径、类型图标与大小;`@tanstack/react-virtual` 单条流 | ✅ | 实测:`/demo/src →「上级目录」→ /demo →「后退」→ /demo/src`,前进由 `disabled` 转可用;`fm.file-browser.v1 = {"tab-1\|pane-slot:p0":{"cwd":"/demo/src","mode":"grid"},…}`(每栏独立);网格卡片 `lib.rs / RS / 900 B`;分组条底色改取 `var(--mantine-color-body)`,暗色下实测 `rgb(36,36,36)`(原先写死 `gray-0` 会在暗色留白条);插件 vite 配置加 `define: process.env.NODE_ENV`(react-virtual 读它,同 react-arborist 坑) |
+| P6-60 | 界面文案中文化 + 槽标签发现面 | SDK/契约 + `plugin-inspector` + 基座 | manifest `frontend.slots[].label`(可选,空白拒) → 注册项携带 → `host.slotLabel(slotId)`;容器用贡献者自己的名字题 tab,D 焦点标题条/区域占位/分栏头全中文,槽 id 只留在 `title` 悬停提示 | ✅ | `cargo test -p fm-contracts`(`label` 往返 `"版本"`、缺省序列化为 Null、空白拒绝)+ SDK `node --test` 10 项(含 label 可选元数据);浏览器实测:D tab 可见文本 `信息`/`历史`(且移除会覆盖可访问名的英文 `aria-label`)、分栏头显示 `栏 1`(悬停 `pane-slot:p0`)、折叠按钮 `折叠侧栏`/`折叠详情`、状态栏 `会话 1 · 文件 /demo/src/main.rs` |
+| P6-61 | 契约:`ListEntry.modifiedMs` + `thumb.image`/`ThumbOut` | `fm-contracts` + `plugin-sdk` + `fm-contract-dump` | 列表条目自带 mtime(目录为 null)以免浏览器逐行 `fs.stat`;新增缩略图能力与 DTO,serde 字段 camelCase | ✅ | `cargo test -p fm-contracts` 断言序列化字段集(按字母序)`["isDir","modifiedMs","name","path","size"]`/`["dataUrl","edge","mime"]` + 目录 `modifiedMs` 为 Null 往返;`pnpm -C apps/shell-ui contract:check` → `dto fields ListEntry`/`ThumbOut` 与 TS SDK 一致;SDK `node --test` 11 项 |
+| P6-62 | 真实感压力数据集 + 缩略图消费链 | `dev-mocks.ts` + `plugin-file-browser` + `plugin-layout-panes` | ~48 种格式各带真实体积区间/文本或二进制标记/是否出图,`/stress/数据集-{1千,1万,10万,50万}` + `空目录` + `读取失败`;网格卡片按可见性懒取 `thumb.image` + LRU + 负缓存 | ✅ | 实测:10 万条目头部 `9566 目录 · 90434 文件 · 295ms`、50 万 `47769 目录 · 452231 文件 · 472ms`;50 万时列表常驻 214 节点/网格 514 节点(内容高 13,000,048 / 22,369,618px),滚动 1400px/帧 p50 ≈ 26ms;图片卡片显示 `data:image/png` 真缩略图(96×72 原图 → 卡片框 207×62);二进制文件在 D 显示中文 `无法以文本读取 .m4a(二进制格式)`,`读取失败` 目录显示 `—模拟读取失败`(SDK 新增 `errorMessage` 去掉 `Error:` 前缀),`空目录` 显示中文 `空目录` |
+| P6-63 | 分栏高度不变量(容器 owner 强制) | `plugin-layout-panes` | 栅格行轨 `minmax(0,1fr)`;栏 `display:flex`+`flex-direction:column`+`min-height:0`;outlet `flex:1`+`overflow:hidden`(滚动归内容插件) | ✅ | 修前:栏 `<section>` 计算样式是 `display:block`(`display: hidden ? "none" : undefined` 被 React 当成"删除该属性"),`flex:1` 失效 → outlet 长到 260,110px → 1 万条目录**挂载 10,002 行**(无窗口化)且被 `overflow:hidden` 静默裁掉;修后实测 `paneDisplay=flex`、outlet 725px、scroller 视口 663px,挂载节点回到数百 |
+
+> 6E 基座/SDK 落地清单:`App.tsx` 六区网格 + `SessionTabs`/`Toolbar`/`PanelResizer` + `ThemeSwitch` + `useShellLayout` 持久化;`main.tsx` 的 `MantineProvider defaultColorScheme="light"`;`state.ts` 每会话级联快照 + 总线单写;`slots.ts`/`PluginSlot.tsx` 为 provide/contribute 运行时(出口挂载/卸载即 `slot:registered`/`slot:disposed`),注册项携带 `label`;`host.ts` 加 `provides`/`slots.contribute` gating 与 `slotLabel`;`loader.ts` 声明槽走 `contributeToSlot`,卸载时 `releasePlugin`;SDK `matchesPermission`/`slotPrefix`/`Events` + `BaseSlots`,并新增**只寻址不解释**的发现面 `host.name`、`contributedSlots(prefix?)`、`providedSlots(prefix?)`(当前已挂载出口)、`onSlotsChange(cb)`、`slotLabel(slotId)`;`contracts`(Rust)镜像 `frontend.provides`、`permissions.slots` 与 `frontend.slots[].label`。容器侧:`slot:reconfigured{action:'add'|'remove'}` 由**容器**按意图发,框架层负责 registered/disposed。
+
 
 ### 6F · 开发期演示与调试插件(2026-10-08 交付)
 
-> 目的:在 6E 框架布局(P6-43~48)之前,先用**现有基座外层槽**(topbar/nav/file-sidebar + 本轮新增 bottom-drawer)跑通"参考界面的基础信息展示 + 大数据渲染性能观察 + 运行时错误/性能捕获",便于开发期肉眼查看各区样式与调试。这些是开发/演示用途插件,**非发布形态**;正式的分栏/详情容器仍以 P6-46/47/48 为准。仅出现在浏览器 dev 的 `plugins_list_frontend` 模拟索引中(`dev-mocks.ts`),发布/Tauri 下不装载。
+> 目的:用**基座外层槽**(topbar/nav/file-sidebar/bottom-drawer)跑通"参考界面的基础信息展示 + 大数据渲染性能观察 + 运行时错误/性能捕获",便于开发期肉眼查看各区样式与调试。这些是开发/演示用途插件,**非发布形态**;正式的分栏/详情容器以 P6-46/47/48 为准。仅出现在浏览器 dev 的 `plugins_list_frontend` 模拟索引中(`dev-mocks.ts`),发布/Tauri 下不装载。6E 容器交付后,这些插件的挂载点已改为容器提供的嵌套槽(见各行落位与下方收尾说明)。
 
 | # | 任务 | 落位 | 采用库/能力 | 完成条件 | 状态 | 证据 |
 |---|---|---|---|---|---|---|
-| P6-49 | 基础信息插件:文件详情属性 / 校验 | 前端插件 `plugin-file-details` → `file-sidebar-zone` | `fs.stat`、`hash.compute`、`fs.home`、`fs.readText` | 选中项经 gated 能力展示 名称/路径/大小/类型/修改时间/BLAKE3;随 `selection:changed` 刷新、无轮询 | ✅ | `vite dev` 实测:选中 notes.txt 显示 `1.3 KB / txt / 2026-10-08… / mockhash-15-blake3`,与 HistoryPanel 同区并存 |
-| P6-50 | 基础信息插件:快捷导航 + 面包屑 | 前端插件 `plugin-file-nav` → `nav-zone` | `fs.home`、`fs.list` | 主页 / 常用位置列表 + 由当前选择不透明引用派生的面包屑 | ✅ | `vite dev` 实测:选 notes.txt → "当前位置 › demo › notes.txt" |
-| P6-51 | 模拟数据 / 压力测试插件 | 前端插件 `plugin-mock-data` → `topbar-zone`(控件)+ `nav-zone`(压力列表);dev 能力 `mock.stress` | 自写窗口化列表(无第三方虚拟列表库) | 一键注入 100~100,000 合成条目;窗口化列表**仅挂载可见行**并显示"拉取/渲染 毫秒",观察各区大数据样式与渲染性能 | ✅ | `vite dev` 实测:点 5,000 → 顶栏"5,000 行"、侧栏"挂载 24/5,000",DOM 仅 ~24 行;修复了 `useLayoutEffect` 内 setState 造成的无限重渲染(改直写 `<span>` ref) |
-| P6-52 | 性能 / 错误日志捕获插件 | 前端插件 `plugin-devtools-log` → 基座新增 `bottom-drawer` 外层槽 | 原生 `console` 包裹 / `window` 错误 / `unhandledrejection` / `PerformanceObserver(longtask)` | 捕获运行数据入环形缓冲(上限 5000);面板按级别筛选、搜索、新旧序切换、清空、导出 JSON;**在 dev 索引里最先装载**以捕获他插件 console/错误 | ✅ | `vite dev` 实测:捕获 `event:selection:changed`、loader 日志、`主线程长任务 103ms` 告警;故意排除 React dev 的海量 `measure` 以免淹没缓冲 |
+| P6-49 | 基础信息插件:文件详情属性 / 校验 | 前端插件 `plugin-file-details` → `detail-info-zone`(D 容器内) | `fs.stat`、`hash.compute`、`fs.home`、`fs.readText` | 选中项经 gated 能力展示 名称/路径/大小/类型/修改时间/BLAKE3;随 `selection:changed` 刷新、无轮询 | ✅ | `vite dev` 实测:焦点 `/demo/src/lib.rs` → 信息 tab 内 `文件详情` 表格显示 大小/类型/修改时间/`mockhash-…-blake3`;同 tab 的 `file-extension-zone` 无注入时显示 `插件预留：暂无插件注入` |
+| P6-50 | 快捷导航 + 位置显示(并入 P6-55) | `plugin-view-favorites`(主页/常用位置) + `plugin-file-browser`(每栏地址栏与分组整路径) | `fs.home`、`fs.list` | 独立的 `plugin-file-nav` 不存在:主页与收藏位置归 B 的 `nav-panel:favorites`,当前位置与路径跟随归 C 的每栏浏览器实例 | ✅ | `vite dev` 实测:B「收藏」面板含 `⌂ 主页` + 收藏条目,并可「＋ 焦点」把当前 `focusRef` 加入收藏;每栏顶部是**独立地址栏**(Mantine `TextInput`,`aria-label="当前目录地址"` + 后退/前进/上级目录/刷新 `ActionIcon`),分组条右侧显示该分组所在整路径(如 `/demo/src`) |
+| P6-51 | 模拟数据 / 压力测试插件 | 前端插件 `plugin-mock-data` → `activity-rail-zone`/`nav-panel:stress`(B 区视图) | `fs.list`(只读数据集目录) | 插件只做**入口**:列出 `/stress` 下的数据集目录,点击即以不透明引用发 `sidebar:selection:changed`,由 C 区**真实网格**加载;窗口化与计时都在 `plugin-file-browser` 内,dev 侧只有 `/stress` 数据集走标准能力(无自定义 dev 能力) | ✅ | `vite dev` 实测:B「模拟数据」列 `数据集-1千/-1万/-10万/-50万/空目录/读取失败`,点某目录只驱动**当前活动栏**(mousedown 抢栏后点击 → 只有该栏换目录),另一栏保持原路径可左右对比量级 |
+| P6-52 | 性能 / 错误日志捕获插件 | 前端插件 `plugin-devtools-log` → 基座 `bottom-drawer` 外层槽 | 原生 `console` 包裹 / `window` 错误 / `unhandledrejection` / `PerformanceObserver(longtask)` | 捕获运行数据入环形缓冲(上限 5000);面板按级别筛选、搜索、新旧序切换、清空、导出 JSON;**在 dev 索引里最先装载**以捕获他插件 console/错误 | ✅ | `vite dev` 实测:捕获整条级联流量(`event:sidebar:view:changed`/`event:focus:changed`/`event:detail:tab:changed`)与 `event:slot:registered`/`slot:reconfigured`/`slot:disposed`;故意排除 React dev 的海量 `measure` 以免淹没缓冲 |
+| P6-53 | 嵌套槽验证夹具 | 前端插件(dev) `plugin-dev-slot-harness` → `bottom-drawer` + 自带 `dev-pane:<n>` | `frontend.provides: ["dev-pane"]`、`permissions.slots.contribute: ["bottom-drawer","dev-pane:*"]` | 为 P6-45 提供真实浏览器夹具:注册 `dev-pane` 前缀、渲染两个 `<SlotOutlet>`、卡片随级联 `focusRef` 更新,并**故意**越权注入 `file-sidebar-zone` 与 `provideSlot("forbidden-prefix:0")` 以取证两条 gating 拒绝路径 | ✅ | `vite dev` 实测:`dev-pane:0/1` 渲染并被焦点驱动;调试台只有两条 `… denied (not in manifest permissions)` 告警,控制台 0 错误。**夹具的两个 outlet 是自身演示行为**,不代表 `pane-slot` 的预挂载策略 |
 
-> 本轮基座侧改动:`App.tsx` 新增 `bottom-drawer` 外层槽 + 可折叠抽屉;`dev-mocks.ts` 扩 `mock.stress` 合成数据源 + 5 插件开发索引(devtools-log 置首);`vite.config.ts` 的 dev 插件服务加 `Cache-Control: no-store`,使重建后的插件 JS 重载即生效(修掉一次"缓存旧模块导致渲染死循环"的排查坑)。
+> 6F → 容器化挂载点收尾(2026-10-08):`plugin-file-details` 注入 `detail-info-zone`、`plugin-file-history` 注入 `detail-tab:history`、`plugin-mock-data` 是 B 区视图 `nav-panel:stress` 的压力数据集入口(点击 → `sidebar:selection:changed` → C 真实网格)、`plugin-file-nav` 按上述并入 P6-50/P6-55;取焦点源统一读 `meta.focusRef`(必要时兼容 `selection:changed`);`devtools-log` 订阅覆盖级联 5 事件 + `slot:registered/reconfigured/disposed`。`plugin-dev-slot-harness` 保持原样,仅作 gating 反例夹具。
+
+
+> 6F 配套基座改动:`App.tsx` 提供 `bottom-drawer` 外层槽 + 可折叠抽屉;`dev-mocks.ts` 含 `/stress` 真实感压力数据集(见 P6-62)与 14 条目开发索引(devtools-log 置首、settings 次末、slot-harness 置末,容器插件须早于其内容插件);`vite.config.ts` 的 dev 插件服务带 `Cache-Control: no-store`,使重建后的插件 JS 重载即生效(修掉一次"缓存旧模块导致渲染死循环"的排查坑)。
 
 ---
 

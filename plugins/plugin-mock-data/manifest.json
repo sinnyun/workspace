@@ -3,23 +3,24 @@
   "name": "plugin-mock-data",
   "version": "0.1.0",
   "displayName": "模拟数据 / 压力测试",
-  "description": "开发期用模拟数据注入各界面区域，便于查看样式与大数据下的渲染性能",
+  "description": "开发期数据集视图：列出 /stress 下的模拟卷宗，点击即让中间网格以真实 fs.list + thumb.image 路径加载，用于大数据压力观察",
   "author": "you",
   "minHostVersion": "0.1.0",
 
   "frontend": {
     "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "topbar-zone", "export": "MockControls" },
-      { "id": "nav-zone", "export": "MockStressList" }
+      { "id": "activity-rail-zone", "export": "StressIcon" },
+      { "id": "nav-panel:stress", "export": "MockDatasetView", "label": "模拟数据" }
     ]
   },
 
   "permissions": {
-    "capabilities": ["mock.stress", "fs.list"],
+    "capabilities": ["fs.list"],
     "events": {
-      "subscribe": ["selection:changed"],
-      "emit": []
-    }
+      "subscribe": [],
+      "emit": ["sidebar:view:changed", "sidebar:selection:changed"]
+    },
+    "slots": { "contribute": ["activity-rail-zone", "nav-panel:stress"] }
   }
 }

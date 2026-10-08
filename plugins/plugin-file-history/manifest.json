@@ -16,7 +16,7 @@
   "frontend": {
     "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "file-sidebar-zone", "export": "HistoryPanel" }
+      { "id": "detail-tab:history", "export": "HistoryPanel", "label": "历史" }
     ]
   },
 
@@ -25,6 +25,7 @@
     "events": {
       "subscribe": ["file:changed", "selection:changed", "history:updated"],
       "emit": ["history:updated"]
-    }
+    },
+    "slots": { "contribute": ["detail-tab:history"] }
   }
 }
