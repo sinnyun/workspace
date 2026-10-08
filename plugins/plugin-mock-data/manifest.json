@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-mock-data",
+  "version": "0.1.0",
+  "displayName": "模拟数据 / 压力测试",
+  "description": "开发期用模拟数据注入各界面区域，便于查看样式与大数据下的渲染性能",
+  "author": "you",
+  "minHostVersion": "0.1.0",
+
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "topbar-zone", "export": "MockControls" },
+      { "id": "nav-zone", "export": "MockStressList" }
+    ]
+  },
+
+  "permissions": {
+    "capabilities": ["mock.stress", "fs.list"],
+    "events": {
+      "subscribe": ["selection:changed"],
+      "emit": []
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-file-nav",
+  "version": "0.1.0",
+  "displayName": "快捷导航",
+  "description": "左侧栏：主页/常用位置与当前选择的面包屑",
+  "author": "you",
+  "minHostVersion": "0.1.0",
+
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "nav-zone", "export": "QuickNavPanel" }
+    ]
+  },
+
+  "permissions": {
+    "capabilities": ["fs.home", "fs.list"],
+    "events": {
+      "subscribe": ["selection:changed"],
+      "emit": []
+    }
+  }
+}

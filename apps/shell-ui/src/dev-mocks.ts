@@ -6,7 +6,12 @@
  */
 import { registerMock } from "./invoke";
 import type { ListEntry, PluginManifest, StatOut } from "@my-file-manager/plugin-sdk";
+
 import fileHistoryManifest from "../../../plugins/plugin-file-history/manifest.json";
+import devtoolsLogManifest from "../../../plugins/plugin-devtools-log/manifest.json";
+import fileDetailsManifest from "../../../plugins/plugin-file-details/manifest.json";
+import fileNavManifest from "../../../plugins/plugin-file-nav/manifest.json";
+import mockDataManifest from "../../../plugins/plugin-mock-data/manifest.json";
 
 const fakeTree: Record<string, ListEntry[]> = {
   "/demo": [
@@ -20,11 +25,34 @@ const fakeTree: Record<string, ListEntry[]> = {
   ],
 };
 
+const EXTENSIONS = ["txt", "md", "rs", "json", "png", "csv", "log", "toml"];
+
+/** Generate `n` synthetic entries with varied, unique paths for the stress view. */
+function stressRows(n: number): ListEntry[] {
+  const out: ListEntry[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const isDir = i % 17 === 0;
+    const ext = EXTENSIONS[i % EXTENSIONS.length];
+    out[i] = {
+      name: isDir ? `folder_${i}` : `item_${i}.${ext}`,
+      path: `/demo/stress/${i}`,
+      isDir,
+      size: isDir ? null : ((i * 2654435761) % 4_000_000) + 1,
+    };
+  }
+  return out;
+}
+
 export function registerMocks(): void {
   registerMock("fs.home", () => "/demo");
 
   registerMock("fs.list", (args) => {
     const path = String(args.path ?? "/demo");
+    if (path.startsWith("/demo/stress")) {
+      // Support the stress region: /demo/stress?n=<count>, default 1000.
+      const match = /[?&]n=(\d+)/.exec(path);
+      return stressRows(match ? Number(match[1]) : 1000);
+    }
     return fakeTree[path] ?? [];
   });
 
@@ -33,12 +61,12 @@ export function registerMocks(): void {
     const ent = Object.values(fakeTree)
       .flat()
       .find((e) => e.path === path);
-    return {
-      path,
-      isDir: ent?.isDir ?? false,
-      size: ent?.size ?? 0,
-      modifiedMs: Date.now(),
-    };
+    const stressIdx = /^\/demo\/stress\/(\d+)$/.exec(path);
+    const isDir = ent?.isDir ?? (stressIdx ? Number(stressIdx[1]) % 17 === 0 : false);
+    const size =
+      ent?.size ??
+      (stressIdx ? (Number(stressIdx[1]) * 2654435761) % 4_000_000 + 1 : 0);
+    return { path, isDir, size, modifiedMs: Date.now() };
   });
 
   registerMock("fs.readText", (args) => `mock content of ${String(args.path ?? "")}`);
@@ -46,6 +74,9 @@ export function registerMocks(): void {
   registerMock("hash.compute", (args) =>
     `mockhash-${String(args.path ?? "").length}-${String(args.algo ?? "blake3")}`,
   );
+
+  // Dev-only data source for the mock-data stress plugin.
+  registerMock("mock.stress", (args) => stressRows(Number(args.n ?? 1000)));
 
   // A tiny in-memory db.history store so the file-history panel has data in dev.
   const history: Record<string, Array<{ hash: string; at: number }>> = {
@@ -67,17 +98,26 @@ export function registerMocks(): void {
     return { ok: true };
   });
 
-  // Browser-dev plugin index: serve the built file-history frontend over the
-  // vite `/dev-plugins` route so the real runtime-ESM loading path is exercised
+  // Browser-dev plugin index: serve the built plugin frontends over the vite
+  // `/dev-plugins` route so the real runtime-ESM loading path is exercised
   // without Tauri. Inside Tauri the real `plugins_list_frontend` command wins.
-  const devPlugins = [
-    {
-      ...(fileHistoryManifest as unknown as PluginManifest),
+  // ORDER MATTERS: devtools-log loads FIRST so its global capture hooks (console
+  // / window errors / PerformanceObserver) are installed before the others run.
+  const devPlugins: PluginManifest[] = [
+    devtoolsLogManifest,
+    fileNavManifest,
+    fileDetailsManifest,
+    fileHistoryManifest,
+    mockDataManifest,
+  ].map((m) => {
+    const manifest = m as unknown as PluginManifest;
+    return {
+      ...manifest,
       frontend: {
-        ...(fileHistoryManifest as unknown as PluginManifest).frontend,
-        entry: "/dev-plugins/plugin-file-history/index.js",
+        ...manifest.frontend!,
+        entry: `/dev-plugins/${manifest.name}/index.js`,
       },
-    },
-  ];
+    };
+  });
   registerMock("plugins_list_frontend", () => devPlugins);
 }

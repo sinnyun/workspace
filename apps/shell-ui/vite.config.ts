@@ -159,6 +159,7 @@ function devPluginServer(): Plugin {
             file.endsWith(".js") ? "text/javascript" : "application/octet-stream",
           );
           res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Cache-Control", "no-store");
           res.end(data);
         } catch {
           next();

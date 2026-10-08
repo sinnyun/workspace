@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-devtools-log",
+  "version": "0.1.0",
+  "displayName": "调试台（性能/错误日志捕获）",
+  "description": "开发期捕获运行时的错误、日志与性能数据，整理成可筛选/导出的面板",
+  "author": "you",
+  "minHostVersion": "0.1.0",
+
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "bottom-drawer", "export": "LogPanel" }
+    ]
+  },
+
+  "permissions": {
+    "capabilities": [],
+    "events": {
+      "subscribe": ["selection:changed", "file:changed", "history:updated"],
+      "emit": []
+    }
+  }
+}

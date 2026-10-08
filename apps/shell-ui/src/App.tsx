@@ -24,6 +24,7 @@ export function App() {
   const [cwd, setCwd] = useState<string>("");
   const [entries, setEntries] = useState<ListEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(true);
   const currentFileId = useMeta((s) => s.currentFileId);
   const setCurrentFile = useMeta((s) => s.setCurrentFile);
   const [, force] = useState(0);
@@ -155,6 +156,9 @@ export function App() {
           <PluginSlot slotId="file-sidebar-zone" slotProps={{ host: baseHost }} />
         </aside>
       </div>
+
+      <BottomDrawer open={drawerOpen} onToggle={() => setDrawerOpen((o) => !o)} />
+
       <StatusBar currentFileId={currentFileId} count={entries.length} />
     </div>
   );
@@ -174,6 +178,43 @@ function TopBar() {
       <strong>My File Manager</strong>
       <PluginSlot slotId="topbar-zone" slotProps={{ host: baseHost }} />
     </header>
+  );
+}
+
+function BottomDrawer({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <section
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: open ? 260 : 28,
+        minHeight: 28,
+        borderTop: "1px solid var(--mantine-color-default-border)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          height: 28,
+          padding: "0 12px",
+          fontSize: 12,
+          color: "var(--mantine-color-dimmed)",
+          cursor: "pointer",
+          flexShrink: 0,
+        }}
+        onClick={onToggle}
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        <span>调试抽屉</span>
+      </div>
+      {open && (
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "0 8px 8px" }}>
+          <PluginSlot slotId="bottom-drawer" slotProps={{ host: baseHost }} />
+        </div>
+      )}
+    </section>
   );
 }
 
