@@ -29,11 +29,11 @@
 | `fm-kernel` | `core-shared/kernel` | **无 Tauri 依赖**的后端内核:能力实现(fs/hash/thumb/db + `watch::WatchHub`)、`Kernel` 引导、后端插件 `registry`、cordis `Logger`→`tracing` 桥(`logger.rs`)。可无头测试 |
 | `fm-host` | `apps/host` | 薄 Tauri 壳:`#[command] invoke_capability`、`plugin://` 协议、`EventBridge`(cordis→Tauri emit)、`PluginServer`(前端插件发现/下发) |
 | `plugin-file-history-backend` | `plugins/plugin-file-history/backend` | 首个后端插件:订阅 `file:changed`→`hash.compute`→写 `db.history`→`emit history:updated`(幂等) |
-| `@my-file-manager/plugin-sdk` | `core-shared/plugin-sdk` | 前端插件**唯一**可依赖包:类型 + `Events`/`Capabilities` + `validateManifest`/`matchesPermission`/`disposer`/`errorMessage` |
-| `shell-ui` | `apps/shell-ui` | React 基座:布局、`PluginSlot`+错误边界、`eventbus`、`slots` 注册表、`loader`、`host`(权限 gating)、`invoke`、共享单例构建 |
+| `@my-file-manager/plugin-sdk` | `core-shared/plugin-sdk` | 前端插件**唯一**可依赖包:类型 + `Events`/`Capabilities`/**`FrontendCapabilities`** + `PluginInfo` + `validateManifest`/`matchesPermission`/`disposer`/`errorMessage` |
+| `shell-ui` | `apps/shell-ui` | React 基座:布局、`PluginSlot`+错误边界、`eventbus`、`slots` 注册表、`loader`(**插件启停的唯一 owner**)、`host`(权限 gating)、`invoke`(基座能力→Tauri→mock 三级分流)、共享单例构建 |
 | `plugin-file-history/frontend` | 同名 | 首个前端插件:导出 `HistoryPanel`(Mantine Timeline),注入 `plugin-inspector` 的 `detail-tab:history`(`label:"历史"`) |
 
-**前端插件共 14 个**(`plugins/*/frontend`,全部 `@mantine/* ^7.17.8` 走 import map 单例):三个框架容器(`layout-panes`/`layout-views`/`inspector`)、内容插件(`file-browser`/`file-details`/`file-history`/`settings`/`preview-text`)、三个侧栏视图(`view-file-tree`/`view-favorites`/`view-tags`)、三个仅 dev 装载的开发期插件(`mock-data`/`devtools-log`/`dev-slot-harness`)。清单与槽位见 08 §2/§5。
+**前端插件共 14 个**(`plugins/*/frontend`,全部 `@mantine/* ^7.17.8` 走 import map 单例):四个**提供嵌套槽**的容器——三个界面框架容器(`layout-panes`/`layout-views`/`inspector`)加设置悬浮面板容器(`settings`,提供 `settings-page:<name>`)、内容插件(`file-browser`/`file-details`/`file-history`/`preview-text`)、三个侧栏视图(`view-file-tree`/`view-favorites`/`view-tags`)、三个仅 dev 装载的开发期插件(`mock-data`/`devtools-log`/`dev-slot-harness`)。清单与槽位见 08 §2/§5。
 
 **共享单例机制**(前端头号风险点):`scripts/build-shared.mjs` 把 React/Mantine/SDK 预构建成固定名 ESM,`index.html` 的 import map 是**唯一解析点**;宿主与插件都把裸 import 外部化到这些 URL → 全局**一个** React、一个 Mantine。产物分**两套模式一致的变体**:`shared-dist/`(production)与 `shared-dist-dev/`(development)。`vite dev` 经 `devImportMap()` 改写指向 dev 变体;`vite build` 只把 prod 变体 emit 进 `dist/shared/`。
 
@@ -53,8 +53,9 @@ Phase 0–4 主线打通且有证据;Phase 5 基本完成(仅余需显示环境�
 | Phase 5 加固+打包 | 基本 ✅(打包/可观测/契约冻结/权限拒绝/后端错误隔离 均有证据;前端边界待窗口) | `tauri build` 出 NSIS 包;`cargo test -p fm-kernel`(panic_isolation + logger_bridge);`contract:check` |
 | Phase 6 · 6E 界面框架与布局 | ✅(P6-43~48/54/55) | `vite dev` 浏览器实测六区 + 三分栏容器 + B 互斥 + D tab 容器 + 懒加载目录树 + 每栏独立实例(证据见 04 6E 表) |
 | Phase 6 · 6E 第二轮(界面收口) | ✅(P6-56~60) | 基座外壳全 Mantine + 亮色默认与三态主题切换(基座顶栏与 `plugin-settings` 共用同一 Mantine 配色值)、槽标签发现面 `slots[].label`→`host.slotLabel`、每栏独立地址栏+历史导航与列表/网格虚拟滚动、D 焦点标题条与全中文文案;`cargo test -p fm-contracts` + SDK 10 项 + `contract:check` + `-r typecheck` 全绿,14 插件 0 控制台错误 |
+| Phase 6 · 6E 第三轮(设置插件与启停) | ✅(P6-64/65) | `plugin-settings` 改为**独立插件的悬浮面板**(`Popover`,不再占 B 视图):分页 软件设置(主题 + 插件启停)/插件设置(各插件经 `settings-page:<name>` 自有一页);启停 owner = 基座 `loader`,核心插件不可关由基座判定,经两个**基座前端能力** `plugins.list`/`plugins.setEnabled`(不跨 IPC、不进 `contract:check`)。实测见 §3"已验证" |
 | Phase 6 · 6F 开发期插件 | ✅(P6-49~53) | dev 索引 14 插件 0 控制台错误;调试台捕获级联/槽事件与两条越权拒绝 |
-| Phase 6 · 6B 已起步 | 🟡 | 已落:`plugin-settings`(主题)、`plugin-preview-text`(纯文本预览)、file-browser 列表/网格虚拟滚动与每栏历史导航、**网格卡片缩略图(`thumb.image` 内核实现 + 可见性懒取 + 负缓存)**、**`/stress` 真实感压力数据集(1千~50万,经真实插件路径消费)**;未落:CodeMirror/Shiki 高亮、表格视图、file-ops/search/preview 其余成员 |
+| Phase 6 · 6B 已起步 | 🟡 | 已落:`plugin-settings`(悬浮面板:主题 + 插件启停 + `settings-page` 容器)、`plugin-preview-text`(纯文本预览)、file-browser 列表/网格虚拟滚动与每栏历史导航、**网格卡片缩略图(`thumb.image` 内核实现 + 可见性懒取 + 负缓存)**、**`/stress` 真实感压力数据集(1千~50万,经真实插件路径消费)**;未落:CodeMirror/Shiki 高亮、表格视图、file-ops/search/preview 其余成员 |
 | Phase 6 · 6A 已起步 | 🟡 | 已落:`thumb.image`(`image`+`base64`,P6-7)、`fs.list` 自然序与 mtime(`natord`,P6-4/P6-11);未落:`fs.copy/move/trash/mkdir/rename`、`file.kind`、`sys.disk`、搜索索引 |
 | Phase 6 · 6A/6C/6D | 🟡 6A 起步(见上一行)/ 6C·6D 🔵 未开始 | 工具链(6C)、cordis 转正(6D) |
 
@@ -68,6 +69,8 @@ Phase 0–4 主线打通且有证据;Phase 5 基本完成(仅余需显示环境�
 - **前端基座浏览器实测**(`vite dev` @1420):六区渲染(A/B/C/D + 顶部会话条 + 状态栏 + dev 抽屉);运行时 `import()` 加载 14 个 dev 插件 0 错误;级联链路 `sidebar:view:changed → nav-panel 互斥可见 → sidebar:selection:changed → 每栏 focus:changed → detail:tab:changed`;`plugin-file-details` 经 gated 能力显示属性 + BLAKE3;单 React/Mantine 实例(hooks 跨 host/插件不报错)。
 - **主题与中文文案实测**:默认亮色(`defaultColorScheme="light"`),顶栏 `SegmentedControl` 切「暗色」→ `data-mantine-color-scheme=dark`、body 底色 `rgb(36,36,36)`,**`plugin-settings` 面板内同一项自动 `checked`**(共用 Mantine 单例的配色值,无自定义事件);D 的 tab 显示 `信息`/`历史`(标题来自 `host.slotLabel`),分栏头显示 `栏 N` 而槽 id 只作悬停提示。
 - **每栏导航实测**:地址栏 后退/前进/上级目录/刷新 独立生效(`/demo/src →上级→ /demo →后退→ /demo/src`,前进由 disabled 转可用);列表/网格切换与路径按 `会话|槽id` 存进 `fm.file-browser.v1`,网格卡片显示 扩展名徽标 + 大小。
+- **设置悬浮面板与插件启停实测**(`vite dev` @1420):点 A 栏齿轮 → `aria-expanded=true` + `.mantine-Popover-dropdown` **固定矩形 `620×560`**(实测 x=55, y=577)完全在视口内;外层分页 `[role=tab]` = `软件设置`/`插件设置`(子页 `文件浏览`/`文本预览`,标题来自贡献者 manifest `label`);**插件列表 14 行**,其中 4 行 `disabled` 并带 `基础插件` 徽标(三容器 + 设置自己);关「文件浏览」→ C 四栏立即只剩栏头(无地址栏/条目),开回 → 4 个地址栏恢复;关「标签视图」→ A 栏 `标签` 图标消失且 `fm.plugins.disabled.v1=["plugin-view-tags"]`,**重载后仍是关闭态**,开回后图标与存储都复原;ESC 能关(受控 `opened` 下由 `onChange` 回送);**正文各自滚动、面板不变形不挪位**:软件设置滚动容器 `clientHeight 477 / scrollHeight 842`,滚到 `scrollTop 300` 后依次切「插件设置」→ 子页「文本预览」→ 切回「软件设置」,四次测量 dropdown 恒为 `620×560 @55,577`,`scrollTop` 300 保留(全挂载 + `display` 显隐,见 §4.26);全程 14 插件加载日志齐、控制台 0 错误。
+- **插件自有设置页即时生效实测**:`fm.file-browser.prefs.v1={"defaultMode":"grid","thumbnails":true}` — 改默认显示方式 → **四栏同时转网格**(自己选过模式的栏保留自选);在 `/stress/数据集-1千` 已滚到图片区时关缩略图 → `<img>` 7 → **0**,再开 → 7(**不重载、不重挂栏**)。`fm.preview-text.prefs.v1` — 关「自动读取」→ D 预览区换成中文按钮 `读取内容` + `尚未读取`,开回即显示;字符上限输入 `50` 回车 → 回落成 `1000`(下限 1000 / 上限 2,000,000)并写进存储。**未取证**:截断本身不可观察——dev mock 的文本恒为 ~50 字符,小于任何合法上限。
 - **大数据压力实测(`vite dev` @1420,双栏)**:B「模拟数据」点 `数据集-10万` → C 头部 `9566 目录 · 90434 文件 · 295ms`;`数据集-50万` → `47769 目录 · 452231 文件 · 472ms`,内容高 13,000,048px(列表)/22,369,618px(网格)而**常驻 DOM 只有 ~214(列表)/~514(网格)节点**;滚动 1400px/帧时 p50 ≈ 26ms(调试抽屉打开时 ≈ 90ms,是 dev 面板自身的成本);图片卡片显示 `data:image/png` 真缩略图,二进制文件在 D 显示中文 `无法以文本读取 .m4a(二进制格式)`,`空目录`/`读取失败` 各显示中文 `空目录`/`—模拟读取失败`。
 - **容器/嵌套槽实测**:`plugin-layout-panes` 1/2/2×2 切换保持每栏路径(4→1→4 后 p1 仍 `/demo/src`)、拖拽改 `colPct`、`closePane` 只退该栏;`plugin-file-browser` 靠 `providedSlots("pane-slot")` + `slot:registered/disposed` 自动为后建栏注入实例;`plugin-inspector` 的 tab 条来自 `contributedSlots("detail-tab")`,空槽显示占位;越权路径仍在调试台留两条 `denied (not in manifest permissions)`。
 - **生产构建**:`vite build` 宿主 bundle 仅 ~16KB(库全外部化),`dist/shared/*` 随包产出;`vite preview` 用 prod 单例正常渲染;插件源缺失时按插件**隔离降级**并 `console.error`,基座继续运行。
@@ -102,6 +105,10 @@ Tauri 窗口内的可视化与跨进程段尚未跑通验证,相关项在 04 里
 20. **"栏高有界"是容器 owner 的不变量**:栅格行轨写 `minmax(0,1fr)`(auto 行轨会被内容撑到无限高)、栏本身 `display:flex`+`min-height:0`、outlet `flex:1`+`overflow:hidden`(滚动权归内容插件)。内容插件只写 `height:100%` 就能拿到确定视口,不需要各自探测父高。
 21. **改 `plugin-sdk` 源码也要 `pnpm build:shared`**:`build:plugins` 只重建插件 dist,而插件运行时 import 的是 `shared-dist(-dev)/plugin-sdk.js` 预打包件 → 新增导出后插件加载期报 `does not provide an export named 'errorMessage'`(基座 loader 会隔离该插件并记 error,其余插件继续跑)。类型检查与测试都读源码,不会暴露这个漂移。
 22. **`String(err)` 会把 `Error:` 前缀带进中文界面**:provider 的中文消息经 `String(new Error("模拟读取失败"))` 变成 `"Error: 模拟读取失败"`。UI 显示错误统一走 SDK 的 `errorMessage(err)`(取 `err.message` 并去掉类名前缀)。
+23. **受控 `Popover` 的 `Target` 不挂 `onClick`**:Mantine 源码是 `...!ctx.controlled ? { onClick: ctx.onToggle } : null` —— 一旦传了 `opened`,`Popover.Target` 里的触发元素**不会再拿到点击处理器**,`onChange` 只负责 ESC/外点把状态送回来。所以设置齿轮必须自己写 `onClick={() => setOpen(o => !o)}`;否则点了毫无反应(实测:trusted click 后 `aria-expanded` 仍 `false`、`document` 里根本没有 `.mantine-Popover-dropdown` 节点)。
+24. **"设置即时生效"必须同时覆盖取数与渲染两条路径**:`Thumb` 里只让取图 `useEffect` 在开关关闭时早退是不够的——缓存的 data URL 还在 `useState` 里,`<img>` 照样渲染(实测关缩略图后 `<img>` 恒为 7)。渲染分支也要读开关(`candidate && dataUrl`)。反过来开回来时 effect 依赖 `candidate`,会命中缓存立即恢复。
+25. **基座前端能力不能塞进 `Capabilities`**:`contract:check` 把 Rust `capability::names` 与 SDK `Capabilities` 做**全等**比对(没有豁免表),而 `plugins.list`/`plugins.setEnabled` 的提供方是前端 `loader`,Rust 侧没有对应物 → 必须用独立常量 `FrontendCapabilities`,并由 SDK 单测断言这两个名字**不在** `Capabilities` 里。
+26. **自适应高度的浮层会"变形 + 挪位"**:Mantine `Popover` 默认让 dropdown 高度跟内容走,一换分页(软件设置 ↔ 插件设置的子页)内容高度就变 → floating-ui 在 `placement:right-start` 下随尺寸重算定位,面板既改形又位移。解法是把它变成**确定尺寸的容器**:`width`/`height` 写死在 `styles.dropdown`,dropdown 自己是 `display:flex; flex-direction:column`,header 与外层 tab 条 `flex-shrink:0`,正文包一层 `flex:1; min-height:0; overflow:hidden`,真正的滚动权交给每个分页体(`height:100%; overflow-y:auto`),插件子页的 tab 条再加 `position:sticky; top:0` 免得滚上去找不到。**和 §4.20 是同一条不变量的两种落位**:浮层也要"尺寸有界、滚动内聚",不要拿内容高度反推视口。
 
 
 ---
@@ -119,7 +126,7 @@ Tauri 窗口内的可视化与跨进程段尚未跑通验证,相关项在 04 里
 1. **窗口内端到端(P0-2/P0-6/P1-1/P1-3/P1-4/P4-3/P5-1 前端边界)**:这是**本环境(无显示器)唯一无法验证的一类**。有显示环境时 `cd apps/host && npx tauri dev`,验证 `plugin://` 下发、真 invoke 往返、真实文件改动→watcher→`file:changed`→后端写历史→`history:updated`→Tauri emit→前端总线→Timeline 自动刷新,并加载一个故意抛错的示例插件确认 `PluginErrorBoundary` 只降级该插槽。这是把 §3 里 🟡 项转 ✅ 的唯一途径。
 2. **工程化补票(P6-41 / P3-5 / P3-6)**:用 `cordis-loader` 生成声明式加载计划 + `build.rs` 扫描 manifest 自动生成后端注册表(去掉手写 `registry` 漂移;当前仅 1 个后端插件收益有限故暂缓),插件脚手架模板。注:`cordis-loader`/`cordis-timer` 现已在 workspace 声明但**零引用**,这两项转正后消除死声明。
 3. **质量工具链(P6-31…40)**:目前**无任何 CI / 提交钩子 / 前端 lint / 依赖审计**。优先补两项——前端 `Biome`(lint+format)与 GitHub Actions(clippy/fmt/`cargo test`/`contract:check`/`typecheck`,发布用 `tauri-action`);再补 `Vitest` 测 `PluginSlot` 错误边界、`cargo-deny` 审计、`lefthook` 钩子。
-4. **产品功能扩展(6A + 6B)**:基座**不含任何浏览逻辑**——六区外壳 + 三个框架容器(分栏/视图互斥/详情)+ 每栏 `plugin-file-browser` 实例(独立地址栏与历史导航、列表/网格虚拟滚动、缩略图卡片)已插件化交付,首个全栈插件是 file-history,另有 `plugin-settings`(主题)与 `plugin-preview-text`(纯文本预览)。下一步按 08 §5.2 落业务:复制/移动/删除(`trash`/`fs_extra`,**同时补 `fs.copy/move/trash/mkdir/rename` 能力与进度事件**)、并行遍历(`ignore`+`rayon`)、视频缩略图(`ffmpeg-next`,独立媒体插件)、搜索(`tantivy` 或 SQLite FTS5)、预览高亮(`codemirror`/`shiki`)、表格视图(`@tanstack/react-table`)、命令面板(`@mantine/spotlight`)——挂载点已稳定,新内容插件只需在 `permissions.slots.contribute` 授权目标嵌套槽(标题写自己的 `slots[].label`)。
+4. **产品功能扩展(6A + 6B)**:基座**不含任何浏览逻辑**——六区外壳 + 三个框架容器(分栏/视图互斥/详情)+ 每栏 `plugin-file-browser` 实例(独立地址栏与历史导航、列表/网格虚拟滚动、缩略图卡片)已插件化交付,首个全栈插件是 file-history,另有 `plugin-settings`(设置悬浮面板:主题 + 插件启停 + 各插件自有设置页的容器)与 `plugin-preview-text`(纯文本预览)。下一步按 08 §5.2 落业务:复制/移动/删除(`trash`/`fs_extra`,**同时补 `fs.copy/move/trash/mkdir/rename` 能力与进度事件**)、并行遍历(`ignore`+`rayon`)、视频缩略图(`ffmpeg-next`,独立媒体插件)、搜索(`tantivy` 或 SQLite FTS5)、预览高亮(`codemirror`/`shiki`)、表格视图(`@tanstack/react-table`)、命令面板(`@mantine/spotlight`)——挂载点已稳定,新内容插件只需在 `permissions.slots.contribute` 授权目标嵌套槽(标题写自己的 `slots[].label`)。
 5. **卡片上的标签 chip(仍待做)**:标签数据住在 `plugin-view-favorites`/`plugin-view-tags` 自己的 localStorage 里,浏览器插件跨插件读它会破插件隔离——要做就走 `db.<store>.*` 能力,不自建共享状态。(修改时间已解决:`ListEntry.modifiedMs` 随 `fs.list` 返回,列表日期列零额外往返。)
 
 > 注:`tauri.conf.json` 里**没有** `build.windows.staticVCRuntime` 键(该 CLI 版本不接受;`STATIC_VCRUNTIME` 警告是 tauri-build 自身默认,无害)。
@@ -160,7 +167,7 @@ cargo test -p fm-contracts                                   # Rust manifest 校
 - 契约(改事件/能力/DTO 必**两侧同步** + 跑 `contract:check`):
   `core-shared/contracts/src/{events,capability,manifest}.rs` ↔ `core-shared/plugin-sdk/src/index.ts`
 - 共享单例构建:`apps/shell-ui/scripts/build-shared.mjs`、`apps/shell-ui/vite.config.ts`、`apps/shell-ui/index.html`
-- 前端加载/权限/插槽:`apps/shell-ui/src/{loader,host,slots,PluginSlot,eventbus,invoke,state}.ts(x)`
+- 前端加载/权限/插槽/启停:`apps/shell-ui/src/{loader,host,slots,PluginSlot,eventbus,invoke,state}.ts(x)`(`loader` 是插件启停的唯一 owner,并注册 `plugins.*` 两个基座前端能力)
 - 后端命令/协议/桥:`apps/host/src/{commands,pluginsrv,bridge,lib}.rs`
 - 内核/能力/监听:`core-shared/kernel/src/{kernel,registry,logger,capabilities/*}.rs`
 - 首个全栈插件:`plugins/plugin-file-history/{manifest.json,backend/src/*,frontend/src/*}`

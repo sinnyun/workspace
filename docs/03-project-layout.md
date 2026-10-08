@@ -47,12 +47,12 @@ my-file-manager/
 │           ├── main.tsx
 │           ├── App.tsx            # 外层区域网格(A/B/C/D+工具栏+状态栏)+顶部会话容器+外层槽挂载
 │           ├── PluginSlot.tsx     # 插槽组件:每个注册项用自带的 gated host 渲染(含错误边界)+ SlotOutlet
-│           ├── loader.ts          # 读 manifest → import() 前端插件 → 挂载
+│           ├── loader.ts          # 读 manifest → import() 前端插件 → 挂载;**插件启停的唯一 owner**(核心保护判定 + `plugins.list`/`plugins.setEnabled` 注册 + 装载/卸载与槽回收 + `fm.plugins.disabled.v1` 持久化)
 │           ├── eventbus.ts        # 前端事件总线(含 Tauri 事件订阅 + 级联协调事件)
 │           ├── host.ts            # 构造注入给插件的 PluginHost(权限 gating + provide/contributeSlot)
-│           ├── slots.ts           # 动态 slot registry:外层槽 + 容器插件提供的嵌套槽(pane-slot:<paneId>/nav-panel:<viewId>/detail-tab:*)+ 出口挂载即 registered/disposed + 记录贡献者的槽标签
+│           ├── slots.ts           # 动态 slot registry:外层槽 + 容器插件提供的嵌套槽(pane-slot:<paneId>/nav-panel:<viewId>/detail-tab:*/settings-page:<name>)+ 出口挂载即 registered/disposed + 记录贡献者的槽标签
 │           ├── state.ts           # 级联元状态:每会话一份快照(activeTabId/activeSidebarView/sidebarSelection/focusRef/activeDetailTab,zustand)+ 总线单写路径
-│           ├── invoke.ts          # Tauri `invoke` / 浏览器 mock 分流
+│           ├── invoke.ts          # 能力分流:**基座前端能力表 → Tauri `invoke` → 浏览器 mock**
 │           ├── dev-mocks.ts       # 浏览器 dev 的能力 mock(含 `/stress` 真实感压力数据集与 `thumb.image` 的 canvas 实现)+ dev 插件索引(仅 dev)
 │
 ├── core-shared/
@@ -63,7 +63,7 @@ my-file-manager/
 │   │       ├── kernel.rs          # cordis Context 引导、provider fiber、boot/teardown
 │   │       ├── registry.rs        # 静态后端插件注册表(待 P6-41 由 loader/build.rs 生成)
 │   │       └── logger.rs          # cordis Logger → tracing 桥
-│   └── plugin-sdk/                # TS 契约包:PluginHost / SlotProps / 事件负载 / validate/permission
+│   └── plugin-sdk/                # TS 契约包:PluginHost / SlotProps / 事件负载 / `Capabilities`+`FrontendCapabilities` / `PluginInfo` / validate/permission
 │
 ├── plugins/
 │   ├── plugin-file-history/       # ✅ 首个全栈插件(后端 fiber + 前端 ESM);前端注入 detail-tab:history
@@ -73,13 +73,13 @@ my-file-manager/
 │   ├── plugin-layout-panes/       # ✅ 框架容器:C 分栏,占 main-view-zone,提供 pane-slot:<paneId>
 │   ├── plugin-layout-views/       # ✅ 框架容器:B 视图互斥,占 nav-zone,提供 nav-panel:<viewId>
 │   ├── plugin-inspector/          # ✅ 框架容器:D 详情,占 file-sidebar-zone,提供 detail-tab/preview-zone/detail-info-zone/file-extension-zone
-│   ├── plugin-file-browser/       # ✅ 内容插件:每栏一个独立实例(独立地址栏+历史前进后退/列表或网格/虚拟滚动),运行时注入 pane-slot:*
+│   ├── plugin-file-browser/       # ✅ 内容插件:每栏一个独立实例(独立地址栏+历史前进后退/列表或网格/虚拟滚动),运行时注入 pane-slot:*;自带偏好 `fm.file-browser.prefs.v1` + 设置页 settings-page:file-browser
 │   ├── plugin-view-file-tree/     # ✅ A+B 侧栏视图:目录树(react-arborist,自写懒加载)
 │   ├── plugin-view-favorites/     # ✅ A+B 侧栏视图:主页 + 收藏
 │   ├── plugin-view-tags/          # ✅ A+B 侧栏视图:标签与成员
 │   ├── plugin-file-details/       # ✅ 基础信息:属性 + BLAKE3,注入 detail-info-zone
-│   ├── plugin-settings/           # ✅ A 栏底部齿轮 + B 设置面板(主题 跟随系统/亮色/暗色,走 Mantine 单例)
-│   ├── plugin-preview-text/       # ✅ 文本预览:随 focusRef 读 fs.readText 填 preview-zone(纯文本,高亮见 P6-22)
+│   ├── plugin-settings/           # ✅ 设置插件:A 栏齿轮 → **悬浮面板**(软件设置/插件设置分页)。软件设置含主题三态 + 插件启停列表;提供嵌套槽 settings-page:<name> 给各插件放自己的设置页
+│   ├── plugin-preview-text/       # ✅ 文本预览:随 focusRef 读 fs.readText 填 preview-zone(纯文本,高亮见 P6-22);自带偏好 `fm.preview-text.prefs.v1`(自动读取/字符上限)+ 设置页 settings-page:preview-text
 │   ├── plugin-mock-data/          # ✅ 开发期:`/stress` 压力数据集的 B 区入口(activity-rail + nav-panel:stress)
 │   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/级联与槽事件捕获面板(bottom-drawer)
 │   ├── plugin-dev-slot-harness/   # ✅ 开发期:嵌套槽运行时验证夹具(bottom-drawer + 提供 dev-pane:<n>,含越权拒绝取证)
@@ -125,6 +125,7 @@ my-file-manager/
 - **Vite**(library 模式)构建:输出单个 `dist/index.js`(ESM 格式),`react`/`react-dom`/`@mantine/*`/`@my-file-manager/plugin-sdk` 全部 **external**(不打进产物)。
 - **无 Module Federation**:插件就是普通 ESM,由基座 `import()` 运行时加载。
 - 构建产物随插件目录分发;运行时 host 扫描插件目录,经 `plugin://` 自定义协议把 `dist/index.js` 交给 WebView。
+- **运行期启用/禁用**:前端插件的启停由 `loader` 持有(状态在 `fm.plugins.disabled.v1`),关闭 = 执行该插件的卸载钩子并回收其注册的全部槽,开启 = 立即 `import()` 装载;三个界面框架容器与设置面板本身是核心插件,不可关闭。后端插件的运行期启停另走 cordis-loader 加载计划(§4.1)。
 
 ### 4.4 一键脚本(pnpm 根 `package.json`)
 - `dev`:并发起 Vite(shell-ui)+ `tauri dev`。

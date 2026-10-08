@@ -319,6 +319,35 @@ export const Capabilities = {
   watchSubscribe: "watch.subscribe",
 } as const;
 
+/** Capabilities the **frontend base itself** serves — no Rust counterpart, so
+ *  (like the frontend-only events above) they stay out of `contract:check`.
+ *  Plugin enable/disable is base loader state, not a kernel concern: the base
+ *  answers these names in-process, still gated by `permissions.capabilities`. */
+export const FrontendCapabilities = {
+  pluginsList: "plugins.list",
+  pluginsSetEnabled: "plugins.setEnabled",
+} as const;
+
+/** One row of `plugins.list` — what the settings panel renders as a switch. */
+export interface PluginInfo {
+  name: string;
+  displayName?: string;
+  version: string;
+  description?: string;
+  enabled: boolean;
+  /** Base-core plugin (region containers, the settings panel itself): switching
+   *  it off would remove the shell's own geometry, so the base refuses and the
+   *  UI shows it locked. The base decides — a manifest cannot grant itself
+   *  immunity. */
+  protected: boolean;
+}
+
+/** `plugins.setEnabled` arguments. */
+export interface PluginSetEnabledArgs {
+  name: string;
+  enabled: boolean;
+}
+
 // ─────────────────────────── stateless helpers ───────────────────────────
 
 /** Manifest schema version the host accepts. Mirrors

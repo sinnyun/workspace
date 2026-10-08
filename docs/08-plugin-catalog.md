@@ -31,7 +31,7 @@
 
 | slotId | 区域 | 现状 | 谁在用/规划用 |
 |---|---|---|---|
-| `activity-rail-zone` | A 活动栏(侧栏视图切换器) | ✅ 存在 | `view-file-tree`/`view-favorites`/`view-tags`/`mock-data` 各贡献一个图标 tab,`settings` 贡献底部齿轮入口(均已交付,P6-48/51/57) |
+| `activity-rail-zone` | A 活动栏(侧栏视图切换器) | ✅ 存在 | `view-file-tree`/`view-favorites`/`view-tags`/`mock-data` 各贡献一个图标 tab,`settings` 贡献底部齿轮入口——齿轮打开**悬浮面板**,不是侧栏视图(均已交付,P6-48/51/57/64) |
 | `topbar-zone` | 工具栏扩展位 | ✅ 存在 | file-ops(新建/上传按钮)、视图工具按钮 |
 | `nav-zone` | B 侧栏面板 | ✅ 存在 | **由 `plugin-layout-views` 容器占用**(P6-54):容器向下提供 `nav-panel:<viewId>` 并负责视图互斥,视图插件不再 self-hide |
 | `main-view-zone` | C 主视图 | ✅ 存在 | **由 `plugin-layout-panes` 容器占用**(P6-46),容器再向下提供 `pane-slot:<paneId>`;基座不含任何浏览逻辑,浏览能力归 `plugin-file-browser`(P6-55) |
@@ -45,8 +45,9 @@
 | slotId 前缀 | 提供者(容器插件) | 谁注入 |
 |---|---|---|
 | `pane-slot:<paneId>`(paneId 为容器分配的稳定 id:`p0/p1/p2/p3`) | `plugin-layout-panes` | `plugin-file-browser`(每栏一个独立实例,已交付)、search 结果、archive、storage-analysis、preview-*(规划) |
-| `nav-panel:<viewId>`(`file-tree`/`favorites`/`tags`/`settings`/`stress`) | `plugin-layout-views` | 对应视图插件的 B 面板;图标由同一插件的 `activity-rail-zone` 贡献 |
+| `nav-panel:<viewId>`(`file-tree`/`favorites`/`tags`/`stress`) | `plugin-layout-views` | 对应视图插件的 B 面板;图标由同一插件的 `activity-rail-zone` 贡献 |
 | `detail-tab:<name>` | `plugin-inspector` | `file-history`(`detail-tab:history`,manifest `label:"历史"`)、未来详情类插件——tab 标题取自贡献者自己的 `label`(02 §4.5) |
+| `settings-page:<name>` | `plugin-settings`(在悬浮面板的"插件设置"页内) | 任何插件的一页自有设置(`file-browser`、`preview-text` 已交付);页标题取贡献者 `label`,内容只该插件认得,写自己的偏好键(05 D13) |
 | `preview-zone` | `plugin-inspector`(在"信息"tab 内) | `preview-text`(已交付,纯文本)、preview-code/markdown/image/pdf/media(规划) |
 | `detail-info-zone` | `plugin-inspector`(在"信息"tab 内) | `file-details`(属性/校验,已交付)、file-ops(操作按钮) |
 | `file-extension-zone` | `plugin-inspector`(在"信息"tab 内,占位文案 `插件预留`) | 任意针对焦点文件的扩展插件 |
@@ -81,7 +82,7 @@
 | `thumb.image` | `image` + `fast_image_resize` | file-browser 网格、preview-image | P6-7 |
 | `hash.compute` | `blake3`/`sha2` | file-history、去重(未来) | ✅ |
 | `text.diff` | `similar` | file-history(版本对比) | P6-11 |
-| `db.<store>.*` | `rusqlite`(+ `refinery` 迁移 / `r2d2_sqlite` 池) | file-history、search 索引、settings | P6-12 |
+| `db.<store>.*` | `rusqlite`(+ `refinery` 迁移 / `r2d2_sqlite` 池) | file-history、search 索引(规划) | P6-12 |
 | `search.query`(索引) | `tantivy` **或** SQLite FTS5 | search | P6-9(⚪ 先评估 FTS5) |
 | `archive.list`/`archive.extract` | `zip`/`tar`+`flate2`/`sevenz-rust` | archive | P6-10 |
 | `fs.chunks`(内容定义分块) | `fastcdc` | file-history 块级历史(可选) | P6-13(⚪) |
@@ -101,13 +102,14 @@
 | `plugin-layout-panes` | 前端 | C 主视图 | `main-view-zone` | `pane-slot:<paneId>` | `fm.layout-panes.v1`,按会话 `activeTabId` 存 `{mode,ids,seq,colPct,rowPct}` | 分栏容器:切单栏/左右双栏/2×2 四栏;稳定 paneId + 单一 keyed 数组迁移子树不丢状态;按模式**增量挂载** outlet;**每栏都是有界 flex 列**(栅格行轨 `minmax(0,1fr)`、栏 `display:flex`+`min-height:0`、outlet `overflow:hidden`),滚动权交给内容插件 | ✅ |
 | `plugin-inspector` | 前端 | D 详情 | `file-sidebar-zone` | `detail-tab:<name>`、`preview-zone`、`detail-info-zone`、`file-extension-zone` | 活动 tab 取 `meta.activeDetailTab` | 详情容器:焦点标题条(名称/路径/类型徽标)+ tab 条(信息 + `contributedSlots("detail-tab")` 扫到的,标题取 `host.slotLabel`)+ 焦点 kind 模板(文件/文件夹/其他);tab 全挂载、隐藏非活动;空槽显示中文占位 | ✅ |
 | `plugin-layout-views` | 前端 | B 侧栏 | `nav-zone` | `nav-panel:<viewId>` | 无(读 `meta.activeSidebarView`) | 视图互斥容器:只渲染活动视图对应出口可见,其余 `display:none`;**互斥是容器职责**,视图插件不写 self-hide | ✅ |
-| `plugin-file-browser` | 前端 | C 内容 | (运行时注入 `pane-slot:*`) | — | `fm.file-browser.v1`,按 `会话\|槽id` 记住每栏 `{cwd,mode}` | 每栏一个独立实例:**独立地址栏 + 后退/前进/上级/刷新历史栈**、列表或网格(统一虚拟滚动流,列表/卡片共用一条 row stream)、文件夹/文件分组、图标与大小、**日期列直接用 `fs.list` 带的 `modifiedMs`**、网格卡片按可见性懒取 `thumb.image`(共享 LRU + 负缓存:不支持的扩展名不再重复请求)、选择与 `focus:changed` 发布;头部显示 `N 目录 · M 文件 · 拉取毫秒` | ✅ |
+| `plugin-file-browser` | 前端 | C 内容 | (运行时注入 `pane-slot:*`);贡献 `settings-page:file-browser` | — | 每栏 `fm.file-browser.v1`(`会话\|槽id` → `{cwd,mode}`)+ 插件偏好 `fm.file-browser.prefs.v1`(`{defaultMode,thumbnails}`) | 每栏一个独立实例:**独立地址栏 + 后退/前进/上级/刷新历史栈**、列表或网格(统一虚拟滚动流,列表/卡片共用一条 row stream)、文件夹/文件分组、图标与大小、**日期列直接用 `fs.list` 带的 `modifiedMs`**、网格卡片按可见性懒取 `thumb.image`(共享 LRU + 负缓存:不支持的扩展名不再重复请求)、选择与 `focus:changed` 发布;头部显示 `N 目录 · M 文件 · 拉取毫秒`。设置页两项(新建栏位的默认显示方式 / 是否取缩略图)经模块级 store **即时影响所有已渲染栏**——没单独选过模式的栏跟随默认值,缩略图开关同时管取数与渲染 | ✅ |
+| `plugin-settings` | 前端 | 悬浮层(不占六区) | `activity-rail-zone`(底部齿轮) | `settings-page:<name>` | `fm.plugins.disabled.v1`(启停列表,由基座 loader 读写) | **设置面板容器**:齿轮点击开 Mantine `Popover`(受控 `opened`:开合由齿轮自己翻、`onChange` 收 ESC/外点)。外层分页 **软件设置**(主题三态 + 插件启停列表)与 **插件设置**(逐个 `settings-page:<name>` 出口,标题取贡献者 `label`,全挂载、隐藏非活动)。启停经基座前端能力 `plugins.list`/`plugins.setEnabled`,**核心插件(三容器 + 设置自己)显示 `基础插件` 且开关禁用**。**面板尺寸固定**(`620×560`,不随分页重算),正文各自 `overflow-y:auto`,子页 tab 条 `sticky`(00 §4.26) | ✅ |
 | `plugin-view-file-tree` | 前端 | A+B | `activity-rail-zone`(图标)、`nav-panel:file-tree` | — | 展开态与已加载目录在组件内(ref),不持久化 | 侧栏视图:目录树(react-arborist,自写懒加载) | ✅ |
 | `plugin-view-favorites` | 前端 | A+B | `activity-rail-zone`、`nav-panel:favorites` | — | `fm.view-favorites.v1` 收藏列表 | 侧栏视图:主页 + 收藏/书签;选中发 `sidebar:selection:changed` | ✅ |
 | `plugin-view-tags` | 前端 | A+B | `activity-rail-zone`、`nav-panel:tags` | — | `fm.view-tags.v1` 标签与成员 | 侧栏视图:标签/集合;点标签发 `{kind:"tag"}` 选择,点成员发 `focus:changed` | ✅ |
 
 要点:
-- 容器插件(`layout-panes`/`inspector`/`layout-views`)**只管几何与承载**,不碰内容业务;内容插件只认 `slotId`,不感知自己处在哪种分栏。
+- 容器插件(`layout-panes`/`inspector`/`layout-views`/`settings`)**只管几何与承载**,不碰内容业务;内容插件只认 `slotId`,不感知自己处在哪种分栏。设置面板同理:它只分页与承载各插件自己的设置页,**不解释任何页内内容的含义**,也不读写任何他插件的偏好键。
 - **稳定 `paneId` + 按 id 迁移子树**是"切换布局/切会话不混乱"的硬要求(02 §4.5):同一直子节点数组里渲染全部活跃面板,不可见者 `display:none` 而非卸载。
 - **"栏高有界"是容器的职责,不是每个内容插件的自检**:栅格行轨写 `minmax(0,1fr)`、栏写 `display:flex`+`min-height:0`、outlet 只 `overflow:hidden`。内容插件的虚拟滚动因此总能拿到确定视口;容器若退化成 `display:block`,`flex:1` 会被忽略、outlet 长到内容高度,虚拟列表会**静默挂载全部行**(10 万条时 DOM 直接爆)。
 - `slot:registered`/`slot:disposed` 由**基座槽运行时**随出口挂载/卸载发出;`slot:reconfigured{add|remove}` 由**容器**按意图发出。内容插件靠这两个面做**自动跟随注入**(`providedSlots(prefix)` 扫已有 + 订增删),不扒 React 内部。
@@ -123,7 +125,7 @@
 | `plugin-file-ops` | **全栈** | 复制/移动/删除/重命名/新建 | `@dnd-kit/core`、`@mantine/modals`、`@mantine/form`、`@mantine/notifications` | `fs.copy`、`fs.move`、`fs.trash`、`fs.mkdir/rename`、`sys.disk` | `topbar-zone`、`statusbar-zone`、`detail-info-zone`(操作按钮)、命令 | 发 `file:operation:progress/complete`;订 `file:changed` | 高 | P6-2/3/18/27/28 | 🔵 |
 | `plugin-file-history` | **全栈** | 内容版本历史 + 时间线 + diff(**已存在,增强**) | `react-diff-view`(+ 现有 Mantine `Timeline`) | `hash.compute`、`text.diff`、`db.history.*`、`fs.readText`(已有) | `detail-tab:history` | 订 `file:changed`;发/订 `history:updated` | — | P6-11/23 增强 | ✅ 基础 / 🔵 diff |
 | `plugin-search` | **全栈** | 文件名 + 内容检索 | 复用 `@mantine/spotlight`(D 共享)+ 结果列表 | `search.query`、`fs.list`(建索引) | `command-palette`、`pane-slot:*`(结果) | 发 `search:results`;订 `file:changed`(增量索引) | 中 | P6-9/14 | 🔵(引擎  待评估) |
-| `plugin-preview-text` | 前端 | 文本只读预览 | 现有:Mantine `ScrollArea`+`Code`(纯文本,截断 200k 字符);规划 `@uiw/react-codemirror`、`shiki`(P6-22 高亮) | `fs.readText`、`file.kind`(规划) | `preview-zone` | 随 `focusRef` 刷新(`onStateChange`) | 中 | P6-22 剩余(高亮) | ✅ 纯文本 / 🔵 语法高亮 |
+| `plugin-preview-text` | 前端 | 文本只读预览 | 现有:Mantine `ScrollArea`+`Code`(纯文本)+ `Switch`/`NumberInput` 设置页;规划 `@uiw/react-codemirror`、`shiki`(P6-22 高亮) | `fs.readText`、`file.kind`(规划) | `preview-zone`;贡献 `settings-page:preview-text` | 随 `focusRef` 刷新(`onStateChange`) | 中 | P6-22 剩余(高亮) | ✅ 纯文本 + 自有偏好(`fm.preview-text.prefs.v1`:`{autoLoad,maxChars}`,上限 1000~2,000,000 读写两侧 clamp;关闭自动读取时显示中文按钮 `读取内容`)/ 🔵 语法高亮 |
 | `plugin-preview-markdown` | 前端 | Markdown 渲染预览 | `react-markdown`、`remark-gfm`、`rehype-*` | `fs.readText` | `preview-zone` | 订 `selection:changed` | 中 | P6-24 | 🔵 |
 | `plugin-preview-image` | 前端 | 图片查看 / lightbox | `react-photo-view` | `fs.readChunk`、`thumb.image`、`file.kind` | `preview-zone`、`pane-slot:*`(大图查看) | 订 `selection:changed`;订 `thumb:ready` | 中 | P6-24 | 🔵 |
 | `plugin-preview-pdf` | 前端 / ⚪后端 | PDF 预览 | `react-pdf`(`pdfjs-dist`) **或** 后端 `doc.render`(pdfium) | `fs.readChunk` 或 `doc.render` | `preview-zone` | 订 `selection:changed` | 低 | P6-24 | ⚪ |
@@ -131,7 +133,6 @@
 | `plugin-archive` | **全栈** | zip/tar/7z 只读浏览 + 解压 | 复用 file-browser 视图 + `@tanstack/react-virtual` | `archive.list/extract`、`fs.*` | `pane-slot:*`(复用 file-browser 视图) | 订 `selection:changed` | 中 | P6-10 | 🔵 |
 | `plugin-storage-analysis` | 前端 | 磁盘占用 treemap / 空间分析 | `echarts`(`echarts-for-react`) | `sys.disk`、`fs.list`(聚合) | `pane-slot:*`(treemap 占一栏) | 订 `selection:changed` | 低 | P6-25 | 🔵 |
 | `plugin-details`(检查器)→ 现为 `plugin-file-details` | 前端 | 选中项属性/校验面板 | `pretty-bytes`/`dayjs` 规划;现为自写格式化 | `fs.stat`、`hash.compute`、`fs.home`、`fs.readText` | `detail-info-zone` | 订 `selection:changed`;随 `focusRef` 刷新 | 中 | P6-6/20/21 | ✅ 基础(属性+BLAKE3)/ 🔵 元数据扩展 |
-| `plugin-settings` | 前端 | 设置面板(主题已交付;语言/插件开关规划) | 现有:Mantine `SegmentedControl` + `useMantineColorScheme`(与基座共用单例,无需自造事件);规划 `@mantine/form`、`@mantine/modals` | `db.settings.*`(规划,现主题由 Mantine 自带持久化 `mantine-color-scheme-value`) | `activity-rail-zone`(底部齿轮)、`nav-panel:settings` | 发 `sidebar:view:changed`;随 `activeSidebarView` 高亮 | 中 | P6-27/29 剩余 | ✅ 主题(跟随系统/亮色/暗色)/ 🔵 语言、插件开关 |
 
 > **前端 drop-in 复用要点**:file-browser / archive / search 结果都消费"虚拟列表"能力,故 `@tanstack/react-virtual` 虽被多插件用,但它**无 React hooks 之外的单例约束**——可选方案:(a) 打进各插件 dist,(b) 若发现重复体积显著,再升入 D 共享集。默认 (a),保持共享集只含框架+Mantine。
 
@@ -174,6 +175,7 @@
 | **主题(亮/暗/跟随系统)** | `MantineProvider`(`defaultColorScheme="light"`)+ `useMantineColorScheme` | 基座顶栏 `SegmentedControl` 与 `plugin-settings` 面板操作**同一个** Mantine 配色值(共享单例)→ 天然同步,持久化 key `mantine-color-scheme-value` |
 | **顶部多标签会话容器** | React + Mantine `Tabs` | 每会话持一份 §3 级联引用快照;切会话整组还原 |
 | **嵌套槽运行时** | 自写 slot registry(动态) | `provideSlot`/`contributeToSlot` + `slot:*` 生命周期 + 稳定 paneId 子树迁移(02 §4.5);容器插件才能 provides |
+| **插件装载与启停** | 自写 `loader.ts` | 发现 manifest → `import()` → 挂载;**启停的唯一 owner**:核心保护名单由基座判定(三容器 + 设置面板不可关),关闭即执行卸载钩子并回收该插件全部槽,持久化 `fm.plugins.disabled.v1`;对外暴露 `plugins.list`/`plugins.setEnabled` 两个**基座前端能力**(02 §5.3、05 D12) |
 | 元状态(级联引用) | `zustand`(已在用) | `activeTabId`/`activeSidebarView`/`sidebarSelection`/`focusRef`/`activeDetailTab`(不透明 `Ref`,基座不解释) |
 | 事件总线 | 自写 + `@tauri-apps/api` | 后端事件→前端(已实现桥) |
 | `PluginHost` | plugin-sdk | invoke/on/emit/state + 命令注册(受权限约束) |
@@ -277,9 +279,9 @@
 
 **建议实现顺序**(每步都产出可 dogfood 的新插件并验证架构):
 0. **框架/布局先行(P6-43~48/54/55,已交付)**:基座补外层区域网格 + 顶部会话容器 + 嵌套槽运行时(provide/contribute + `slot:*` 生命周期 + 稳定 paneId 迁移),再落 `plugin-layout-panes`(C 分栏)、`plugin-inspector`(D tab 容器)、`plugin-layout-views`(B 视图互斥),并把最小浏览能力拆成 `plugin-file-browser`(每栏实例)与 `view-*` 侧栏视图。**先立外壳与级联状态,后续业务插件才有稳定的挂载点**——现在挂载点已稳定,基座内零业务状态。
-1. **file-browser 增强**(✅ 每栏独立地址栏+历史前进后退、列表/网格统一虚拟滚动已交付,见 P6-59;剩余:缩略图 `thumb.image`、标签 chips(需跨插件读标签数据→须先定数据归属,不破插件隔离)、表格视图 `@tanstack/react-table`、网格修改时间需 `ListEntry` 加 mtime)。
+1. **file-browser 增强**(✅ 每栏独立地址栏+历史前进后退、列表/网格统一虚拟滚动、缩略图 `thumb.image`、mtime 日期列、**插件自有设置页**均已交付,见 P6-59/62/65;剩余:标签 chips(需跨插件读标签数据→须先定数据归属,不破插件隔离)、表格视图 `@tanstack/react-table`)。
 2. **file-ops**(首个新增后端能力 + 进度事件 → 验证能力层扩展 + 契约两侧同步 + 错误隔离在写操作上的表现)。
 3. **search**(验证重能力/索引 + spotlight 命令注册)。
 4. **preview 家族**(✅ text 已交付纯文本路线,高亮待 P6-22;下一步 markdown→image,验证单消费者库打进插件 dist + preview-zone)。
 5. **file-history 增强(diff)**:复用 preview 的 diff-view 与 `text.diff` 能力。
-6. 视需要:archive / storage-analysis / details / settings / media。
+6. 视需要:archive / storage-analysis / media。

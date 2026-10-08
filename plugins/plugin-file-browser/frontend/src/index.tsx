@@ -18,14 +18,20 @@
  * sorted with sizes and mtimes, so a 500k directory costs one pass here instead of
  * a UI-thread sort. Grid thumbnails are pulled per visible card through the gated
  * `thumb.image` capability — never as raw file URLs — and cached plugin-side.
+ *
+ * It also owns its own preferences (default view mode, thumbnail switch) under
+ * `fm.file-browser.prefs.v1` and contributes the matching settings page to
+ * `plugin-settings`' floating panel — plugin-local state, never base state.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import {
   ActionIcon,
   Badge,
   Group,
   SegmentedControl,
+  Stack,
+  Switch,
   Text,
   TextInput,
 } from "@mantine/core";
@@ -125,6 +131,55 @@ function remember(key: string, patch: Partial<PaneMemory>): void {
  *  in one tab cannot swallow another tab's selections. */
 const lastPaneBySession = new Map<string, string>();
 
+// ───────────────────────────── 插件自己的偏好 ─────────────────────────────
+
+/** 插件偏好放在模块作用域 + 自己的存储键里（不是基座状态）：设置页改一次，
+ *  已经在渲染的每一栏都立刻跟随。 */
+const PREFS_KEY = "fm.file-browser.prefs.v1";
+
+interface Prefs {
+  /** 栏位自己没选过显示方式时用的那一种。 */
+  defaultMode: ViewMode;
+  /** 网格卡片是否去取缩略图。 */
+  thumbnails: boolean;
+}
+
+const DEFAULT_PREFS: Prefs = { defaultMode: "list", thumbnails: true };
+
+function readPrefs(): Prefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    return raw ? { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULT_PREFS;
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+let prefs: Prefs = readPrefs();
+const prefsListeners = new Set<() => void>();
+
+function patchPrefs(patch: Partial<Prefs>): void {
+  prefs = { ...prefs, ...patch };
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // 存不下（隐私模式等）：偏好本次会话内照样生效
+  }
+  for (const listener of prefsListeners) listener();
+}
+
+function usePrefs(): Prefs {
+  return useSyncExternalStore(
+    (cb) => {
+      prefsListeners.add(cb);
+      return () => {
+        prefsListeners.delete(cb);
+      };
+    },
+    () => prefs,
+  );
+}
+
 export function activate(host: PluginHost): () => void {
   const attached = new Map<string, () => void>();
 
@@ -153,6 +208,49 @@ export function activate(host: PluginHost): () => void {
   };
 }
 
+/** 本插件贡献给设置面板的一页：内容只有本插件认得，写的也是自己的偏好存储。 */
+export function SettingsPage() {
+  const current = usePrefs();
+  return (
+    <Stack gap="md">
+      <div>
+        <Text size="sm" fw={600}>
+          新建栏位的显示方式
+        </Text>
+        <Text size="xs" c="dimmed" mb={6}>
+          没有单独选过的栏位跟随这个值；已经手动切换过的栏位保留自己的选择。
+        </Text>
+        <SegmentedControl
+          fullWidth
+          size="xs"
+          value={current.defaultMode}
+          onChange={(v) => patchPrefs({ defaultMode: v as ViewMode })}
+          data={[
+            { value: "list", label: "列表" },
+            { value: "grid", label: "网格" },
+          ]}
+        />
+      </div>
+      <Group gap={10} wrap="nowrap">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text size="sm" fw={600}>
+            网格缩略图
+          </Text>
+          <Text size="xs" c="dimmed">
+            关闭后网格卡片只显示类型图标，滚动大目录时不再请求缩略图。
+          </Text>
+        </div>
+        <Switch
+          size="xs"
+          checked={current.thumbnails}
+          aria-label="显示网格缩略图"
+          onChange={(e) => patchPrefs({ thumbnails: e.currentTarget.checked })}
+        />
+      </Group>
+    </Stack>
+  );
+}
+
 /** One pane's browser. `slotId` is which pane this instance lives in. */
 function FileBrowserPane({ host, slotId }: SlotProps) {
   /** Fixed for the lifetime of this instance — the pane remounts per session. */
@@ -167,7 +265,10 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   }));
   const cwd = hist.stack[hist.pos] ?? "";
 
-  const [mode, setMode] = useState<ViewMode>(memory.mode ?? "list");
+  const prefs = usePrefs();
+  /** null = 这一栏没单独选过,跟随插件偏好;选过就自己记住。 */
+  const [manualMode, setManualMode] = useState<ViewMode | null>(memory.mode ?? null);
+  const mode = manualMode ?? prefs.defaultMode;
   const [entries, setEntries] = useState<ListEntry[]>([]);
   const [counts, setCounts] = useState<{ dirs: number; files: number }>({ dirs: 0, files: 0 });
   const [fetchMs, setFetchMs] = useState(0);
@@ -271,7 +372,7 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   };
 
   const switchMode = (next: ViewMode): void => {
-    setMode(next);
+    setManualMode(next);
     remember(memKey, { mode: next });
   };
 
@@ -583,7 +684,8 @@ function rememberThumb(path: string, dataUrl: string | null): void {
  *  it answers — so scrolling a huge directory pulls ~a screen of images, not all
  *  of them, and a decode failure is just an icon. */
 function Thumb({ host, entry }: { host: PluginHost; entry: ListEntry }) {
-  const candidate = !entry.isDir && THUMB_CANDIDATES.has(extensionOf(entry.name));
+  const enabled = usePrefs().thumbnails;
+  const candidate = enabled && !entry.isDir && THUMB_CANDIDATES.has(extensionOf(entry.name));
   const [dataUrl, setDataUrl] = useState<string | null>(
     () => thumbCache.get(entry.path) ?? null,
   );
@@ -614,7 +716,9 @@ function Thumb({ host, entry }: { host: PluginHost; entry: ListEntry }) {
     };
   }, [candidate, entry.path, host]);
 
-  return dataUrl ? (
+  // 关掉的瞬间：effect 只是不再取图，缓存里的 dataUrl 还在 —— 渲染也必须看开关，
+  // 否则已加载的缩略图会一直留在卡片上。
+  return candidate && dataUrl ? (
     <img src={dataUrl} alt="" loading="lazy" style={thumbStyle} />
   ) : (
     <div style={thumbFallbackStyle}>

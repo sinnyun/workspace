@@ -1,14 +1,16 @@
 {
   "schemaVersion": 1,
   "name": "plugin-file-browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "文件浏览",
-  "description": "内容插件：把目录浏览从基座外置进分栏容器的每个 pane-slot，网格卡片按需取缩略图，并发布 focus:changed 驱动 D",
+  "description": "内容插件：把目录浏览从基座外置进分栏容器的每个 pane-slot，网格卡片按需取缩略图，并发布 focus:changed 驱动 D；自带设置页（默认显示方式 / 缩略图）",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {
     "entry": "frontend/dist/index.js",
-    "slots": [],
+    "slots": [
+      { "id": "settings-page:file-browser", "export": "SettingsPage", "label": "文件浏览" }
+    ],
     "provides": []
   },
   "permissions": {
@@ -18,7 +20,7 @@
       "emit": ["focus:changed"]
     },
     "slots": {
-      "contribute": ["pane-slot:*"]
+      "contribute": ["pane-slot:*", "settings-page:file-browser"]
     }
   }
 }

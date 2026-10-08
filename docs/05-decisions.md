@@ -189,6 +189,55 @@
 
 ---
 
+## D11 · 设置入口:独立插件的**悬浮面板**,不是一种侧栏视图
+
+| 选项 | 与六区网格的关系 | 多插件分页 | 结论 |
+|---|---|---|---|
+| Mantine **`Popover`**(受控 `opened`,挂 `activity-rail-zone` 的齿轮上) | 经 portal 渲染到 `body`,**不占六区任何一格**,不改布局 | 面板内部 `Tabs` 自由分页 + 嵌套槽 | ✓ **采用** |
+| `Modal` / `Drawer` | 遮罩打断浏览(设置是**对照界面边看边调**的动作),且遮罩会盖住正在被设置的网格 | 可以 | ✗ |
+| 继续占 B(`nav-panel:settings`) | 设置被当成"侧栏视图之一",与文件树/收藏抢同一格;分页只能塞进 B 的窄面板 | 差 | ✗ |
+| 自写 Portal + 定位 | 要自己处理翻转/避让/ESC/外点关闭 | — | ✗(Mantine 已提供) |
+
+**决定**:`plugin-settings` 贡献 A 栏底部齿轮,点击打开**悬浮面板**;面板外层分页 **软件设置**(主题 + 插件启停)与 **插件设置**(每个插件一页,标题取贡献者自己的 `slots[].label`)。设置不再是 B 的视图,齿轮也不再发 `sidebar:view:changed`。面板是**固定尺寸的容器**(`620×560`),正文各自内部滚动,切页/切子页不改形不挪位。
+
+**理由**:设置是"看着当前界面调当前界面"的动作,遮罩式模态打断这个循环;而把它塞进 B 会让"设置"和"文件树"在同一格里互斥竞争,分页深度也受侧栏宽度限制。用 `Popover` 的既有能力(flip/shift/withArrow/ESC/外点关闭)而不是自写浮层,符合"优先用开源库"。
+
+**后果**:受控 `opened` 下 Mantine 的 `Popover.Target` **不再自己挂 `onClick`**(源码 `...!ctx.controlled ? { onClick: ctx.onToggle } : null`),开合必须由齿轮自己翻,`onChange` 只回送 ESC/外点——这个坑记在 00 §4.23。浮层高度默认跟内容走,换分页会同时变形和被 floating-ui 重新定位,所以尺寸写死、滚动内聚,记在 00 §4.26。
+
+**复核触发**:若设置页需要脱离齿轮独立开窗(如"在独立窗口打开设置"),再考虑 `Modal` 作为第二形态。
+
+---
+
+## D12 · 插件启停:owner 是**基座 loader**,核心保护由基座判定,能力名不进 Rust 契约
+
+| 选项 | 单一 owner | 第三方插件能否自免 | 契约成本 | 结论 |
+|---|---|---|---|---|
+| 基座 `loader` 持启停 + 暴露 `plugins.list`/`plugins.setEnabled` 两个**基座前端能力** | ✓(装载/卸载/槽回收都在它手里) | 不能:`protected` 由基座的固定名单判定,与 manifest 无关 | 零(不动 Rust、不动 `contract:check`) | ✓ **采用** |
+| `plugin-settings` 自己 import 各插件目录并动态 import | ✗:UI 插件同时成了加载器,与 loader 两份装载状态 | 取决于实现 | 零 | ✗ |
+| 放进 Rust 内核(真能力) | ✓ | — | 要动 `capability::names` + dump + 前端插件状态得反向同步进 Rust | ✗(**前端插件的存在与否本来就是前端事实**) |
+
+**决定**:运行态启停归 `apps/shell-ui/src/loader.ts`,持久化 `fm.plugins.disabled.v1`;不可关闭集合是**基座策略**(三个界面框架容器 + 设置面板自身)。设置 UI 只经 `host.invoke` 走同一套 `permissions.capabilities` 白名单,不获得任何特权通道。
+
+**理由**:与 D10 同源——**跨组件的不变量必须由 owner 结构性强制**。若"哪些插件不可关"写在 manifest,任何插件都能豁免自己,"基座最小、其余皆可插拔"这条边界就形同虚设;若启停逻辑住在 UI 插件里,卸载顺序/槽回收这些只有 loader 知道的事实会被复制第二份实现。
+
+**后果**:`FrontendCapabilities` 与 `Capabilities` **必须是两个常量**:`contract:check` 拿 Rust `capability::names` 与 `Capabilities` 做全等比对,基座前端能力没有 Rust 对应物,混进去即假阴性/漂移。SDK 单测额外断言这两个名字**不在** `Capabilities` 里。基座能力查找排在 Tauri `invoke` 之前(`invoke.ts` 三级分流:基座表 → Tauri → dev mock)。
+
+**复核触发**:若要做"禁用后端 Rust 插件"(dispose fiber)的统一面板,`plugins.list` 需扩成前后端合并视图,届时再谈是否把前端侧名称并入 Rust 契约。
+
+---
+
+## D13 · 插件自己的设置页:内容自持,生效走**同插件内模块级 store**,不进基座状态
+
+**决定**:一个插件的设置页(`settings-page:<name>` 里的内容)读写**自己的** localStorage 键,并经由该插件 dist 内部的模块级偏好 store(`useSyncExternalStore` + 监听者集合)通知已渲染的实例;值域在读与写两侧都 clamp。基座元状态不新增任何"设置"字段。
+
+**理由**:同一插件的 bundle 天然共享模块作用域,所以"设置页改一次、已在渲染的每一栏立刻跟随"不需要新契约、不需要事件、也不需要基座解释这个偏好的含义。**反例实测**:只让 `Thumb` 的取图 `useEffect` 早退而不让渲染读开关,已加载的缩略图会因缓存的 data URL 仍在 state 里而**关不掉**(实测 `<img>` 恒为 7)——"即时生效"必须同时覆盖取数与渲染两条路径。
+
+**代价**:偏好按插件分散在各自己的键里(现为 `fm.file-browser.prefs.v1`、`fm.preview-text.prefs.v1`),没有全局导出/导入;等出现"备份配置"需求时再统一(可能落 `db.settings.*`)。
+
+**复核触发**:若两个插件需要共享同一设置(例如主题色影响预览渲染),那说明它已经是跨插件契约,应提升进能力/事件面而不是各自读同一键。
+
+---
+
 ## 决策速查
 
 | 维度 | 决定 |
@@ -206,3 +255,6 @@
 | 图片预览 | 能力 `thumb.image` 出 PNG data URL + 前端按可见性懒取(不开 `file:`/asset URL,见 D8) |
 | 列表顺序/mtime | provider 在 `fs.list` 里排好(自然序)并带 `modifiedMs`,浏览器不排序(见 D9) |
 | 分栏几何不变量 | 容器 owner 保证"栏高有界 + outlet 不滚动",内容插件只写 `height:100%`(见 D10) |
+| 设置入口形态 | 独立插件 `plugin-settings` 的悬浮 `Popover`(不占六区、不是 B 视图;分页软件设置/插件设置,见 D11) |
+| 插件启停 | owner = 基座 `loader`;不可关闭集合由基座判定,`plugins.*` 是基座前端能力、不进 Rust 契约(见 D12) |
+| 插件设置页生效方式 | 页内容自持 + 同插件内模块级 store 广播,基座不持有设置状态(见 D13) |

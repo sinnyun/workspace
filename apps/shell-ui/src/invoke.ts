@@ -16,10 +16,22 @@ export function registerMock(capability: string, fn: Mock): void {
   mocks.set(capability, fn);
 }
 
+/** Capabilities the frontend base serves itself (plugin enable/disable — pure
+ *  loader state, no Rust counterpart). Checked BEFORE Tauri, unlike dev mocks,
+ *  so they answer identically in the shipped app and never round-trip an IPC
+ *  error (docs/02 §5.1). */
+const baseCaps = new Map<string, Mock>();
+
+export function registerBaseCapability(capability: string, fn: Mock): void {
+  baseCaps.set(capability, fn);
+}
+
 export async function invokeCapability<T>(
   capability: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
+  const base = baseCaps.get(capability);
+  if (base) return base(args ?? {}) as T;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     return (await invoke<T>("invoke_capability", {

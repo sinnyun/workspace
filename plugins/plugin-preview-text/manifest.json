@@ -1,14 +1,17 @@
 {
   "schemaVersion": 1,
   "name": "plugin-preview-text",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "文本预览",
-  "description": "跟随级联焦点，把文本文件的内容填进 D 信息页的 preview-zone",
+  "description": "跟随级联焦点，把文本文件的内容填进 D 信息页的 preview-zone；自带设置页（自动读取 / 字符上限）",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {
     "entry": "frontend/dist/index.js",
-    "slots": [{ "id": "preview-zone", "export": "TextPreview" }]
+    "slots": [
+      { "id": "preview-zone", "export": "TextPreview" },
+      { "id": "settings-page:preview-text", "export": "SettingsPage", "label": "文本预览" }
+    ]
   },
   "permissions": {
     "capabilities": ["fs.readText"],
@@ -16,6 +19,6 @@
       "subscribe": [],
       "emit": []
     },
-    "slots": { "contribute": ["preview-zone"] }
+    "slots": { "contribute": ["preview-zone", "settings-page:preview-text"] }
   }
 }

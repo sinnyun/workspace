@@ -83,7 +83,7 @@ plugin-<name>/
 | `backend.config` | | 传给 `Plugin::prepare()` 的初始配置 |
 | `frontend.entry` | 前端插件✓ | ESM 入口相对路径(相对插件根) |
 | `frontend.slots[]` | | 声明要挂载的**基座外层槽**或**容器嵌套槽**:`id`=槽名,`export`=从 entry 导出的组件名,`label`=该贡献的**展示名**(可选,如 `"历史"`;容器用它给 tab/入口题名,见 §4.5) |
-| `frontend.provides[]` | | **容器插件**声明它提供的**嵌套槽前缀**(如 `pane-slot`、`nav-panel`、`detail-tab`、`preview-zone`、`file-extension-zone`);普通插件省略或空数组 |
+| `frontend.provides[]` | | **容器插件**声明它提供的**嵌套槽前缀**(如 `pane-slot`、`nav-panel`、`detail-tab`、`preview-zone`、`file-extension-zone`、`settings-page`);普通插件省略或空数组 |
 | `permissions.capabilities` | ✓ | 允许调用的能力白名单,支持 `*` 通配 |
 | `permissions.events.subscribe/emit` | ✓ | 允许订阅/发出的事件白名单 |
 | `permissions.slots.contribute[]` | | 允许注入的槽(含他插件提供的嵌套槽)前缀白名单;注入未声明的槽被拒 |
@@ -243,10 +243,10 @@ export function HistoryPanel({ host }: SlotProps) {
 
 ### 4.5 嵌套槽与容器插件(已落地)
 
-默认模型是"基座预留外层槽、插件注入"(§4.1 的 `registerSlot`)。界面级联(01 §9)需要**容器插件再向下提供槽**给别的插件,故引入受控的**嵌套槽**——目前只有三个框架容器用到,不开放给一般业务插件滥用。
+默认模型是"基座预留外层槽、插件注入"(§4.1 的 `registerSlot`)。界面级联(01 §9)需要**容器插件再向下提供槽**给别的插件,故引入受控的**嵌套槽**——目前只有四个容器用到(三个界面框架容器 + 设置悬浮面板容器),不开放给一般业务插件滥用。
 
 **角色**
-- **容器插件**:在 manifest `frontend.provides` 声明它提供的**槽前缀**(现为 `pane-slot`、`nav-panel`、`detail-tab`/`preview-zone`/`detail-info-zone`/`file-extension-zone`)。运行时用 `host.provideSlot('pane-slot:p0')` 拿到一个出口组件并渲染;出口 id 由容器自己生成并可动态增长。
+- **容器插件**:在 manifest `frontend.provides` 声明它提供的**槽前缀**(现为 `pane-slot`、`nav-panel`、`detail-tab`/`preview-zone`/`detail-info-zone`/`file-extension-zone`、`settings-page`)。运行时用 `host.provideSlot('pane-slot:p0')` 拿到一个出口组件并渲染;出口 id 由容器自己生成并可动态增长。
 - **内容插件**:用 `host.contributeToSlot('pane-slot:p0', Comp)` 注入。目标槽若是他插件提供的嵌套槽,须在 `permissions.slots.contribute` 里列出该前缀(如 `pane-slot:*`),否则被拒。
 
 **生命周期事件(基座总线,前端内)**
@@ -317,6 +317,19 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 - 能力**必须可 JSON 序列化**参数与返回(跨 IPC)。
 - 能力名与权限白名单使用同一套 `domain.action` 命名。
 
+### 5.3 基座前端能力(不跨 IPC,不进 Rust 契约)
+
+有极少量能力的**提供方就是前端基座自己**——它们要读写的状态只存在于浏览器运行态里,后端无从知道。它们与内核能力**同名规则、同一套门控**(`permissions.capabilities` 白名单 + `host.invoke`),只是 `invokeCapability` 先查基座注册表,命中就不走 Tauri `invoke`:
+
+| 能力 | 参数 | 返回 | 提供方 | 说明 |
+|---|---|---|---|---|
+| `plugins.list` | `{}` | `PluginInfo[]`(`{name, displayName?, version, description?, enabled, protected}`) | `shell-ui` 的 `loader` | 列出已发现的前端插件及其**运行态**(是否装载) |
+| `plugins.setEnabled` | `{name, enabled}` | `PluginInfo[]`(新列表) | 同上 | 关闭 = 调用该插件的卸载钩子并回收其槽;开启 = 立即装载,**对当前界面即时生效**并持久化 `fm.plugins.disabled.v1`,下次启动仍然有效 |
+
+- **`protected` 由基座判定**(三个界面框架容器 + 设置面板容器不可关闭),**不来自 manifest**——否则任何插件都能声明自己豁免,破坏"基座最小、其余皆可插拔"的边界。
+- 这两项住在 SDK 的 `FrontendCapabilities` / `PluginInfo` / `PluginSetEnabledArgs`,**故意不并进 `Capabilities`**:`contract:check` 拿 Rust `capability::names` 与 `Capabilities` 做全等比对,基座前端能力没有(也不该有)Rust 对应物。名字稳定性由 SDK 单测守住。
+- 新增此类能力属于**基座变更**(改 `loader`/`invoke`),不需要重建 Rust 宿主。
+
 ---
 
 ## 6. 事件约定
@@ -370,7 +383,7 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 | 契约面 | v1 冻结内容 | 事实源(改代码即改这里) |
 |---|---|---|
 | manifest 结构 | `schemaVersion == 1`;字段见 §2.2 | Rust `fm_contracts::manifest::SCHEMA_VERSION` + `PluginManifest::validate`;TS `MANIFEST_SCHEMA_VERSION` + `validateManifest` |
-| 能力名 | `fs.home`/`fs.list`/`fs.stat`/`fs.readChunk`/`fs.readText`/`hash.compute`/`thumb.image`/`watch.subscribe`/`db.<store>.*` | Rust `fm_contracts::capability::names`;TS SDK `Capabilities` |
+| 能力名 | `fs.home`/`fs.list`/`fs.stat`/`fs.readChunk`/`fs.readText`/`hash.compute`/`thumb.image`/`watch.subscribe`/`db.<store>.*`(基座前端能力另列,见 §5.3) | Rust `fm_contracts::capability::names`;TS SDK `Capabilities` |
 | 事件名 + 负载 | `file:changed`、`history:updated`(前端另有 `selection:changed`) | Rust `fm_contracts::events`(`Service`/`Event` 的 `const NAME` + args 结构);TS SDK 事件类型 |
 | DTO 形状 | `ListEntry`(含 `modifiedMs`)/`StatOut`/`ReadChunkOut`/`ThumbOut`(camelCase) | Rust serde 结构;TS SDK 接口 |
 
@@ -381,6 +394,7 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 - `HostMetaState` 由 `{ currentFileId }` 扩为 `{ activeTabId, activeSidebarView, sidebarSelection, focusRef, activeDetailTab }`(§4.2);`selection:changed` 保留。
 - `PluginHost` 加**只寻址**的发现面 `name`/`contributedSlots(prefix?)`/`providedSlots(prefix?)`/`onSlotsChange(cb)`(§4.2、§4.5);它们不改变任何已冻结形状,容器与内容插件靠它们跟随动态槽,无需理解彼此内部。
 - §6.4 的**级联协调事件**与 §4.5 的**嵌套槽生命周期事件**是**前端总线专用**,只在 `plugin-sdk`(TS)定义,不进 Rust 契约、不参与 `contract:check`(该命令只管跨 IPC 的能力/领域事件/DTO)。
+- §5.3 的**基座前端能力**(`plugins.list`/`plugins.setEnabled`)同上:提供方在前端,没有 Rust 对应物,故住在独立的 `FrontendCapabilities` 常量里而非 `Capabilities`——`Capabilities` 必须继续与 `capability::names` 全等。附带新增的 `PluginInfo`/`PluginSetEnabledArgs` 也只是 TS 侧形状。
 
 ---
 
@@ -394,5 +408,6 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 | 容器 `provideSlot` | 槽前缀 ∈ 本插件 manifest `frontend.provides`,否则拒绝提供 |
 | 内容 `contributeToSlot` | 目标槽前缀 ∈ `permissions.slots.contribute`(他插件嵌套槽须显式授权),否则拒绝注入 |
 | 运行时 `invoke` | capability ∈ 白名单,否则 reject |
+| `invoke` 启停他人 | `plugins.setEnabled` 的 `name` 若是基座判定的**核心插件**(三容器 + 设置面板),loader 直接返回中文错误,不执行 |
 | 运行时 `emit/on` | event ∈ 白名单,否则忽略并告警 |
 | 卸载 | 调用前端卸载钩子 / dispose 后端 fiber,校验 Effect 全部回收 |

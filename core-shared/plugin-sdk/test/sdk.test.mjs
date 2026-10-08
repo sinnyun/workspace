@@ -10,6 +10,7 @@ import {
   errorMessage,
   Events,
   Capabilities,
+  FrontendCapabilities,
   BASE_SLOT_IDS,
 } from "../src/index.ts";
 
@@ -187,4 +188,19 @@ test("errorMessage: provider text reaches the UI without the Error: class prefix
   assert.equal(errorMessage(new Error("模拟读取失败")), "模拟读取失败");
   assert.equal(errorMessage("直接字符串"), "直接字符串");
   assert.equal(errorMessage(undefined), "undefined");
+});
+
+test("frontend base capabilities stay out of the Rust capability set", () => {
+  assert.equal(FrontendCapabilities.pluginsList, "plugins.list");
+  assert.equal(FrontendCapabilities.pluginsSetEnabled, "plugins.setEnabled");
+  // `contract:check` compares `Capabilities` against the Rust dump 1:1, so a
+  // base-served name must never be added to that const.
+  const kernel = Object.values(Capabilities);
+  for (const name of Object.values(FrontendCapabilities)) {
+    assert.equal(kernel.includes(name), false, `${name} must not be a kernel capability`);
+  }
+  // Permission patterns work the same way, so a plugin can whitelist the pair.
+  assert.equal(matchesPermission("plugins.list", ["plugins.*"]), true);
+  assert.equal(matchesPermission("plugins.list", ["plugins.list"]), true);
+  assert.equal(matchesPermission("plugins.list", ["fs.list"]), false);
 });
