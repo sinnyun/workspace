@@ -12,9 +12,9 @@
 │                                                                     │
 │  ┌───────────────────────────── WebView ─────────────────────────┐ │
 │  │  前端基座 (React 19 + Vite)                                     │ │
-│  │   · 布局骨架:侧边栏 / 顶栏 / 主视图区                            │ │
-│  │   · <PluginSlot name=... />  插槽                                │ │
-│  │   · 全局元状态 (currentFileId ...)                               │ │
+│  │   · 外层区域网格:活动栏/侧栏/主视图/详情/工具栏/状态栏(见 §9) │ │
+│  │   · <PluginSlot name=... />  插槽(外层 + 容器提供的嵌套槽)     │ │
+│  │   · 级联元状态(不透明引用 selection/focus,见 §9.2)            │ │
 │  │   · 前端事件总线 (EventBus)                                      │ │
 │  │        ▲                                                          │ │
 │  │        │ 运行时 import()  (自定义协议 plugin://)                  │ │
@@ -101,7 +101,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 - 事件负载必须可 JSON 序列化(跨 IPC 边界)。
 
 ### 4.3 元状态广播
-- 基座维护的全局元状态(如 `currentFileId`)变化时,通过前端事件总线广播;前端插件订阅。**基座不把元状态推给后端**,后端若需要,由插件显式 `invoke` 上报。
+- 基座维护的全局元状态(不透明引用,如 `focusRef`/`sidebarSelection`,见 §9)变化时,通过前端事件总线广播;前端插件订阅。**基座不把元状态推给后端**,后端若需要,由插件显式 `invoke` 上报。
 
 > 事件命名与负载 schema 的规范见 [02-plugin-spec.md](02-plugin-spec.md) §5。
 
@@ -140,7 +140,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
    - 前端:插件之间、插件与基座之间禁止 `import ... from '../../another-plugin'`。所有交互只能通过前端事件总线与基座注入的 host API。
 
 2. **基座无状态化(Stateless Host)**
-   - 基座不知道"文件有历史版本""文件可上云"等业务概念。基座只维护 `currentFileId` 这类**全局元状态**。业务数据全部由插件订阅元状态后自行维护。
+   - 基座不知道"文件有历史版本""文件可上云"等业务概念。基座只维护 `currentFileId`/`focusRef`/`sidebarSelection` 这类**不透明全局元状态引用**(见 §9.2),不含业务语义。业务数据全部由插件订阅元状态后自行维护。
 
 3. **原子化 Rust(Atomic Rust)**
    - Rust 能力层只提供 `read_file_chunk`、`compute_hash`、`db_query` 等基础工具箱,**不写针对特定插件的业务逻辑**。业务策略全封在 cordis-rs 后端插件里。
@@ -177,4 +177,52 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 - **B/C 的分界是"原子 vs 业务"**。`image` 缩放是能力(B);"何时给哪些文件生成缩略图"是业务(C 或前端插件用 B)。
 - **重依赖(ffmpeg/pdfium/tantivy/monaco)默认做成独立能力 + 独立插件**,按需启用,不占核心路径。
 - 新增前端功能一律**插件化**以持续 dogfood 架构;新能力落 B 后**同步 `core-shared/contracts`↔`plugin-sdk` 两侧并跑 `contract:check`**;新事件先冻结进 02 §7.1。
-- 插槽由基座预留、插件只注入;元状态仅 `currentFileId`/selection,业务数据由插件自持(见 §6.2)。
+- **插槽分两类**:基座预留的**外层区域槽**(见 §9),与容器插件提供的**嵌套槽**(如 `pane-slot:<n>`、`detail-tab:<name>`)。普通插件只注入;仅两个"容器插件"(分栏容器、详情容器)可**提供**嵌套槽,机制见 02 §4.5。元状态只存不透明引用(selection/focus 的 `{kind,id}`),业务数据由插件自持(见 §6.2)。
+
+---
+
+## 9. 界面区域模型与级联状态
+
+界面是一台**级联的选择/派生状态机**,自上而下由"外层区域(基座) + 各区域内容(插件)"构成。本节定区域划分、级联关系与基座/插件归属;具体槽清单见 08 §2,嵌套槽机制见 02 §4.5。**颜色与组件一律复用 Mantine 主题,本节只定布局与状态。**
+
+### 9.1 区域网格(基座持有的外壳)
+
+```
+┌─────┬────────┬───────────────────────────────┬──────────────┐
+│LOGO │ 顶部多标签页 tabs(浏览会话)              │              │
+│     ├────────┼───────────────────────────────┤  D 详情容器   │
+│ A   │ 工具栏:导航+地址面包屑+topbar-zone 扩展位 │  (通高)      │
+│ 活动 ├────────┼───────────────────────────────┤  = 嵌套槽     │
+│ 栏  │ B 侧栏  │  C 主视图 = 分栏容器            │  detail-tab:* │
+│     │ (当前视 │  pane-slot:0..3(1/2/4 栏)      │  preview-zone │
+│ 图标│  图内容)│  每栏挂一个内容插件             │  file-ext-zone│
+├─────────────┴───────────────────────────────┴──────────────┤
+│ 状态栏 statusbar-zone                                          │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **A 活动栏**:**侧栏视图的切换器**(不是浏览标签)。选哪个图标 → B 显示对应视图。底部固定"设置"入口。
+- **B 侧栏**:当前 A 视图的**面板内容**(文件树 / 收藏列表 / 标签列表 / 最近…)。每个视图是一个插件,向 `nav-zone` 注入面板、向 `activity-rail-zone` 注入图标。
+- **C 主视图**:B 选中项的**内容展开**(选中文件夹→该目录文件网格;选中标签→该标签下文件),外层由**分栏容器插件**包裹,可切 1 栏 / 左右 2 栏 / 2×2 四栏。
+- **D 详情容器**:焦点对象的**上下文检查器**,用 tab 承载。tab 条(信息 + 未来插件页)正交于**内容模板**(随焦点 kind 切换:程序信息 / 文件夹信息 / 标签列信息 / 文件详情+预览)。
+- **顶部多标签页**:独立的**浏览会话**层。每个会话各持一份 `{activeSidebarView, sidebarSelection, layoutMode, panes, focusRef, activeDetailTab}` 快照;切会话整组还原——这是"切换不混乱"的保证。
+
+### 9.2 级联链(单向派生)
+
+```
+activeSidebarView(A) → sidebarSelection(B) → 每栏 focusRef(C) → detailFocus(D)
+```
+- 基座只搬运**不透明引用** `{kind, id, sourcePlugin}`,不解释 kind 的业务含义。
+- 每层订阅上游引用、渲染、并在用户交互时回写下游引用。区域插件各持**局部状态**,互不越界。
+
+### 9.3 基座 vs 插件(务实版边界)
+
+| 归属 | 内容 |
+|---|---|
+| **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限 |
+| **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<n>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`) |
+| **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` … 各贡献一个 A 图标 + 一个 B 面板 |
+| **内容插件(注入 pane-slot)** | `plugin-file-browser`(网格/列表)、search 结果、archive 等 |
+| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history)、`plugin-details`(信息表)、`preview-*`(preview-zone)、`plugin-file-ops`(操作按钮) |
+
+要点:外层网格与总线**留在基座**(稳定、零业务),只把**多变的部分**插件化;分栏容器与详情容器是仅有的两个"提供嵌套槽"的框架插件。`layoutMode`/`panes`/`activeDetailTab` 属容器插件**局部状态**,不上基座;跨区协调只走 §9.2 的不透明引用。

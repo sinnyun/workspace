@@ -20,7 +20,9 @@
 > `tauri build` 产出。**Tauri 窗口内的可视化验证在本环境(无显示器)未做**,相关项标 🟡 而非 ✅。
 > API 事实参考见 [07-cordis-api-memo.md](07-cordis-api-memo.md)。
 >
-> **Phase 6 已立**:2026-10-08 开源库使用审计后,把 [06](06-open-source-stack.md) 的既定选型逐项转成可执行任务(6A 能力 / 6B 前端插件 / 6C 工具链 / 6D cordis 运行时),后续开发按 Phase 6 接入并使用这些库。审计中 cordis-rs 侧发现的**已声明未用**依赖(`cordis-loader`/`cordis-timer`)不删除,由 P6-41/P6-42 转正启用。
+> **Phase 6 已立**:2026-10-08 开源库使用审计后,把 [06](06-open-source-stack.md) 的既定选型逐项转成可执行任务(6A 能力 / 6B 前端插件 / 6C 工具链 / 6D cordis 运行时 / 6E 界面框架与布局 / 6F 开发期演示与调试插件),后续开发按 Phase 6 接入并使用这些库。审计中 cordis-rs 侧发现的**已声明未用**依赖(`cordis-loader`/`cordis-timer`)不删除,由 P6-41/P6-42 转正启用。
+>
+> **6F 已交付(2026-10-08)**:在 6E 框架布局落地前,先用现有外层槽跑通"参考界面基础信息展示 + 大数据渲染性能观察 + 运行时错误/性能捕获",4 个插件已在 `vite dev` 浏览器实测(见 P6-49~52)。**6E(P6-43~48)仍未实现**,分栏/详情容器与级联元状态仍是目标形态。
 
 ---
 
@@ -121,7 +123,7 @@
 
 > 目的:把 [06-open-source-stack.md](06-open-source-stack.md) 已选型的开源库**真正接入**,而不是停在清单。每项注明**用哪个库**、**装在哪(隔离层)**、**完成条件**。新增后端能力一律落在 `core-shared/kernel/src/capabilities/*`(对外只经 `db.<store>.*` / 能力名契约);新增前端功能一律做成**插件**(运行时 `import()`),共享依赖走 import map 单例。跨层新数据形状先加 `core-shared/contracts`↔`plugin-sdk` 并跑 `contract:check`。
 >
-> **这些库按插件的分布(哪个插件拉起哪些 P6 任务、占哪些插槽、声明哪些能力/事件)见 [08-plugin-catalog.md](08-plugin-catalog.md)。** 下面 6A/6B/6C/6D 是"按库/任务"视角,08 是"按插件"视角,同一批工作两种切面。
+> **这些库按插件的分布(哪个插件拉起哪些 P6 任务、占哪些插槽、声明哪些能力/事件)见 [08-plugin-catalog.md](08-plugin-catalog.md)。** 下面 6A/6B/6C/6D/6E 是"按库/任务"视角,08 是"按插件"视角,同一批工作两种切面。
 
 ### 6A · 后端能力层扩展(Rust,走 capabilities 隔离层)
 
@@ -184,6 +186,32 @@
 |---|---|---|---|---|
 | P6-41 | 声明式加载计划 / 注册表生成 | `cordis-loader`(当前在 workspace 声明但**无引用**) | 落地 roadmap P3-5:扫描 manifest 自动生成后端加载计划,消手写 `registry` 漂移;启用后即从"死声明"转为在用 | 🔵 |
 | P6-42 | fiber 作用域定时 | `cordis-timer`(当前在 workspace 声明但**无引用**) | 用于 watch debounce / 定期清理 / 进度节流等需要 fiber 生命周期定时器的场景;启用后进代码 | 🔵 |
+
+### 6E · 界面框架与布局(01 §9 / 02 §4.5 / 08 §5.1)
+
+> 务实边界:**外层网格 + 元状态总线留在基座**,只把多变部分插件化;分栏容器与详情容器是仅有的两个"提供嵌套槽"的框架插件。区域与级联状态定义见 01 §9,嵌套槽机制见 02 §4.5,插件清单见 08 §5.1。
+
+| # | 任务 | 落位 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P6-43 | 外层区域网格 + 顶部会话容器 | 基座 `shell-ui`(App.tsx) | 渲染 A/B/C/D + 工具栏 + 状态栏六区;顶部多标签会话,每会话持一份级联快照;面板可折叠、宽度记忆 | 🔵 |
+| P6-44 | 级联元状态 + 协调事件 | 基座 `state.ts`/`eventbus.ts` + SDK | `HostMetaState` 扩为 `{activeTabId,activeSidebarView,sidebarSelection,focusRef,activeDetailTab}`(不透明 `Ref`);发 `tab:activated`/`sidebar:view:changed`/`sidebar:selection:changed`/`focus:changed`/`detail:tab:changed` | 🔵 |
+| P6-45 | 嵌套槽运行时 | 基座 `slots.ts` + SDK `PluginHost` | `provideSlot`/`contributeToSlot`;`slot:registered/reconfigured/disposed` 生命周期;manifest `provides`/`permissions.slots.contribute` gating | 🔵 |
+| P6-46 | `plugin-layout-panes`(C 分栏容器) | 前端插件 | 提供 `pane-slot:<n>`;切 1/左右2/2×2 栏;**稳定 paneId + 按 id 迁移子树**不丢每栏局部状态;分隔条可调 | 🔵 |
+| P6-47 | `plugin-inspector`(D 详情容器) | 前端插件 | 占用 `file-sidebar-zone`,提供 `detail-tab:*`/`preview-zone`/`detail-info-zone`/`file-extension-zone`;tab 条 + 焦点 kind 模板(程序/文件夹/标签/文件) | 🔵 |
+| P6-48 | 侧栏视图插件化(A+B) | 前端插件 `view-file-tree`/`view-favorites`/`view-tags` | 各贡献 `activity-rail-zone` 图标 + `nav-zone` 面板;A 切换 → B 内容随之换;选中标项 → `sidebar:selection:changed` 驱动 C | 🔵 |
+
+### 6F · 开发期演示与调试插件(2026-10-08 交付)
+
+> 目的:在 6E 框架布局(P6-43~48)之前,先用**现有基座外层槽**(topbar/nav/file-sidebar + 本轮新增 bottom-drawer)跑通"参考界面的基础信息展示 + 大数据渲染性能观察 + 运行时错误/性能捕获",便于开发期肉眼查看各区样式与调试。这些是开发/演示用途插件,**非发布形态**;正式的分栏/详情容器仍以 P6-46/47/48 为准。仅出现在浏览器 dev 的 `plugins_list_frontend` 模拟索引中(`dev-mocks.ts`),发布/Tauri 下不装载。
+
+| # | 任务 | 落位 | 采用库/能力 | 完成条件 | 状态 | 证据 |
+|---|---|---|---|---|---|---|
+| P6-49 | 基础信息插件:文件详情属性 / 校验 | 前端插件 `plugin-file-details` → `file-sidebar-zone` | `fs.stat`、`hash.compute`、`fs.home`、`fs.readText` | 选中项经 gated 能力展示 名称/路径/大小/类型/修改时间/BLAKE3;随 `selection:changed` 刷新、无轮询 | ✅ | `vite dev` 实测:选中 notes.txt 显示 `1.3 KB / txt / 2026-10-08… / mockhash-15-blake3`,与 HistoryPanel 同区并存 |
+| P6-50 | 基础信息插件:快捷导航 + 面包屑 | 前端插件 `plugin-file-nav` → `nav-zone` | `fs.home`、`fs.list` | 主页 / 常用位置列表 + 由当前选择不透明引用派生的面包屑 | ✅ | `vite dev` 实测:选 notes.txt → "当前位置 › demo › notes.txt" |
+| P6-51 | 模拟数据 / 压力测试插件 | 前端插件 `plugin-mock-data` → `topbar-zone`(控件)+ `nav-zone`(压力列表);dev 能力 `mock.stress` | 自写窗口化列表(无第三方虚拟列表库) | 一键注入 100~100,000 合成条目;窗口化列表**仅挂载可见行**并显示"拉取/渲染 毫秒",观察各区大数据样式与渲染性能 | ✅ | `vite dev` 实测:点 5,000 → 顶栏"5,000 行"、侧栏"挂载 24/5,000",DOM 仅 ~24 行;修复了 `useLayoutEffect` 内 setState 造成的无限重渲染(改直写 `<span>` ref) |
+| P6-52 | 性能 / 错误日志捕获插件 | 前端插件 `plugin-devtools-log` → 基座新增 `bottom-drawer` 外层槽 | 原生 `console` 包裹 / `window` 错误 / `unhandledrejection` / `PerformanceObserver(longtask)` | 捕获运行数据入环形缓冲(上限 5000);面板按级别筛选、搜索、新旧序切换、清空、导出 JSON;**在 dev 索引里最先装载**以捕获他插件 console/错误 | ✅ | `vite dev` 实测:捕获 `event:selection:changed`、loader 日志、`主线程长任务 103ms` 告警;故意排除 React dev 的海量 `measure` 以免淹没缓冲 |
+
+> 本轮基座侧改动:`App.tsx` 新增 `bottom-drawer` 外层槽 + 可折叠抽屉;`dev-mocks.ts` 扩 `mock.stress` 合成数据源 + 5 插件开发索引(devtools-log 置首);`vite.config.ts` 的 dev 插件服务加 `Cache-Control: no-store`,使重建后的插件 JS 重载即生效(修掉一次"缓存旧模块导致渲染死循环"的排查坑)。
 
 ---
 

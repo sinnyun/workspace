@@ -45,13 +45,13 @@ my-file-manager/
 │       ├── scripts/build-shared.mjs # 预构建共享单例两套变体(prod/dev)
 │       └── src/
 │           ├── main.tsx
-│           ├── App.tsx            # 布局骨架 + 插槽挂载
+│           ├── App.tsx            # 外层区域网格(A/B/C/D+工具栏+状态栏)+顶部会话容器+外层槽挂载
 │           ├── PluginSlot.tsx     # 通用插槽组件(含错误边界)
 │           ├── loader.ts          # 读 manifest → import() 前端插件 → 挂载
-│           ├── eventbus.ts        # 前端事件总线(含 Tauri 事件订阅)
-│           ├── host.ts            # 构造注入给插件的 PluginHost(权限 gating)
-│           ├── slots.ts           # slotId → 组件注册表
-│           └── state.ts           # 全局元状态(currentFileId,zustand)
+│           ├── eventbus.ts        # 前端事件总线(含 Tauri 事件订阅 + 级联协调事件)
+│           ├── host.ts            # 构造注入给插件的 PluginHost(权限 gating + provide/contributeSlot)
+│           ├── slots.ts           # 动态 slot registry:外层槽 + 容器插件提供的嵌套槽(pane-slot:<n>/detail-tab:*)+ slot 生命周期
+│           └── state.ts           # 级联元状态(activeTabId/activeSidebarView/sidebarSelection/focusRef/activeDetailTab,zustand)
 │
 ├── core-shared/
 │   ├── contracts/                 # Rust 契约包(Event/Capability/DTO/manifest + fm-contract-dump)
@@ -68,7 +68,15 @@ my-file-manager/
 │   │   ├── manifest.json
 │   │   ├── backend/src/lib.rs     # cargo 成员,静态编进 host
 │   │   └── frontend/              # pnpm 成员,Vite lib 构建 ESM,externalize react/@mantine
-│   └── (规划,见 08)plugin-file-browser / file-ops / search / preview-text / preview-markdown /
+│   ├── plugin-file-details/       # ✅ 基础信息:文件属性 + BLAKE3(file-sidebar-zone)
+│   ├── plugin-file-nav/           # ✅ 基础信息:快捷导航 + 面包屑(nav-zone)
+│   ├── plugin-mock-data/          # ✅ 开发期:模拟数据注入 + 窗口化压力列表(topbar/nav)
+│   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/事件捕获面板(bottom-drawer)
+│   │   # 上述 4 个为纯前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
+│   │   # 仅 6F 交付的演示/调试插件,只在浏览器 dev 的模拟索引里装载(见 08 §5.3)
+│   └── (规划,见 08)框架/布局:plugin-layout-panes / plugin-inspector / plugin-view-file-tree /
+│       plugin-view-favorites / plugin-view-tags
+│       业务:plugin-file-browser / file-ops / search / preview-text / preview-markdown /
 │       preview-image / preview-pdf / media / archive / storage-analysis / details / settings
 │       # 每个前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │       # 全栈插件再加 backend/(cargo 成员,只依赖 fm-contracts + cordis,经能力契约)
@@ -146,7 +154,8 @@ my-file-manager/
 | 前端包 | `plugin-<name>-frontend` | `plugin-file-history-frontend` |
 | 能力 | `domain.action` | `fs.readChunk` / `db.history.list` |
 | 事件 | `domain:action`(过去式) | `file:changed` / `history:updated` |
-| 插槽 | `<zone>-zone` 或语义名 | `file-sidebar-zone` |
+| 插槽(外层) | `<zone>-zone` 或语义名 | `file-sidebar-zone` / `nav-zone` |
+| 插槽(嵌套) | `<前缀>:<实例>` | `pane-slot:0` / `detail-tab:history` |
 
 ---
 

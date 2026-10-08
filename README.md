@@ -71,5 +71,5 @@ pnpm --filter @my-file-manager/plugin-sdk test # SDK 纯函数单测
 - **基座 / host**:不含业务概念的最小运行框架(前端 React 骨架 + 后端 Rust 能力层与内核引导)。
 - **插件 / plugin**:实现某个业务功能的独立工程,含后端(Rust)与/或前端(ESM)两部分。
 - **能力 / capability**:Rust 暴露的原子操作(如 `fs.read_chunk`、`hash.compute`),无业务策略。
-- **插槽 / slot**:基座预留的 UI 挂载点(如 `file-sidebar-zone`),前端插件向其注入组件。
-- **元状态 / meta-state**:基座唯一持有的一类全局状态(如 `currentFileId`),不含业务语义。
+- **插槽 / slot**:UI 挂载点。**外层区域槽**由基座预留(如 `file-sidebar-zone`、`nav-zone`),插件注入;**嵌套槽**由容器插件提供(如 `pane-slot:<n>`、`detail-tab:<name>`),内容插件经 `contributeToSlot` 注入(见 docs/01 §9、docs/02 §4.5)。
+- **元状态 / meta-state**:基座唯一持有的一类全局状态,只存**不透明引用**(如 `focusRef`/`sidebarSelection` 的 `{kind,id}`),不含业务语义(见 docs/01 §9.2)。
