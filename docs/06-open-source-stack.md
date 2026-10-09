@@ -18,13 +18,14 @@
 | 哈希 | `blake3`(+ `md-5`/`sha2` 兼容需求) |
 | 存储 | `rusqlite`(bundled SQLite,WAL)+ `refinery` 迁移 |
 | 检索 | `tantivy`(全文)+ SQLite FTS5(轻量场景) |
-| 类型/缩略图 | `image` + `base64`(已用,`thumb.image`)；`infer` + `fast_image_resize`(待评估) |
+| 类型/缩略图 | Windows Shell `IThumbnailCache`/thumbnail handlers（规划为 `shell.thumbnail.read`）；`infer` + `mime_guess` 做类型识别 |
 | 后端插件运行时 | cordis-rs(+ loader/logger/timer) |
 | 前端框架 | React 19 + Vite + TypeScript |
 | UI 组件库 | **Mantine ★(已定)**:core/hooks/spotlight/notifications/dates/modals/form |
 | 大列表/表格/树 | TanStack Virtual + TanStack Table + react-arborist |
 | 状态 | zustand |
-| 代码/diff 查看 | CodeMirror 6 ★ + react-diff-view + Shiki;需 VS Code 级编辑再上 Monaco |
+| 代码/diff 查看 | CodeMirror 6 ★ + react-diff-view + Shiki;版本来源采用 Lore；需 VS Code 级编辑再上 Monaco |
+| 文件版本管理 | Epic Games Lore（MIT；pre-1.0）+ LoreGUI 可复用的 `lore-vm` 架构参考 | Lore 核心管理仓库版本、提交与文件历史；本应用保留 Mantine 历史插件 UI；集成前固定 revision 并验证 Windows/API/服务端部署 |
 | 图表(磁盘占用) | ECharts(treemap) |
 | 质量工具 | Biome / clippy+rustfmt / Vitest / cargo-nextest / WebDriverIO+tauri-driver |
 
@@ -44,8 +45,8 @@
 |---|---|---|---|
 | 并行遍历 | `ignore`、`jwalk`、`walkdir` | ★ `ignore`(需尊重忽略规则)/ `jwalk`(纯并行、更快) | `ignore` 是 ripgrep 同款,内建并行 + gitignore;`jwalk` 更轻更快 |
 | 文件监听 | `notify`(+`notify-debouncer-full`) | ★ notify | 跨平台事实标准;debouncer 合并抖动事件 |
-| 复制到回收站 | `trash` | ★ trash | 跨平台回收站,删除更安全 |
-| 带进度复制/移动 | `fs_extra`、自行 `tokio::fs` | ★ fs_extra(目录级)+ 自写进度 | 大文件进度需自行分块 |
+| Windows 原生复制/移动/重命名/删除 | Windows Shell `IFileOperation`(COM STA) | ★ `plugin-file-ops` 的 Windows provider | 由系统处理目录操作、冲突提示、进度 UI；删除设置回收站 flag，不自写文件 mutation |
+| 默认应用打开/资源管理器定位 | `tauri-plugin-opener` | ★ opener（已注册） | 通过 host capability 暴露系统默认关联行为 |
 | 路径处理 | `dunce`(Windows)、`path-absolutize`、`unicode-normalization` | ★ 按需 | Windows 路径前缀、规范化 |
 | 文件名自然排序 | `natord`、`human-sort` | ★ natord | "2 file" 排在 "10 file" 前 |
 | 磁盘/系统信息 | `sysinfo` | ★ sysinfo | 剩余空间、磁盘占用统计 |
@@ -73,17 +74,15 @@
 |---|---|---|---|
 | MIME(按魔数) | `infer`、`tree_magic_mini` | ★ infer | 内容嗅探,快 |
 | MIME(按扩展名) | `mime_guess` | ★ mime_guess | 兜底 |
-| 图像/缩略图 | `image`、`fast_image_resize`、`thumbnailer` | ★ image(`base64` 配套) | 已用 `image` 做 `thumb.image`(default-features off + 5 种格式,`FilterType::Triangle` 缩放);`fast_image_resize` 待评估:当前缩放质量与耗时够用 |
-| 视频缩略图 | `ffmpeg-next`(需系统 ffmpeg) | 可选 | 体积/依赖大,做成独立媒体插件 |
-| PDF 解析/渲染 | `pdfium-render`(需 pdfium 库)、`lopdf` | ★ pdfium-render(渲染)/ lopdf(纯解析) | 渲染走 pdfium;仅取元数据用 lopdf |
+| Windows 系统缩略图 | Windows Shell `IThumbnailCache::GetThumbnail` + 已注册 thumbnail handlers | ★ 系统接口 | 由 `plugin-windows-thumbnails` 的 host capability 统一调用；读取 Windows 缓存或允许 Shell 提取并缓存，应用不解码/生成；非 Windows 明确降级 |
+| 统一文件预览 | [Open File Viewer](https://github.com/xushanpei/open-file-viewer) | ★ React SDK（待版本/格式验证） | 单一 `plugin-preview` 容器；按需启用内部格式插件，MIT；通过受限本地资源句柄接入，不暴露裸路径 |
+| 预览服务候选（未采用） | [kkFileView](https://github.com/kekingcn/kkFileView) | 暂不采用 | Spring Boot 在线预览服务，需 Java 与 LibreOffice/OpenOffice 等运行依赖；不作为桌面端默认内嵌路线 |
 | 文本编码探测 | `encoding_rs`、`chardetng` | ★ encoding_rs + chardetng | 非 UTF-8 文本预览 |
 
 ### 1.6 归档 / 压缩
 | 用途 | 候选 | 推荐 | 说明 |
 |---|---|---|---|
-| zip | `zip`、`async-compression` | ★ zip | 浏览/解压 zip |
-| tar/gz | `tar` + `flate2` | ★ tar+flate2 | |
-| 7z | `sevenz-rust` | ★ sevenz-rust | 纯 Rust 7z |
+| 压缩包浏览/解压 | `zip`、`tar`+`flate2`、`sevenz-rust` | 暂不采用 | 独立 archive 浏览/解压插件已取消；若统一预览需要读取压缩包，再单独评估只读所需依赖 |
 | zstd/brotli | `zstd`、`brotli` | 按需 | |
 
 ### 1.7 内核 / 基础设施
@@ -109,7 +108,6 @@
 | `tauri-plugin-notification` | 系统通知 |
 | `tauri-plugin-log` | 前端日志转发到 Rust/文件 |
 | `tauri-plugin-window-state` | 记忆窗口位置/尺寸 |
-| `tauri-plugin-context-menu` | 原生右键菜单 |
 | `tauri-plugin-clipboard-manager` | 剪贴板 |
 | `tauri-plugin-opener` / `-shell` | 用默认程序打开文件/目录 |
 | `tauri-plugin-store` | 轻量 KV 持久化(前端设置) |
@@ -172,7 +170,7 @@
 | 命令面板 | `@mantine/spotlight`、`cmdk`、`kbar` | ★ @mantine/spotlight | VS Code 式 Ctrl+Shift+P,随 Mantine 生态 |
 | 快捷键 | `react-hotkeys-hook`、`tinykeys` | ★ react-hotkeys-hook | |
 | 拖拽 | `@dnd-kit/core`(+`sortable`)、`react-dnd` | ★ dnd-kit | 拖文件/排序,现代无障碍 |
-| 右键菜单 | UI 库自带 / `tauri-plugin-context-menu`(原生) | ★ 视需求 | 需要系统级菜单用 Tauri 插件 |
+| 应用内右键面板 | Mantine `Menu`/Popover + PluginHost context-menu 注册 API | ★ 规划 | 独立 `plugin-context-menu` 负责界面与上下文；业务插件注册菜单项并由自身执行。Tauri 原生 context-menu 不用于本应用扩展面板 |
 | 通知/Toast | `@mantine/notifications`、`sonner`、`react-hot-toast` | ★ @mantine/notifications | 随 Mantine 生态 |
 | 图标 | `lucide-react`、`@tabler/icons-react` | ★ lucide-react | |
 | 文件类型图标 | `@vscode/codicons`、`file-icons-js`、`vscode-icons` | ★ 按需 | 文件树/列表的类型图标 |
@@ -228,11 +226,11 @@
 
 | 架构层(见 [01](01-architecture.md)) | 归入的库 |
 |---|---|
-| **能力层(原子 Rust)** | ignore/jwalk、notify、blake3/RustCrypto、rusqlite+r2d2、infer/mime_guess、image/fast_image_resize、trash、fs_extra、zip/tar/flate2、tantivy、pdfium-render、encoding_rs、sysinfo、natord |
+| **能力层(原子 Rust)** | ignore/jwalk、notify、blake3/RustCrypto、rusqlite+r2d2、infer/mime_guess、Windows Shell `IFileOperation`/`IThumbnailCache` adapters、tantivy、encoding_rs、sysinfo、natord |
 | **后端内核(cordis-rs)** | cordis-rs/core/loader/hmr/logger/timer、tracing、serde、figment、thiserror/anyhow、tokio/rayon |
 | **后端插件(Rust)** | 复用能力层 Service;需要时直连 similar/fastcdc 等(经契约) |
 | **前端基座(React)** | React、**Mantine**(core/hooks/spotlight/notifications/dates/modals/form，统一主题与组件样式)、TanStack Virtual/Table、react-arborist、zustand、事件总线 |
-| **前端插件(ESM)** | 各自按需:CodeMirror 6、react-diff-view、Shiki、react-markdown、react-pdf、react-photo-view、ECharts、pretty-bytes……(React 与 Mantine 等共享依赖经 import map 走宿主单例) |
+| **前端插件(ESM)** | 各自按需:Open File Viewer、react-diff-view、ECharts、pretty-bytes……(React 与 Mantine 等共享依赖经 import map 走宿主单例) |
 | **工具链** | Vite、cargo、tauri-cli、Biome/clippy、Vitest/nextest、WebDriverIO+tauri-driver、changesets、tauri-action |
 
 ---
@@ -259,7 +257,8 @@
 | 代码查看器 | ✅ 默认 CodeMirror 6 | 只读预览;需 VS Code 级编辑再上 Monaco(重),做成独立插件 |
 | DB | ✅ rusqlite + WAL | 若强烈需要异步 + 编译期 SQL 校验再切 sqlx |
 | 全文检索 | ✅ tantivy | 数据量小、想少依赖可退回 SQLite FTS5 |
-| 视频缩略图/转码(ffmpeg-next) | ⚪ 待评估 | 依赖系统 ffmpeg、体积大,做成独立媒体插件按需启用 |
+| Windows 系统缩略图 | 🔵 已定方案，待实现 | `plugin-windows-thumbnails` 经 Windows Shell API 读取/提取，不生成应用缩略图 |
+| 统一文件预览 | 🔵 已定方案，待实现 | 单一 `plugin-preview` 采用 Open File Viewer React SDK；kkFileView 暂不采用（独立 Java/Office 转换服务） |
 
 ### 6.1 落地状态(2026-10-08 开源库使用审计)
 
@@ -278,8 +277,10 @@
 | Mantine `core`+`hooks`+`notifications`(**7.17.8**) | ✅ 在用(基座外壳与插件 UI 全走 Mantine:SegmentedControl/Tabs/ScrollArea/Table/Timeline/Badge…) | `spotlight/dates/modals/form` 未引 → P6-14/27;**改 `plugin-sdk` 源码或升 Mantine 版本后必须 `pnpm build:shared`**——插件运行时 import 的是 `shared-dist*/plugin-sdk.js` 预打包件,漏建会在加载时报 "does not provide an export named …" |
 | 并行遍历 `ignore`/`jwalk` + `rayon` | ❌ 未引(`fs.list` 现同步 `read_dir`) | P6-1 |
 | `natord` | ✅ 在用(`fs.list` 出参自然序、忽略大小写) | — |
-| `image`(default-features off:png/jpeg/gif/bmp/webp/tiff)+ `base64` | ✅ 在用(`capabilities/thumb.rs` 解码 → 等比缩放 `FilterType::Triangle` → PNG data URL;带 mtime 键缓存) | `fast_image_resize` 未引:当前缩放质量足够,量大再评估 |
-| `trash`/`fs_extra`/`sysinfo`/`infer`/`mime_guess`/`encoding_rs`/`chardetng`/`similar`/`tantivy`/`zip`/`tar`/`sevenz-rust`/`fastcdc` | ❌ 未引 | P6-1…13(对应功能建时接入) |
+| 旧 `image` + `base64` 缩略图链 | ✅ 当前代码在用，目标需移除 | P6-66：替换为 Windows Shell 系统缩略图；删除应用生成与 canvas mock 路径 |
+| `trash`/`fs_extra` | 不再选用 | `plugin-file-ops` 将 Windows 文件写操作交给系统 Shell `IFileOperation` |
+| Lore Rust 核心/`lore-vm` | ❌ 未引 | P6-69/70：先固定 revision 并验证 Windows、API、磁盘格式及是否需服务端；若需要 sidecar，复核 D4 单进程决策 |
+| `sysinfo`/`infer`/`mime_guess`/`encoding_rs`/`chardetng`/`similar`/`tantivy`/`fastcdc` | ❌ 未引 | P6-1…13(对应功能建时接入；`similar`/`fastcdc` 需随 Lore 迁移复核) |
 | 前端功能库:`@tanstack/react-virtual`、`react-arborist`、`lucide-react` | ✅ 在用(各自打进插件 dist,不进共享集):虚拟滚动=`plugin-file-browser` 列表+网格单条流;树=`plugin-view-file-tree`;图标=基座外壳 + browser + inspector | 剩余:P6-16/18/19/21/22 |
 | 前端功能库(TanStack Table、dnd-kit、react-hotkeys-hook、codemirror、shiki、react-diff-view、react-markdown、react-pdf、react-photo-view、echarts、dayjs、pretty-bytes、i18next) | ❌ 未引 | P6-14…27(功能插件化时接入) |
 | `tauri-plugin-notification`/`-window-state`/`-single-instance` | ❌ 未引 | P6-28/29 |

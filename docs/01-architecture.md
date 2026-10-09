@@ -117,17 +117,18 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
   → 结果回前端插件,局部渲染
 ```
 
-### 流 B:文件变更 → 后端记录历史 → 前端时间线更新(后端事件驱动)
+### 流 B:文件变更 → Lore 工作区状态刷新 → 前端时间线更新(后端事件驱动)
 ```
 文件监听(能力层, notify)── emit file:changed ──▶ 内核事件管道
   → plugin-file-history-backend 的 ctx.on::<FileChanged>() 触发 (Fiber)
-  → 调用能力层 hash_compute,与上次比对
-  → 有变动 → 调用能力层 db.* 写入历史
+  → 调用 Lore 适配能力查询仓库内目标的 dirty/workspace 状态
+  → file:changed 只作失效提示；用户显式执行“创建版本”时再由 Lore stage/commit
+  → Lore 成功创建 revision 后发生命周期事件 → plugin-history-metadata 捕获该 revision 边界的系统缩略图/属性并保存 → 发 `history:metadata:updated`
   → ctx.emit::<HistoryUpdated>(payload)
   → 事件桥 → Tauri emit → 前端事件总线
   → plugin-file-history/frontend 的时间线面板收到并刷新
 ```
-注意:流 B 中前端插件**不主动轮询**,完全由后端事件驱动;前后端两个插件物理隔离,只靠 `history:updated` 事件契约通信。
+注意:流 B 中前端插件**不主动轮询**,由后端事件驱动失效通知;前后端插件只靠契约通信。Lore 是版本内容与提交的事实来源；普通文件 watcher 不自动制造提交。用户需先显式选择/连接 Lore 仓库，仓库外路径不纳管。`plugin-history-metadata` 只保存、显示 revision 创建边界上的缩略图与属性，点击切换只发请求，由 `plugin-file-history` 执行 Lore 恢复。旧 `db.history.*` 只保留为兼容元数据，不再作为可恢复版本。
 
 ---
 
@@ -175,7 +176,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 要点:
 - **D/E 的分界是"是否多消费者且要求单例"**。功能库(哪怕大,如 CodeMirror/echarts/arborist)只要单插件用,就打进插件自己的 dist,**不进共享集**;共享集永远只放框架 + Mantine。
 - **B/C 的分界是"原子 vs 业务"**。`image` 缩放是能力(B);"何时给哪些文件生成缩略图"是业务(C 或前端插件用 B)。
-- **缩略图只经 `thumb.image` 能力**(PNG data URL),不走 `file:`/asset URL:否则拿到路径就等于绕过 `permissions.capabilities` 读任意文件。前端按可见卡片懒取 + 负缓存(见 08 §5.1)。
+- **缩略图只经 `shell.thumbnail.read` 能力**读取 Windows Shell 系统缩略图；应用不自行解码、绘制或生成缩略图。能力受插件权限门控，未命中可由 Windows handler 提取并写入系统缓存；未支持时显示文件类型图标。前端按可见卡片懒取。统一预览另走路径绑定、只读、短时有效的预览资源句柄，禁止裸本地路径绕过权限。
 - **目录顺序由 provider 负责**:`fs.list` 返回自然序、忽略大小写(`natord`),并直接带 `modifiedMs`。浏览器拿到 10 万条时不再做任何排序,头部日期列也不产生 N 次 `fs.stat`。
 - **重依赖(ffmpeg/pdfium/tantivy/monaco)默认做成独立能力 + 独立插件**,按需启用,不占核心路径。
 - 新增前端功能一律**插件化**以持续 dogfood 架构;新能力落 B 后**同步 `core-shared/contracts`↔`plugin-sdk` 两侧并跑 `contract:check`**;新事件先冻结进 02 §7.1。
@@ -230,8 +231,8 @@ activeSidebarView(A) → sidebarSelection(B) → focusRef(C) → activeDetailTab
 | **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、Mantine 主题 provider(默认亮色；主题由设置插件控制)、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限、**插件运行态(装载/卸载/启停)由 loader 独占**:它对外提供 `plugins.list`/`plugins.setEnabled` 两个基座前端能力(见 02 §5.3),**哪些插件不可关闭也是基座策略**,manifest 无法自我豁免 |
 | **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<paneId>`)、`plugin-layout-views`(拥有 B 的视图互斥,提供 `nav-panel:<viewId>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`)、`plugin-settings`(拥有设置悬浮面板的分页,提供 `settings-page:<name>`) |
 | **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` … 各贡献一个 A 图标 + 一个 `nav-panel:<viewId>` 面板 |
-| **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格)、search 结果、archive 等 |
-| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history)、`plugin-file-details`(信息表 + BLAKE3,注入 detail-info-zone)、`plugin-preview-text`(preview-zone,纯文本;高亮待 P6-22)、`plugin-file-ops`(操作按钮) |
+| **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格)、search 结果、storage-analysis 等 |
+| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history; Lore 版本操作/时间线)、`plugin-history-metadata`(history-record:metadata; 版本缩略图/属性的保存与展示)、`plugin-file-details`(信息表 + BLAKE3,注入 detail-info-zone)、`plugin-preview`(preview-zone,统一格式预览；迁移期间接替 `plugin-preview-text`)、`plugin-file-ops`(操作按钮) |
 | **功能插件(注入设置面板)** | 任何插件都可贡献 `settings-page:<name>` 一页(标题写自己的 `slots[].label`):页内容只该插件认得,读写**自己的** localStorage 键,并由同插件内的模块级偏好 store 广播给已渲染的实例,使设置**即时生效**而不经基座状态 |
 
 要点:外层网格与总线**留在基座**(稳定、零业务),只把**多变的部分**插件化;提供嵌套槽的容器目前为四个——三个界面框架容器(分栏 / 视图互斥 / 详情)加设置悬浮面板容器 `plugin-settings`。`layoutMode`/`panes`(每栏 id 与比例)属 `plugin-layout-panes` **局部状态**,不上基座;`activeDetailTab` 是级联终点、住在基座元状态里(D 容器读它、用户点 tab 时发 `detail:tab:changed`)。跨区协调只走 §9.2 的不透明引用。

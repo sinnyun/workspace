@@ -4,6 +4,8 @@
 
 > 代码片段均为**契约示意**。cordis-rs 的确切泛型/错误类型签名以 Phase 0 锁定的 crate 版本为准(见 [04-roadmap.md](04-roadmap.md));前端 host API 的确切类型以 `core-shared` 里最终导出的 `plugin-sdk` 为准。本文定义的是**形状与约束**,不是逐字 API。
 
+> 本文是插件运行时与机器接口规范。逐个插件的完整用户流程、交互状态、动效、持久化及跨插件数据流见 [09-plugin-functional-spec.md](09-plugin-functional-spec.md)；插件职责、插槽与依赖库目录见 [08-plugin-catalog.md](08-plugin-catalog.md)。
+
 ---
 
 ## 1. 插件的构成
@@ -87,6 +89,7 @@ plugin-<name>/
 | `permissions.capabilities` | ✓ | 允许调用的能力白名单,支持 `*` 通配 |
 | `permissions.events.subscribe/emit` | ✓ | 允许订阅/发出的事件白名单 |
 | `permissions.slots.contribute[]` | | 允许注入的槽(含他插件提供的嵌套槽)前缀白名单;注入未声明的槽被拒 |
+| `permissions.contextMenu.open/contribute` | | 规划字段；分别授权表面插件请求右键面板、业务插件注册右键动作；默认拒绝，插件卸载时撤销注册 |
 
 > **权限即契约**:未在 `permissions` 声明的能力调用或事件收发,一律被基座/内核拒绝。这既是安全边界,也让插件依赖关系可静态审计。
 
@@ -183,6 +186,12 @@ interface PluginHost {
   onSlotsChange(cb: () => void): () => void;      // 注册表变化(挂载/卸载/注入/移除)
   slotLabel(slotId: string): string | undefined;  // 贡献者为自己那个槽声明的显示名(manifest `slots[].label`)
 
+  // —— UI:应用级右键菜单(规划，见 P6-72；动作回调归注册插件所有)——
+  contextMenu: {
+    open(context: ContextMenuOpenContext): void; // 内容区域请求框架显示面板
+    registerItem(item: ContextMenuItem): () => void; // 返回卸载句柄
+  };
+
   // —— 事件(前端总线,含桥接来的后端事件)——
   on<T = unknown>(event: string, handler: (payload: T) => void): () => void; // 返回退订
   emit(event: string, payload?: unknown): void;
@@ -196,6 +205,28 @@ interface PluginHost {
 }
 
 interface SlotProps { host: PluginHost; slotId: string; }   // 插槽组件拿到的 props
+
+interface ContextMenuContext {
+  surfaceId: string;
+  targetKind: string;
+  targetRef: Ref | null;
+  selectedRefs: Ref[];
+  sessionId: string;
+  paneId?: string;
+  anchor: { x: number; y: number };
+  trigger: 'pointer' | 'keyboard' | 'accessibility';
+}
+type ContextMenuOpenContext = Omit<ContextMenuContext, 'trigger'> & { trigger?: ContextMenuContext['trigger'] };
+interface ContextMenuItem {
+  id: string;
+  label: string;
+  icon?: string;
+  group?: string;
+  order?: number;
+  when(context: ContextMenuContext): boolean;
+  enabled(context: ContextMenuContext): boolean | { enabled: false; reason: string };
+  execute(context: ContextMenuContext, signal: AbortSignal): void | Promise<void>;
+}
 
 // 基座只存不透明引用,不解释 kind 的业务含义(见 01 §9.2)
 interface Ref { kind: string; id: string; sourcePlugin: string; }
@@ -303,14 +334,14 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 | 读分块 | `fs.readChunk` | `{path, offset, len}` | `bytes/base64` | 大文件分块读 |
 | 读文本 | `fs.readText` | `{path}` | `text` | 二进制格式直接 reject,由 UI 显示中文错误 |
 | 计算哈希 | `hash.compute` | `{path, algo}` | `hex` | 流式分块,md5/blake3... |
-| 缩略图 | `thumb.image` | `{path, edge}` | `ThumbOut{dataUrl,mime,edge}` | 内核 `image` 解码 + 等比缩放 → PNG data URL;扩展名白名单外的格式 reject |
+| Windows 系统缩略图 | `shell.thumbnail.read` | `{path, edge, cacheOnly?}` | `ThumbnailOut{resource,edge,state}`（DTO 待冻结） | Windows Shell `IThumbnailCache`/系统 handler；不由应用解码或生成；非 Windows 返回 unsupported |
 | 监听变更 | `watch.subscribe` | `{path}` | 建立监听,变更走 `file:changed` 事件 | 基于 notify |
 | DB 查询 | `db.<store>.list/get` | store 相关 | JSON | 各插件的存储分区 |
 | DB 写入 | `db.<store>.put/append` | store 相关 | ack | |
 
 > `db.<store>.*` 中的 `<store>` 是插件命名空间(如 `db.history.*`),由内核做存储隔离与权限校验。能力清单会随基座演进;**新增能力属于基座变更,需重新构建宿主**。
 >
-> 图片预览一律走 `thumb.image`(受 `permissions.capabilities` 门控),**不用 `file:`/asset URL**——否则任何插件拿到路径就能绕过权限读取任意文件。
+> 缩略图一律走 `shell.thumbnail.read`(受 `permissions.capabilities` 门控)，通过 Windows Shell 读取系统缩略图；不得使用裸 `file:`/asset URL 或应用生成图像。统一预览内容另使用路径绑定、只读、短时授权的预览资源句柄，详情见 [`plugin-preview`](plugin-functional/plugin-preview.md)。
 
 ### 5.2 约束
 - 能力函数**必须无副作用策略**:只做 IO/计算,不做"如果是历史插件就……"这类判断。
@@ -383,7 +414,7 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 | 契约面 | v1 冻结内容 | 事实源(改代码即改这里) |
 |---|---|---|
 | manifest 结构 | `schemaVersion == 1`;字段见 §2.2 | Rust `fm_contracts::manifest::SCHEMA_VERSION` + `PluginManifest::validate`;TS `MANIFEST_SCHEMA_VERSION` + `validateManifest` |
-| 能力名 | `fs.home`/`fs.list`/`fs.stat`/`fs.readChunk`/`fs.readText`/`hash.compute`/`thumb.image`/`watch.subscribe`/`db.<store>.*`(基座前端能力另列,见 §5.3) | Rust `fm_contracts::capability::names`;TS SDK `Capabilities` |
+| 能力名 | `fs.home`/`fs.list`/`fs.stat`/`fs.readChunk`/`fs.readText`/`hash.compute`/`thumb.image`（迁移替换为 `shell.thumbnail.read`）/`watch.subscribe`/`db.<store>.*`(基座前端能力另列,见 §5.3) | Rust `fm_contracts::capability::names`;TS SDK `Capabilities` |
 | 事件名 + 负载 | `file:changed`、`history:updated`(前端另有 `selection:changed`) | Rust `fm_contracts::events`(`Service`/`Event` 的 `const NAME` + args 结构);TS SDK 事件类型 |
 | DTO 形状 | `ListEntry`(含 `modifiedMs`)/`StatOut`/`ReadChunkOut`/`ThumbOut`(camelCase) | Rust serde 结构;TS SDK 接口 |
 

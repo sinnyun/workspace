@@ -135,16 +135,16 @@
 | # | 能力 / 任务 | 采用库 | 完成条件 | 状态 |
 |---|---|---|---|---|
 | P6-1 | 并行目录遍历 + 大目录基准(收口 P1-7) | `ignore`(尊重 gitignore)或 `jwalk`(纯并行更快) + `rayon` | `fs.list` 并行遍历;10万级目录基准达预期;`fs.readChunk`/`hash.compute` 流式分块 | 🔵 |
-| P6-2 | 回收站删除 | `trash` | 能力 `fs.trash`(跨平台回收站,非硬删) | 🔵 |
-| P6-3 | 复制 / 移动 + 进度 | `fs_extra`(目录级)+ 自写分块进度 | 能力 `fs.copy`/`fs.move`,大文件进度事件 | 🔵 |
+| P6-2 | Windows 原生回收站删除 | Windows Shell `IFileOperation` + `FOFX_RECYCLEONDELETE` | `plugin-file-ops` 经授权 host capability 调用；由系统处理回收站和确认，不实现永久删除 | 🔵 |
+| P6-3 | Windows 原生复制 / 移动 | Windows Shell `IFileOperation` + 系统冲突/进度对话框 | `plugin-file-ops` 不引入 `fs_extra` 或自写分块复制；COM 调用放专用 STA 线程，返回逐项结果和取消状态 | 🔵 |
 | P6-4 | 文件名自然排序 | `natord` | 列表/排序 "2 file" < "10 file" | ✅(`fs.list` 出参按 `natord::compare_ignore_case` 排好,provider 负责顺序,浏览器不再排序;dev mock 生成序与之对齐) |
 | P6-5 | 磁盘/系统信息 | `sysinfo` | 能力 `sys.disk`(剩余空间、占用统计) | 🔵 |
 | P6-6 | 类型识别(MIME) | `infer`(魔数)+ `mime_guess`(扩展名兜底) | 能力 `file.kind`,供预览/图标插件消费 | 🔵 |
-| P6-7 | 图像缩略图 | `image`(default-features off:png/jpeg/gif/bmp/webp/tiff)+ `base64` | 能力 `thumb.image`:内核解码 → 等比缩放(`FilterType::Triangle`,edge ≤ 512)→ PNG data URL,按 mtime 键缓存(`capabilities/thumb.rs`,3 个单测);不走 `file:`/asset URL,权限仍由 `permissions.capabilities` 门控 | ✅(`fast_image_resize` 未引:当前缩放质量与耗时足够,量大再评估) |
+| P6-7 | 旧应用自制图像缩略图（迁移源记录） | 当前 `image` + `base64` 实现 | 当前代码经 `thumb.image` 解码/缩放；该实现由 P6-66 替换，目标应用不得自制缩略图 | ✅ 现有实现；已被新决策取代 |
 | P6-8 | 文本编码探测 | `encoding_rs` + `chardetng` | `fs.readText` 非 UTF-8 正确预览 | 🔵 |
 | P6-9 | 全文检索(内容搜索插件) | `tantivy`(大)/ SQLite **FTS5**(小数据,零额外依赖) | 搜索插件后端索引 + `search.query` 能力;**先评估 FTS5 是否够用**再定 tantivy | ⚪ |
-| P6-10 | 归档浏览 | `zip` / `tar`+`flate2` / `sevenz-rust` | 只读浏览/解压能力,封进归档插件 | 🔵 |
-| P6-11 | 文本差异(file-history 内容 diff) | `similar` | 后端算行 diff,前端 `react-diff-view`(见 P6-20)展示 | 🔵 |
+| P6-10 | 归档浏览与解压 | `plugin-archive` | 曾规划 zip/tar/7z 虚拟目录浏览与解压；已取消，不纳入当前开发路线；统一预览器内的压缩包只读预览单独评估 | ⚫ 已取消 |
+| P6-11 | 文本差异(file-history 内容 diff) | Lore revision diff API；文本展示 `react-diff-view` | 优先由 Lore 提供版本比较；若接口不覆盖纯文本显示需求，再用 `react-diff-view` 呈现 | 🔵（随 Lore 历史迁移） |
 | P6-12 | DB schema 迁移 + 并发池 | `refinery`(版本化迁移)+ `r2d2_sqlite`(多线程池) | 当出现 schema 演进即引入 refinery;当前 rusqlite 单连接直连为已知延后项 | 🔵 |
 | P6-13 | 增量版本存储(块级历史,可选) | `fastcdc`(内容定义分块) | 仅在做块级去重历史时启用;否则不引 | ⚪ |
 
@@ -160,15 +160,15 @@
 | P6-19 | 快捷键 | `react-hotkeys-hook` | 基座级键位,插件可声明 | 🔵 |
 | P6-20 | 图标 | `lucide-react`(+ 文件类型图标 `@vscode/codicons`) | 基座与插件统一图标源,替换现有内联/emoji | 🟡(基座顶栏/折叠/会话、D 焦点标题、browser 文件类型图标已用 lucide;A 栏活动图标仍是 emoji) |
 | P6-21 | 日期 & 文件大小格式化 | `dayjs` + `pretty-bytes` | 时间线/列表展示 | 🔵(现为插件内自写 `toLocaleString`/`formatSize`) |
-| P6-22 | 代码/文本查看器(预览插件) | `@uiw/react-codemirror`(CodeMirror 6)+ `shiki`(静态高亮) | 只读预览插件;需 VS Code 级编辑再上 Monaco(重,独立插件) | 🟡(`plugin-preview-text` 已交付纯文本只读预览并接 `preview-zone`,见 P6-58;CodeMirror/Shiki 高亮未接) |
+| P6-22 | 统一文件预览插件 | Open File Viewer React SDK（MIT；依赖与格式按需验证） | 将现有纯文本预览并入唯一 `plugin-preview`；格式统一分派、受限本地资源句柄、按需 worker/资源清理 | 🔵（接替 P6-22/24 的分散预览计划） |
 | P6-23 | 版本 diff 面板 | `react-diff-view` | 消费 P6-11 后端 diff | 🔵 |
-| P6-24 | Markdown / PDF / 图片预览 | `react-markdown`+`remark-gfm` / `react-pdf`(`pdfjs-dist`)/ `react-photo-view` | 各做成独立预览插件按需装载 | 🔵 |
+| P6-24 | 统一预览格式覆盖 | Open File Viewer 内部格式插件（只保留一个应用预览插件） | Markdown/PDF/图片/媒体/Office 等按代表性样本逐类启用和验收；不再拆成独立应用插件 | 🔵 |
 | P6-25 | 磁盘占用 treemap | `echarts`(`echarts-for-react`) | 消费 P6-5 `sys.disk` + 遍历数据 | 🔵 |
 | P6-26 | i18n | `i18next` + `react-i18next` | 基座+插件文案 | 🔵 |
-| P6-27 | 模态 / 表单 | `@mantine/modals` + `@mantine/form` | 设置面板、重命名对话框等 | 🔵 |
+| P6-27 | 操作参数表单 | Mantine form/modal（仅收集新名称/目标等参数） | 表单负责输入校验和确认；实际重命名/创建/删除均委托系统原生 provider，不实现文件操作算法 | 🔵 |
 | P6-28 | 系统级通知 | `tauri-plugin-notification` | 长任务完成通知(应用内通知已用 `@mantine/notifications`) | 🔵 |
 | P6-29 | 窗口状态记忆 / 单实例 | `tauri-plugin-window-state` / `tauri-plugin-single-instance` | 记住尺寸位置;禁多开 | 🔵 |
-| P6-30 | 用默认程序打开(增强) | `tauri-plugin-opener`(已装)+ `tauri-plugin-dialog`(已装) | 系统关联打开、原生对话框——验证并接线到能力层 | 🟡 |
+| P6-30 | 默认程序打开 / 资源管理器定位 | `tauri-plugin-opener`(已装)+ `tauri-plugin-dialog`(已装) | 经 host capability 暴露默认关联打开、reveal 与系统文件/目录选择；纳入 `plugin-file-ops` 统一入口 | 🟡 |
 
 ### 6C · 质量 / 构建 / 发布工具链(06 §3)
 
@@ -216,6 +216,14 @@
 | P6-63 | 分栏高度不变量(容器 owner 强制) | `plugin-layout-panes` | 栅格行轨 `minmax(0,1fr)`;栏 `display:flex`+`flex-direction:column`+`min-height:0`;outlet `flex:1`+`overflow:hidden`(滚动归内容插件) | ✅ | 修前:栏 `<section>` 计算样式是 `display:block`(`display: hidden ? "none" : undefined` 被 React 当成"删除该属性"),`flex:1` 失效 → outlet 长到 260,110px → 1 万条目录**挂载 10,002 行**(无窗口化)且被 `overflow:hidden` 静默裁掉;修后实测 `paneDisplay=flex`、outlet 725px、scroller 视口 663px,挂载节点回到数百 |
 | P6-64 | 设置改为独立插件的**悬浮面板**(分页 + 启停) | `plugin-settings` + 基座 `loader`/`invoke` + SDK | 齿轮打开 Mantine `Popover` 悬浮面板(不占六区、不再是 B 视图),**面板尺寸固定**、正文各自滚动;面板分页 **软件设置 / 插件设置**;软件设置含主题与**插件启停列表**;各插件的设置页经 `settings-page:<name>` 嵌套槽进入"插件设置";关闭/开启对当前界面即时生效并持久化 | ✅ | `vite dev` @1420 实测:点齿轮 → `aria-expanded=true`、`.mantine-Popover-dropdown` 矩形 `620×560` 且**完全落在视口内**(x=55, y=577);**切换分页/子页外形与位置完全不变**(软件设置 → 插件设置 → 文本预览 → 回软件设置,四次读数都是 `620×560 @55,577`),正文滚动容器 client 477 / scroll 842 → 溢出只出内部滚动条,且滚动位置切回仍在(top 300 → 300);面板 `[role=tab]` = `软件设置`/`插件设置`(子页 `文件浏览`/`文本预览`);**14 行插件**,其中 4 行 `disabled` + `基础插件` 徽标(三容器 + 设置本身);关「文件浏览」→ C 四栏立即无地址栏/条目(`main` 只剩栏头),开回 → 4 个地址栏恢复;关「标签视图」→ A 栏 `标签` 图标消失且 `fm.plugins.disabled.v1=["plugin-view-tags"]`,**重载后仍关闭**(rail 无该图标、列表该行 `checked=false`),开回后图标回归、存储清空;ESC 关闭生效(受控 `opened` + `onChange`);全程控制台 0 错误、14 插件加载日志齐 |
 | P6-65 | 插件设置页机制 + 两个样例 | `plugin-settings` 提供 `settings-page`,file-browser / preview-text 各贡献一页 | 每页内容由贡献插件自持,写自己的 localStorage 偏好键,并经**同插件内的模块级 store**(`useSyncExternalStore`)广播 → 已渲染实例即时跟随;值域在读/写两侧 clamp | ✅ | 实测:`fm.file-browser.prefs.v1={"defaultMode":"grid","thumbnails":true}` — 改「新建栏位的显示方式」为网格 → **四栏全部转网格**(选过模式的栏仍保留自己的选择);关「显示网格缩略图」→ `/stress/数据集-1千` 滚动位置上的 `<img>` 由 7 → **0**,再开 → 7(不重载、不重挂栏);`fm.preview-text.prefs.v1` — 关「自动读取」→ D 预览变中文按钮 `读取内容` + `尚未读取`,开回即显示内容;字符上限输 `50` 回车 → 回落并存储 `1000`(下限 1000,上限 2,000,000)。**未取证**:截断效果本身不可观察——dev mock 的文本恒为 ~50 字符,远小于任何合法上限 |
+| P6-66 | Windows 系统缩略图插件 | Windows Shell `IThumbnailCache::GetThumbnail` + 系统 handlers | 新增受权限 gate 的 `shell.thumbnail.read`；支持仅读缓存/允许 Shell 提取两种策略；替换 `thumb.image` 图像解码生成和 stress canvas mock；消费者无图时回退类型图标；非 Windows 明确 unsupported | 🔵 |
+| P6-67 | 本地预览安全数据通道 | Tauri host capability + Open File Viewer 输入适配 | 只读、路径绑定、短时有效的预览句柄与 range/chunk 读取，支持取消/撤销；禁止裸 `file:`/asset 路径和大文件全量 base64；完成离线与敏感文件验证 | 🔵 |
+| P6-68 | 统一预览迁移与格式验收 | `plugin-preview` + Open File Viewer | 右侧预览区增加“缩略图 / 文件预览”切换；每个新焦点默认只显示系统缩略图，不初始化 viewer、不读正文；用户点击后才合并旧 `plugin-preview-text` 及原 Markdown/图片/PDF/媒体规划；切回或换焦点取消读取并释放资源；移除独立预览插件计划及 `media.thumb` 路线 | 🔵 |
+| P6-69 | Lore 文件历史集成可行性与版本锁定 | Lore / LoreGUI 的 `lore-vm` 核心 | 验证 Windows 构建、Rust API/许可、仓库格式、服务端依赖与当前单进程宿主兼容性；固定上游 revision；确定由宿主管理的本地服务生命周期和数据目录 | 🔵 |
+| P6-70 | 文件历史版本操作迁移到 Lore | `plugin-file-history` + `lore.*` host capabilities | 仓库显式初始化/连接；查询文件历史、工作区 dirty 状态、指定版本内容与差异；显式创建版本；恢复前检查未提交改动并确认；恢复结果形成可追踪的新变化；旧 `db.history.*` 只读兼容。版本行显示委托给 P6-71 | 🔵（依赖 P6-69） |
+| P6-71 | 历史版本展示信息插件 | `plugin-history-metadata` + `history-record:metadata` 子槽 | 订阅 Lore revision 创建生命周期（含连接同一 Lore 服务的 LoreGUI 创建通知），在版本边界采集并保存系统缩略图、文件大小/类型、图片尺寸和采集状态；独占 `db.historyMetadata.*` 与缩略图 blob；历史行按 revision 查询展示；点击切换只发请求，由 P6-70 的 Lore 适配层确认并执行；插件不得调用 Lore commit/restore | 🔵（依赖 P6-69/70） |
+| P6-72 | 右键菜单框架插件 | `plugin-context-menu` + PluginHost `contextMenu` API | 应用内 Mantine 覆盖面板；统一打开上下文、锚点定位、过滤/分组/键盘操作和插件注册生命周期；定义 `ContextMenuContext` 与插件卸载/ACL 规则；框架不实现具体业务动作 | 🔵 |
+| P6-73 | 右键功能插件接入 | `plugin-file-ops`、`plugin-file-history`、favorites/tags、file-browser | 各插件用框架 API 自动注册自有菜单项；按文件/目录/空白区/历史版本等上下文筛选；handler 仍由贡献插件调用自身能力；验证禁用/卸载和权限撤销后清理 | 🔵（依赖 P6-72） |
 
 > 6E 基座/SDK 落地清单:`App.tsx` 六区网格 + `SessionTabs`/`Toolbar`/`PanelResizer` + `ThemeSwitch` + `useShellLayout` 持久化;`main.tsx` 的 `MantineProvider defaultColorScheme="light"`;`state.ts` 每会话级联快照 + 总线单写;`slots.ts`/`PluginSlot.tsx` 为 provide/contribute 运行时(出口挂载/卸载即 `slot:registered`/`slot:disposed`),注册项携带 `label`;`host.ts` 加 `provides`/`slots.contribute` gating 与 `slotLabel`;`loader.ts` 声明槽走 `contributeToSlot`,卸载时 `releasePlugin`;SDK `matchesPermission`/`slotPrefix`/`Events` + `BaseSlots`,并新增**只寻址不解释**的发现面 `host.name`、`contributedSlots(prefix?)`、`providedSlots(prefix?)`(当前已挂载出口)、`onSlotsChange(cb)`、`slotLabel(slotId)`;`contracts`(Rust)镜像 `frontend.provides`、`permissions.slots` 与 `frontend.slots[].label`。容器侧:`slot:reconfigured{action:'add'|'remove'}` 由**容器**按意图发,框架层负责 registered/disposed。
 

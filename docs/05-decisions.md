@@ -35,6 +35,8 @@
 
 ---
 
+---
+
 ## D2 · 后端插件分发:静态内置 Rust
 
 **背景**:cordis-rs 插件是编译期 Rust。需要决定第三方/运行时能否安装新后端插件。
@@ -151,21 +153,21 @@
 
 ---
 
-## D8 · 图片预览:走 `thumb.image` 能力,不开 `file:`/asset URL
+## D8 · 缩略图:读取 Windows Shell 系统缩略图,应用不生成
 
 | 选项 | 权限模型 | 结论 |
 |---|---|---|
-| 内核 `thumb.image` → PNG data URL(`image` 解码 + 等比缩放) | 与 `fs.*` 同一套 `permissions.capabilities` gating;返回的是**已缩放的图**,不是原文件 | ✓ **采用** |
+| `shell.thumbnail.read` → Windows Shell 缩略图 | 与 `fs.*` 同一套 `permissions.capabilities` gating；通过 `IThumbnailCache::GetThumbnail`，命中读取系统缓存、未命中由系统 handler 提取；应用不解码/生成 | ✓ **采用** |
 | `asset:` / `file:` 协议直出原图 | 拿到路径即可显示任意文件,权限形同虚设;缩放交给浏览器 CSS,大图全量解码 | ✗ |
-| 前端插件自行解码(自带 `image` 库) | 每个插件重复实现 + 无共享缓存 | ✗ |
+| 应用内核/插件自行解码、缩放或 canvas 造缩略图 | 复制系统能力、格式覆盖不一且偏离用户要求 | ✗ |
 
-**决定**:缩略图是**能力(B)**;"何时向哪些条目要图"是**业务(C/前端)**——`plugin-file-browser` 只按当前可见卡片懒取,配共享 LRU 与**负缓存**(不支持的扩展名记 `null`,不再重复请求)。
+**决定**:Windows 系统缩略图由 `plugin-windows-thumbnails` 统一拥有；宿主 capability 提供受权限控制的 Shell API，`plugin-file-browser`、`plugin-preview` 等消费者只按当前可见项/焦点请求。应用短期缓存只保存读取结果引用以减少重复请求，Windows 缓存由系统管理。无图时回退文件类型图标。
 
 **理由**:权限边界不能被显示路径绕过(与 01 §8 "B/C 分界是原子 vs 业务"一致);按需取图让 50 万条目录的拉取成本仍只是一屏请求量。
 
-**代价**:data URL 比二进制响应体积大(base64 +33%),靠 edge 上限 512 与 mtime 键缓存压住。
+**代价**:能力仅在 Windows 上提供，且格式覆盖取决于系统已安装的 Shell thumbnail handler；缓存未命中可能慢，消费者必须提供占位和图标回退。
 
-**复核触发**:若缩略图成为主要瓶颈(冷启动大量首屏),再评估自定义 Tauri protocol 直出**已缓存的缩略图文件**(仍不是原文件)。
+**验收重点**:首屏按可见范围请求并限制并发；若 Shell 缓存冷启动较慢，先优化请求队列和状态反馈，不改为应用生成或解析自定义缩略图缓存。
 
 ---
 
@@ -238,6 +240,68 @@
 
 ---
 
+## D14 · 文件写操作由 Windows Shell 执行，插件只负责受权调用与界面
+
+**决定**：规划中的 `plugin-file-ops` 作为唯一应用内文件写操作入口。Windows 上复制、移动、重命名、新建和删除由 Rust host 的 Windows provider 调用 `IFileOperation`；删除默认设置 `FOFX_RECYCLEONDELETE`。打开文件和资源管理器定位使用已注册的 `tauri-plugin-opener`；路径选择使用 `tauri-plugin-dialog`。前端通过 host capability 调用，不能直接 import Tauri 插件或发任意 Shell 命令。
+
+**理由**：用户要求复用 Windows 自身文件操作能力。系统 Shell 已提供目录级 copy/move/rename/delete/create、冲突提示和进度界面，避免应用再实现一套递归复制、覆盖规则和进度算法。能力层仍负责权限、路径校验、COM 线程隔离和结果适配；插件负责用户入口、参数输入、确认和结果反馈。
+
+**实现边界**：`IFileOperation` 要求单线程单元（STA），因此需使用专用 COM STA 线程，不直接在通用 Tokio worker 调用。系统进度/冲突对话框作为权威反馈；插件最多展示操作摘要，不再叠加自制的详细进度 UI。永久删除不属于普通删除。非 Windows 平台不得静默退回自写文件 mutation；须提供单独原生 provider 或明确显示不支持。
+
+**复核触发**：若产品后续要求无系统对话框、云端/虚拟文件或可跨平台的后台批处理，再评估相应 OS provider；不得默认恢复 `fs_extra`/`trash` 的通用自实现路线。
+
+---
+
+## D15 · 右侧预览默认使用系统缩略图，内容预览由用户显式启动
+
+**决定**：右侧 `preview-zone` 对每个新聚焦文件默认只展示 `plugin-windows-thumbnails` 返回的 Windows 系统缩略图；没有缩略图时显示文件类型图标。用户点击“打开文件预览”后，统一 `plugin-preview` 才初始化 Open File Viewer 并通过授权资源句柄读取文件。预览区提供单个切换按钮，viewer 模式下按钮为“返回缩略图”。模式只属于当前焦点文件的临时 UI 状态；切换焦点恢复缩略图模式，不记住上次预览状态。
+
+**理由**：选中文件时不自动读取完整内容或启动格式解析，避免大文件导致不必要的数据传递、内存占用和界面阻塞；用户的明确点击才启动完整预览。
+
+**生命周期**：切回缩略图或切换焦点时立即取消在途读取、撤销只读预览句柄并释放 viewer/worker/media/object URL。缩略图读取独立于 viewer，不得触发正文读取。
+
+---
+
+## D16 · 文件版本历史：Lore 核心 + 本应用历史面板
+
+**背景**：现有 `plugin-file-history` 以 watcher、hash 和 SQLite 元信息记录快照，尚未形成可恢复的内容版本。用户希望采用开源 Lore 进行版本管理和切换，并可参考 LoreGUI。
+
+**决定**：以 Epic Games Lore 作为仓库内文件版本、提交和历史操作的事实来源；`plugin-file-history` 保留 `detail-tab:history` 时间线并负责 Lore 查询、创建和恢复。参考 LoreGUI 将 Lore 核心与 GUI 解耦的 `lore-vm` 思路，不嵌入其完整桌面 GUI。文件监听只刷新 Lore 工作区状态；默认由用户明确创建版本，不对每个 watcher 事件静默提交。恢复需确认并产生可追踪的新变化，不回退分支头。
+
+**边界**：用户显式选择/确认仓库根目录；仓库外文件不自动纳管。版本正文由 Lore 仓库存储；插件偏好仅存仓库选择等配置。旧 `db.history.*` 元数据在迁移验证前保留，只作为旧记录，不宣称可恢复。若 Lore 需要 `loreserver`，必须在 P6-69 验证其打包与生命周期；这将触及 D4 的“单进程、无 sidecar”决策，须一并评估其架构代价。远端服务仅在用户主动配置后连接。
+
+**代价与风险**：增加 Lore API/格式、Windows 打包与服务生命周期维护；Lore 和 LoreGUI 目前处于 pre-1.0，接口与磁盘格式可能变化。正式开发前需固定兼容 revision、核对许可证并完成 Windows/API/数据迁移验证。若上游核心与当前单进程宿主不兼容，应先重评集成适配层，不得直接把 CLI 或完整 GUI 塞进插件 UI。
+
+**证据**：[Epic Games Lore](https://github.com/EpicGames/lore) 说明其集中式、内容寻址版本控制模型及 pre-1.0 状态；[LoreGUI](https://github.com/BiloxiStudios/loregui) 说明它使用原生 Lore Rust crate，并提供与 GUI 解耦的 `lore-vm` 核心；[Lore CLI 文档](https://github.com/EpicGames/lore/blob/main/docs/reference/lore-cli-commands.md) 列出文件历史、差异、指定版本读取与恢复相关操作。
+
+---
+
+## D17 · 历史版本展示信息由独立插件保存
+
+**背景**：Lore revision 负责版本内容和版本操作，但历史面板还需要呈现创建该版本时的缩略图、文件大小和图片尺寸；直接读取当前文件会让历史条目显示成当前状态。
+
+**决定**：新增 `plugin-history-metadata`，在 Lore revision 创建生命周期边界捕获并保存缩略图和展示属性，按 `(repositoryId, revisionId, normalizedPath)` 关联。它提供 `history-record:metadata` 子槽，在历史版本行显示数据；缩略图来自 Windows Shell，不由应用生成。插件不管理 Lore 仓库、revision、diff、commit 或 restore。
+
+点击“切换到此版本”时，元数据卡片只发 `history:revision:restore-requested`；`plugin-file-history` 执行焦点/未提交改动校验、确认和 Lore 恢复。元数据采集为 best-effort，失败只显示缺失状态，不得阻塞或回滚 Lore 创建的版本。采集来源必须绑定提交边界并校验 revision 文件指纹，竞态时标记 partial/unavailable，禁止误绑后续文件状态。
+
+**存储边界**：元数据插件独占 `db.historyMetadata.*` 和应用数据目录下的缩略图 blob；清理这些副本不删除原文件或 Lore revision。Lore 仓库保持版本事实来源，元数据表仅作历史面板展示快照。
+
+---
+
+## D18 · 取消独立压缩包浏览与解压插件
+
+**决定**：取消 `plugin-archive` 的 zip/tar/7z 虚拟目录浏览与解压规划；不为该插件继续建设专用 archive 能力、虚拟路径 Ref 或解压流程。保留其功能文档作为已取消方案的记录。统一预览器可能支持的压缩包只读预览属于另一项预览能力，需按具体格式单独验收。
+
+**理由**：当前目标聚焦文件管理主流程与插件扩展基础设施；压缩包浏览/解压需要独立路径模型、冲突策略和安全防护，暂不纳入当前开发范围。
+
+---
+
+## D19 · 右键面板采用可扩展的独立界面框架
+
+**决定**：新增 `plugin-context-menu` 作为应用内 Mantine 右键面板框架，独立负责打开上下文、面板定位、分组/排序、键盘交互、关闭与插件项注册生命周期。业务动作由各自插件通过 `host.contextMenu.registerItem` 注册并用自身权限执行；入口区域通过 `host.contextMenu.open` 提交短期上下文。插件禁用/卸载时自动移除其贡献项。
+
+**边界**：框架不实现具体文件/收藏/标签/Lore 动作，也不代替贡献插件调用 capability；上下文只含不透明 Ref、surface、栏/会话和锚点信息，不持久化。右键面板是应用内浮层，不采用 Tauri 原生菜单作为插件扩展界面。初始贡献者包括 file-ops、file-history、favorites/tags 和 file-browser。
+
 ## 决策速查
 
 | 维度 | 决定 |
@@ -252,7 +316,10 @@
 | 契约源 | `core-shared`(TS `plugin-sdk` + Rust `contracts`)+ 契约测试 |
 | 界面标题来源 | 贡献者 manifest `slots[].label` → `host.slotLabel`(容器不硬编码他插件名,见 D6) |
 | 亮/暗主题 | Mantine 内置 colorScheme(默认亮色;基座与插件共用单例,不自造主题层,见 D7) |
-| 图片预览 | 能力 `thumb.image` 出 PNG data URL + 前端按可见性懒取(不开 `file:`/asset URL,见 D8) |
+| 图片预览 | 统一 `plugin-preview` + Open File Viewer；本地文件经受权预览句柄读取，图片缩略图另经 Windows Shell `shell.thumbnail.read`(见 D8) |
+| 文件版本历史 | Lore 是版本与操作事实来源；`plugin-history-metadata` 保存 revision 绑定的展示快照(见 D16/D17) |
+| 压缩包浏览/解压 | 独立 `plugin-archive` 已取消；预览器的只读格式支持另行评估(见 D18) |
+| 右键菜单 | `plugin-context-menu` 管框架；业务插件注册自有动作并自行执行(见 D19) |
 | 列表顺序/mtime | provider 在 `fs.list` 里排好(自然序)并带 `modifiedMs`,浏览器不排序(见 D9) |
 | 分栏几何不变量 | 容器 owner 保证"栏高有界 + outlet 不滚动",内容插件只写 `height:100%`(见 D10) |
 | 设置入口形态 | 独立插件 `plugin-settings` 的悬浮 `Popover`(不占六区、不是 B 视图;分页软件设置/插件设置,见 D11) |

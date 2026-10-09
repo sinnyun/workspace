@@ -34,6 +34,8 @@
 | [docs/06-open-source-stack.md](docs/06-open-source-stack.md) | 分层开源方案选型清单(后端 Rust / 前端 React / 工具链):推荐库 + 理由 + 隔离层原则 |
 | [docs/07-cordis-api-memo.md](docs/07-cordis-api-memo.md) | cordis-core API 事实备忘(签名/生命周期/panic 语义);依赖源码仅作 API 参考 |
 | [docs/08-plugin-catalog.md](docs/08-plugin-catalog.md) | 插件目录与库分布:每个开源库归到哪个插件/层、插件清单与 manifest 草案、实现顺序 |
+| [docs/09-plugin-functional-spec.md](docs/09-plugin-functional-spec.md) | 插件完整功能规格:用户交互、界面状态与动效、数据处理/存储、能力与插件间事件契约、逐插件验收门槛 |
+| [docs/plugin-functional/README.md](docs/plugin-functional/README.md) | **逐插件功能文档**:每个现有/规划插件单独说明实际职责、数据流、交互显示、动效切换、状态、存储和插件间交流 |
 | [docs/00-handover.md](docs/00-handover.md) | **开发交接文档**:当前进度快照、已验证证据、在跑任务、剩余任务流程、关键坑与命令 |
 
 ---
@@ -51,7 +53,7 @@ workspace/
 ├── core-shared/             # contracts(Rust) / kernel(Rust) / plugin-sdk(TS)
 ├── apps/                    # host(Tauri Rust) / shell-ui(React 前端)
 ├── plugins/plugin-file-history/  # 首个全栈插件(backend Rust + frontend ESM + manifest)
-└── plugins/(规划)file-browser、file-ops、search、preview-*、archive、storage-analysis … 见 08
+└── plugins/(规划)context-menu(右键框架)、file-ops、search、preview(统一预览)、windows-thumbnails、storage-analysis … 见 08
 ```
 
 常用命令:

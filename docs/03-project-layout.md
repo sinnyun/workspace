@@ -53,7 +53,7 @@ my-file-manager/
 │           ├── slots.ts           # 动态 slot registry:外层槽 + 容器插件提供的嵌套槽(pane-slot:<paneId>/nav-panel:<viewId>/detail-tab:*/settings-page:<name>)+ 出口挂载即 registered/disposed + 记录贡献者的槽标签
 │           ├── state.ts           # 级联元状态:每会话一份快照(activeTabId/activeSidebarView/sidebarSelection/focusRef/activeDetailTab,zustand)+ 总线单写路径
 │           ├── invoke.ts          # 能力分流:**基座前端能力表 → Tauri `invoke` → 浏览器 mock**
-│           ├── dev-mocks.ts       # 浏览器 dev 的能力 mock(含 `/stress` 真实感压力数据集与 `thumb.image` 的 canvas 实现)+ dev 插件索引(仅 dev)
+│           ├── dev-mocks.ts       # 当前浏览器 dev mock 含旧 canvas 缩略图路径；迁移目标只用固定 fixture/unsupported 状态，不生成图
 │
 ├── core-shared/
 │   ├── contracts/                 # Rust 契约包(Event/Capability/DTO/manifest + fm-contract-dump)
@@ -79,14 +79,14 @@ my-file-manager/
 │   ├── plugin-view-tags/          # ✅ A+B 侧栏视图:标签与成员
 │   ├── plugin-file-details/       # ✅ 基础信息:属性 + BLAKE3,注入 detail-info-zone
 │   ├── plugin-settings/           # ✅ 设置插件:A 栏齿轮 → **悬浮面板**(软件设置/插件设置分页)。软件设置含主题三态 + 插件启停列表;提供嵌套槽 settings-page:<name> 给各插件放自己的设置页
-│   ├── plugin-preview-text/       # ✅ 文本预览:随 focusRef 读 fs.readText 填 preview-zone(纯文本,高亮见 P6-22);自带偏好 `fm.preview-text.prefs.v1`(自动读取/字符上限)+ 设置页 settings-page:preview-text
+│   ├── plugin-preview-text/       # ✅ 当前旧实现:纯文本预览；后续并入统一 plugin-preview 并移除独立入口
 │   ├── plugin-mock-data/          # ✅ 开发期:`/stress` 压力数据集的 B 区入口(activity-rail + nav-panel:stress)
 │   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/级联与槽事件捕获面板(bottom-drawer)
 │   ├── plugin-dev-slot-harness/   # ✅ 开发期:嵌套槽运行时验证夹具(bottom-drawer + 提供 dev-pane:<n>,含越权拒绝取证)
 │   │   # 除 file-history 外均为纯前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │   │   # 最后三个是开发期演示/调试插件,只在浏览器 dev 的模拟索引里装载(见 08 §5.3)
-│   └── (规划,见 08)业务:plugin-file-ops / search / preview-markdown /
-│       preview-image / preview-pdf / media / archive / storage-analysis
+│   └── (规划,见 08)业务:plugin-file-ops / search / plugin-preview /
+│       plugin-context-menu / plugin-windows-thumbnails / storage-analysis
 │       # 每个前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │       # 全栈插件再加 backend/(cargo 成员,只依赖 fm-contracts + cordis,经能力契约)
 │
