@@ -11,9 +11,10 @@
  * no self-hide check lives here. Cascade role: publishes
  * `sidebar:selection:changed` (B → C).
  */
+import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderTree } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Tree } from "react-arborist";
+import { Tree, type NodeRendererProps } from "react-arborist";
 import {
   Events,
   errorMessage,
@@ -43,11 +44,14 @@ export function RailIcon({ host }: SlotProps) {
   return (
     <button
       type="button"
+      className="fm-rail-button"
+      aria-label="目录树"
+      aria-pressed={active === VIEW_ID}
       title="目录树"
       onClick={() => host.emit(Events.sidebarViewChanged, { viewId: VIEW_ID })}
       style={railButtonStyle(active === VIEW_ID)}
     >
-      🌳
+      <FolderTree size={19} />
     </button>
   );
 }
@@ -105,8 +109,8 @@ export function TreePanel({ host }: SlotProps) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, height: "100%", minHeight: 0 }}>
-      <div style={{ fontSize: 12, color: "var(--mantine-color-dimmed)" }}>目录树</div>
+    <div className="fm-nav-panel fm-tree" style={{ display: "flex", flexDirection: "column", gap: 4, height: "100%", minHeight: 0 }}>
+      <div className="fm-nav-heading">目录树</div>
       {rootError && <div style={{ color: "var(--mantine-color-red-6)", fontSize: 12 }}>{rootError}</div>}
       <div ref={box} style={{ flex: 1, minHeight: 0 }}>
         {tree.length > 0 && (
@@ -115,7 +119,7 @@ export function TreePanel({ host }: SlotProps) {
             width={size.w}
             height={size.h}
             indent={14}
-            rowHeight={22}
+            rowHeight={32}
             openByDefault={false}
             disableDrag
             disableDrop
@@ -141,9 +145,31 @@ export function TreePanel({ host }: SlotProps) {
                 sourcePlugin: PLUGIN_NAME,
               } satisfies Ref);
             }}
-          />
+          >
+            {TreeRow}
+          </Tree>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Keep the tree library's selection/keyboard behavior; customize its visuals. */
+function TreeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
+  return (
+    <div ref={dragHandle} style={{ ...style, display: "flex", alignItems: "center", gap: 6, height: "100%", paddingRight: 6 }}>
+      {node.isLeaf ? <span style={{ width: 18, flexShrink: 0 }} /> : (
+        <button type="button" tabIndex={-1} className="fm-tree-toggle"
+          aria-label={`${node.isOpen ? "折叠" : "展开"}${node.data.name}`}
+          onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
+          {node.isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+      )}
+      {node.data.isDir ? (node.isOpen ? <FolderOpen size={16} color="var(--mantine-color-yellow-6)" /> : <Folder size={16} color="var(--mantine-color-yellow-6)" />) : <FileText size={15} color="var(--mantine-color-dimmed)" />}
+      {node.isEditing ? (
+        <input autoFocus defaultValue={node.data.name} onBlur={() => node.reset()}
+          onKeyDown={(e) => { if (e.key === "Escape") node.reset(); if (e.key === "Enter") node.submit(e.currentTarget.value); }} />
+      ) : <span title={node.data.path} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>}
     </div>
   );
 }
@@ -184,12 +210,12 @@ function findNode(nodes: TreeNode[], id: string): TreeNode | undefined {
 
 const railButtonStyle = (active: boolean): CSSProperties => ({
   display: "block",
-  width: 36,
-  height: 36,
+  width: 40,
+  height: 40,
   margin: "2px auto",
   fontSize: 16,
   cursor: "pointer",
-  borderRadius: 6,
+  borderRadius: "var(--mantine-radius-md)",
   border: "none",
   background: active ? "var(--mantine-color-blue-light)" : "transparent",
 });

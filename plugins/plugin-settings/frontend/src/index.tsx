@@ -112,6 +112,8 @@ export function SettingsEntry({ host }: SlotProps) {
             自己翻；`onChange` 仍负责 ESC / 点外部把状态送回来。 */}
         <button
           type="button"
+          className="fm-rail-button"
+          aria-pressed={open}
           title="设置"
           aria-label="设置"
           onClick={() => setOpen((o) => !o)}
@@ -121,8 +123,8 @@ export function SettingsEntry({ host }: SlotProps) {
         </button>
       </Popover.Target>
 
-      <Popover.Dropdown>
-        <Group gap={8} wrap="nowrap" style={panelHeaderStyle}>
+      <Popover.Dropdown className="fm-settings">
+        <Group className="fm-settings-header" gap={8} wrap="nowrap" style={panelHeaderStyle}>
           <Title order={6} tt="none">
             设置
           </Title>
@@ -199,7 +201,7 @@ function SoftwareSettings({
           ]}
         />
         <Text size="xs" c="dimmed">
-          主题由界面库记忆并即时生效，与顶栏的切换共用同一个值。
+          选择适合你的显示方式，自动保存并即时生效。
         </Text>
       </Block>
 
@@ -227,14 +229,14 @@ function PluginRow({
   onToggle: (name: string, enabled: boolean) => void;
 }) {
   return (
-    <Group gap={10} wrap="nowrap" style={rowStyle}>
+    <Group className="fm-plugin-row" gap={10} wrap="nowrap" style={rowStyle}>
       <div style={{ minWidth: 0, flex: 1 }}>
         <Group gap={6} wrap="nowrap">
           <Text size="sm" fw={600} truncate>
             {info.displayName}
           </Text>
           {info.protected && (
-            <Badge size="xs" variant="light" color="gray" title="区域容器与设置面板本身，关闭后界面无法工作">
+            <Badge size="xs" variant="light" color="gray" title="基础插件保持开启，保证界面正常使用">
               基础插件
             </Badge>
           )}
@@ -318,7 +320,7 @@ const SchemeLabel = ({ icon, text }: { icon: ReactNode; text: string }) => (
 
 function Block({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <Stack gap={6}>
+    <Stack className="fm-settings-block" gap={10}>
       <Text size="xs" fw={600}>
         {title}
       </Text>
@@ -348,11 +350,11 @@ const railButtonStyle = (active: boolean): CSSProperties => ({
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  width: 36,
-  height: 36,
+  width: 40,
+  height: 40,
   margin: "2px auto",
   cursor: "pointer",
-  borderRadius: 6,
+  borderRadius: "var(--mantine-radius-md)",
   border: "none",
   // 侧栏是 flex 列，齿轮靠 marginTop:auto 固定在底部。
   marginTop: "auto",
@@ -387,11 +389,11 @@ const dropdownStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   overflow: "hidden",
-  padding: 12,
+  padding: 18,
 };
 
 const rowStyle: CSSProperties = {
-  padding: "4px 6px",
-  borderRadius: 4,
+  padding: "10px 12px",
+  borderRadius: "var(--mantine-radius-sm)",
   border: "1px solid var(--mantine-color-default-border)",
 };

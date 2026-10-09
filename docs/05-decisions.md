@@ -77,7 +77,7 @@
 - drop-in 目标可达成:构建后的前端插件放入目录即生效,无需重建基座。
 - iframe/多 WebView 隔离虽强,但通信与体验代价过高,不适合需要与主视图频繁协作的文件管理器面板。
 
-**代价**:隔离弱于 iframe,需靠 host API 收口 + 权限白名单 + 样式隔离(Mantine 共享单例 + CSS Modules;不用 Shadow DOM,因 Mantine 浮层走 portal)兜底(→ R5)。共享依赖(React/Mantine)版本靠 import map 约定。
+**代价**:隔离弱于 iframe,需靠 host API 收口 + 权限白名单 + Mantine 主题变量约束插件样式(不用 Shadow DOM,因 Mantine 浮层走 portal)兜底(→ R5)。共享依赖(React/Mantine)版本靠 import map 约定。主题与插件样式规范见 [01-architecture.md](01-architecture.md) §7。
 
 **后果**:前端插件产物极小(只含自身代码);React 全局单例;`plugin-sdk` 仅类型 + 无状态 helper。
 

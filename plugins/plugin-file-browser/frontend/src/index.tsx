@@ -28,13 +28,16 @@ import type { CSSProperties } from "react";
 import {
   ActionIcon,
   Badge,
+  Button,
   Group,
+  Menu,
   SegmentedControl,
   Stack,
   Switch,
   Text,
   TextInput,
 } from "@mantine/core";
+import { createToolbarStore } from "./toolbar-store";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
@@ -69,7 +72,7 @@ const PANE_PREFIX = "pane-slot";
  *  than leaked through a shared instance (docs/01 §9.1). */
 const LS_KEY = "fm.file-browser.v1";
 const CARD_MIN_WIDTH = 150;
-const CARD_ROW_HEIGHT = 116;
+const CARD_ROW_HEIGHT = 156;
 /** Longest edge requested from `thumb.image`; a card shows ~96px. */
 const THUMB_EDGE = 96;
 /** Extensions worth asking the image capability about. Formats the provider cannot
@@ -144,7 +147,7 @@ interface Prefs {
   thumbnails: boolean;
 }
 
-const DEFAULT_PREFS: Prefs = { defaultMode: "list", thumbnails: true };
+const DEFAULT_PREFS: Prefs = { defaultMode: "grid", thumbnails: true };
 
 function readPrefs(): Prefs {
   try {
@@ -275,7 +278,8 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
-  const [address, setAddress] = useState(cwd);
+  const browserRef = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(false);
 
   /** A new location truncates the forward branch; stepping back/forward does not push. */
   const navigate = useCallback((dir: string): void => {
@@ -288,9 +292,9 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     setError(null);
   }, []);
 
-  const goBack = (): void => setHist((h) => ({ ...h, pos: Math.max(0, h.pos - 1) }));
-  const goForward = (): void =>
-    setHist((h) => ({ ...h, pos: Math.min(h.stack.length - 1, h.pos + 1) }));
+  const goBack = useCallback((): void => setHist((h) => ({ ...h, pos: Math.max(0, h.pos - 1) })), []);
+  const goForward = useCallback((): void =>
+    setHist((h) => ({ ...h, pos: Math.min(h.stack.length - 1, h.pos + 1) })), []);
 
   /** Read one directory. The provider's order is kept as-is: sorting 500k names on
    *  the UI thread is the host's job (`fs.list` returns natural order), and the
@@ -320,7 +324,6 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
 
   // The address bar mirrors whichever directory this pane now shows.
   useEffect(() => {
-    setAddress(cwd);
     if (cwd) remember(memKey, { cwd });
   }, [cwd, memKey]);
 
@@ -353,9 +356,10 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     [host, navigate, slotId, session],
   );
 
-  const claimPane = (): void => {
+  const claimPane = useCallback((): void => {
     lastPaneBySession.set(session, slotId);
-  };
+    toolbarStore.claim(session, slotId);
+  }, [session, slotId]);
 
   const publishFocus = (ent: ListEntry): void => {
     claimPane();
@@ -371,99 +375,58 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     if (ent.isDir) navigate(ent.path);
   };
 
-  const switchMode = (next: ViewMode): void => {
+  const switchMode = useCallback((next: ViewMode): void => {
     setManualMode(next);
     remember(memKey, { mode: next });
-  };
+  }, [memKey]);
+
+  const controller = useMemo<NavigationController>(() => ({
+    id: memKey, cwd, mode,
+    canBack: hist.pos > 0, canForward: hist.pos < hist.stack.length - 1,
+    canUp: !!cwd && cwd !== parentOf(cwd),
+    back: goBack, forward: goForward, up: () => navigate(parentOf(cwd)),
+    reload, navigate, setMode: switchMode, claim: claimPane,
+  }), [memKey, cwd, mode, hist.pos, hist.stack.length, goBack, goForward, navigate, reload, switchMode, claimPane]);
+
+  useEffect(() => {
+    const el = browserRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setVisible(el.clientWidth > 0 && el.clientHeight > 0));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => { toolbarStore.set(session, slotId, controller, visible); }, [session, slotId, controller, visible]);
+  useEffect(() => () => { toolbarStore.remove(session, slotId); }, [session, slotId]);
 
   return (
-    <div style={paneStyle} onMouseDown={claimPane}>
-      <div style={addressBarStyle}>
-        <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="后退"
-            aria-label="后退"
-            disabled={hist.pos <= 0}
-            onClick={goBack}
-          >
-            <ArrowLeft size={15} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="前进"
-            aria-label="前进"
-            disabled={hist.pos >= hist.stack.length - 1}
-            onClick={goForward}
-          >
-            <ArrowRight size={15} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="上级目录"
-            aria-label="上级目录"
-            disabled={!cwd || cwd === parentOf(cwd)}
-            onClick={() => navigate(parentOf(cwd))}
-          >
-            <ArrowUp size={15} />
-          </ActionIcon>
-          <ActionIcon variant="subtle" color="gray" size="sm" title="刷新" aria-label="刷新" onClick={reload}>
-            <RefreshCw size={14} />
-          </ActionIcon>
-        </Group>
+    <div ref={browserRef} className="fm-browser" style={paneStyle} onMouseDown={claimPane} onFocusCapture={claimPane}>
+      <NavigationBar controller={controller} />
 
-        <TextInput
-          size="xs"
-          variant="default"
-          value={address}
-          onChange={(e) => setAddress(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && address.trim()) navigate(address.trim());
-          }}
-          placeholder="输入目录路径后回车"
-          aria-label="当前目录地址"
-          style={{ flex: 1, minWidth: 0 }}
-        />
-
-        <SegmentedControl
-          size="xs"
-          value={mode}
-          onChange={(v) => switchMode(v as ViewMode)}
-          data={[
-            { value: "list", label: <ListLabel /> },
-            { value: "grid", label: <GridLabel /> },
-          ]}
-          style={{ flexShrink: 0 }}
-        />
-      </div>
-
-      <div style={dirHeaderStyle}>
-        <Text size="xs" fw={600} truncate style={{ minWidth: 0 }}>
+      <div className="fm-directory" style={dirHeaderStyle}>
+        <Text className="fm-directory-name" size="xs" fw={600} truncate title={cwd} style={{ minWidth: 0 }}>
           {cwd || "—"}
         </Text>
-        <Text size="xs" c="dimmed" style={{ marginLeft: "auto", flexShrink: 0 }}>
+        <Text className="fm-directory-count" title={`读取耗时 ${fetchMs.toFixed(0)} ms`} size="xs" c="dimmed" style={{ marginLeft: "auto", flexShrink: 0 }}>
           {loading
             ? "载入中…"
             : error
               ? "—"
-              : `${counts.dirs} 目录 · ${counts.files} 文件 · ${fetchMs.toFixed(0)}ms`}
+              : `${counts.dirs} 个文件夹 · ${counts.files} 个文件`}
         </Text>
       </div>
 
       {error && (
-        <Text size="xs" c="red" px={6}>
-          {error}
-        </Text>
+        <div className="fm-empty" style={{ flex: 1 }}>
+          <span className="fm-empty-icon"><Folder size={28} /></span>
+          <Text size="sm" fw={600}>无法打开此文件夹</Text>
+          <Text size="xs" c="red" style={{ overflowWrap: "anywhere" }}>{error}</Text>
+          <Text size="xs" c="dimmed">检查目录路径，或点击刷新重试。</Text>
+        </div>
       )}
 
       {!error && (
         <EntryArea
+          loading={loading}
           host={host}
           mode={mode}
           entries={entries}
@@ -477,16 +440,129 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   );
 }
 
+interface NavigationController {
+  id: string;
+  cwd: string;
+  mode: ViewMode;
+  canBack: boolean;
+  canForward: boolean;
+  canUp: boolean;
+  back: () => void;
+  forward: () => void;
+  up: () => void;
+  reload: () => void;
+  navigate: (path: string) => void;
+  setMode: (mode: ViewMode) => void;
+  claim: () => void;
+}
+
+const toolbarStore = createToolbarStore<NavigationController>();
+
+/** The existing topbar slot carries the active pane's navigation, owned by this plugin. */
+export function FileBrowserToolbar({ host }: SlotProps) {
+  const [session, setSession] = useState(host.getState().activeTabId);
+  useEffect(() => host.onStateChange((state) => setSession(state.activeTabId)), [host]);
+  const controller = useSyncExternalStore(toolbarStore.subscribe, () => toolbarStore.get(session));
+  useEffect(() => { controller?.claim(); }, [controller?.id]);
+  return controller ? <NavigationBar key={controller.id} controller={controller} global />
+    : <Text size="xs" c="dimmed">文件导航</Text>;
+}
+
+function NavigationBar({ controller, global = false }: { controller: NavigationController; global?: boolean }) {
+  const [address, setAddress] = useState(controller.cwd);
+  useEffect(() => setAddress(controller.cwd), [controller.cwd]);
+  return (
+    <div className={global ? "fm-address fm-global-address" : "fm-address"}
+      onMouseDown={controller.claim} onFocusCapture={controller.claim}
+      style={{ ...addressBarStyle, ...(global ? { padding: 0, flex: 1 } : {}) }}>
+        <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            title="后退"
+            aria-label="后退"
+            disabled={!controller.canBack}
+            onClick={controller.back}
+          >
+            <ArrowLeft size={15} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            title="前进"
+            aria-label="前进"
+            disabled={!controller.canForward}
+            onClick={controller.forward}
+          >
+            <ArrowRight size={15} />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            title="上级目录"
+            aria-label="上级目录"
+            disabled={!controller.canUp}
+            onClick={controller.up}
+          >
+            <ArrowUp size={15} />
+          </ActionIcon>
+          <ActionIcon variant="subtle" color="gray" size="sm" title="刷新" aria-label="刷新" onClick={controller.reload}>
+            <RefreshCw size={14} />
+          </ActionIcon>
+        </Group>
+
+        <TextInput
+          className="fm-address-input"
+          leftSection={<Folder size={14} />}
+          size="xs"
+          variant="default"
+          value={address}
+          onChange={(e) => setAddress(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && address.trim()) controller.navigate(address.trim());
+          }}
+          placeholder="输入目录路径后回车"
+          aria-label="当前目录地址"
+          style={{ flex: 1, minWidth: 0 }}
+        />
+
+        <div className="fm-view-mode" style={{ flexShrink: 0 }}>
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <Button className="fm-dropdown-button" variant="default" size="xs" aria-label="视图模式"
+                rightSection={<span aria-hidden="true">⌄</span>}>
+                {controller.mode === "list" ? <ListLabel /> : <GridLabel />}
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>视图模式</Menu.Label>
+              {(["list", "grid"] as const).map((mode) => (
+                <Menu.Item key={mode} onClick={() => controller.setMode(mode)}
+                  leftSection={mode === "list" ? <List size={14} /> : <LayoutGrid size={14} />}
+                  rightSection={controller.mode === mode ? <span aria-label="当前视图">✓</span> : undefined}>
+                  {mode === "list" ? "列表" : "网格"}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        </div>
+      </div>
+  );
+}
+
 const ListLabel = () => (
   <Group gap={4} wrap="nowrap">
     <List size={12} />
-    <span>列表</span>
+    <span className="fm-view-label-text">列表</span>
   </Group>
 );
 const GridLabel = () => (
   <Group gap={4} wrap="nowrap">
     <LayoutGrid size={12} />
-    <span>网格</span>
+    <span className="fm-view-label-text">网格</span>
   </Group>
 );
 
@@ -519,6 +595,7 @@ function buildRows(entries: ListEntry[], cwd: string, mode: ViewMode, cols: numb
 /** List and grid share ONE virtualized row stream, so a 50k-entry directory costs the
  *  same in either mode. Grid rows carry real height because a card shows a thumbnail. */
 function EntryArea({
+  loading,
   host,
   mode,
   entries,
@@ -527,6 +604,7 @@ function EntryArea({
   onFocus,
   onEnter,
 }: {
+  loading: boolean;
   host: PluginHost;
   mode: ViewMode;
   entries: ListEntry[];
@@ -537,6 +615,7 @@ function EntryArea({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+  const empty = entries.length === 0;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -544,24 +623,26 @@ function EntryArea({
     const observer = new ResizeObserver(() => setWidth(el.clientWidth));
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [empty]);
 
-  const cols = mode === "grid" ? Math.max(2, Math.floor(width / CARD_MIN_WIDTH) || 2) : 1;
+  const cols = mode === "grid" ? Math.max(1, Math.floor((width + 8) / (CARD_MIN_WIDTH + 8)) || 1) : 1;
   const rows = useMemo(() => buildRows(entries, cwd, mode, cols), [entries, cwd, mode, cols]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (i) =>
-      rows[i].kind === "header" ? 24 : rows[i].kind === "cards" ? CARD_ROW_HEIGHT : 26,
+      rows[i].kind === "header" ? 32 : rows[i].kind === "cards" ? CARD_ROW_HEIGHT : 36,
     overscan: 10,
   });
 
   if (entries.length === 0) {
     return (
-      <Text size="xs" c="dimmed" px={6} py={4}>
-        空目录
-      </Text>
+      <div className="fm-empty" style={{ flex: 1 }}>
+        <span className="fm-empty-icon"><Folder size={28} /></span>
+        <Text size="sm" fw={600}>{loading ? "正在加载目录…" : "此文件夹为空"}</Text>
+        <Text size="xs" c="dimmed">{loading ? "稍候即可查看文件内容" : "这里还没有文件或子文件夹"}</Text>
+      </div>
     );
   }
 
@@ -579,11 +660,11 @@ function EntryArea({
           };
           if (row.kind === "header") {
             return (
-              <div key={item.key} style={{ ...rowHeaderStyle, ...abs }}>
+              <div className="fm-entry-group" key={item.key} style={{ ...rowHeaderStyle, ...abs }}>
                 <Text size="xs" fw={600}>
                   {row.title}
                 </Text>
-                <Text size="xs" c="dimmed" truncate ml="auto">
+                <Text className="fm-entry-group-path" size="xs" c="dimmed" truncate ml="auto">
                   {row.path}
                 </Text>
               </div>
@@ -593,7 +674,16 @@ function EntryArea({
             return (
               <div
                 key={item.key}
-                style={{ ...listRowStyle, ...abs, background: selected === row.ent.path ? SELECTED : undefined }}
+                className="fm-entry"
+                data-selected={selected === row.ent.path}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selected === row.ent.path}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { onFocus(row.ent); onEnter(row.ent); }
+                  if (e.key === " ") { e.preventDefault(); onFocus(row.ent); }
+                }}
+                style={{ ...listRowStyle, ...abs }}
                 onClick={() => onFocus(row.ent)}
                 onDoubleClick={() => onEnter(row.ent)}
                 title={row.ent.isDir ? "双击进入" : undefined}
@@ -602,21 +692,30 @@ function EntryArea({
                 <Text size="xs" truncate style={{ flex: 1, minWidth: 0 }}>
                   {row.ent.name}
                 </Text>
-                <Text size="xs" c="dimmed" style={cellStyle}>
+                <Text className="fm-size-cell" size="xs" c="dimmed" style={cellStyle}>
                   {row.ent.isDir ? "" : formatSize(row.ent.size ?? 0)}
                 </Text>
-                <Text size="xs" c="dimmed" style={cellStyle}>
+                <Text className="fm-date-cell" size="xs" c="dimmed" style={cellStyle}>
                   {formatModified(row.ent.modifiedMs)}
                 </Text>
               </div>
             );
           }
           return (
-            <div key={item.key} style={{ ...cardsRowStyle, ...abs }}>
+            <div key={item.key} style={{ ...cardsRowStyle, ...abs, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
               {row.items.map((ent) => (
                 <div
                   key={ent.path}
-                  style={{ ...cardStyle, outline: selected === ent.path ? SELECTED_OUTLINE : undefined }}
+                  className="fm-card"
+                  data-selected={selected === ent.path}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected === ent.path}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { onFocus(ent); onEnter(ent); }
+                    if (e.key === " ") { e.preventDefault(); onFocus(ent); }
+                  }}
+                  style={cardStyle}
                   onClick={() => onFocus(ent)}
                   onDoubleClick={() => onEnter(ent)}
                   title={ent.isDir ? "双击进入" : undefined}
@@ -627,7 +726,7 @@ function EntryArea({
                   </Text>
                   <Group gap={4} wrap="nowrap" style={{ marginTop: "auto" }}>
                     <Badge size="xs" variant="light" color={ent.isDir ? "blue" : "gray"} tt="uppercase">
-                      {ent.isDir ? "dir" : extensionOf(ent.name) || "file"}
+                      {ent.isDir ? "文件夹" : extensionOf(ent.name) || "文件"}
                     </Badge>
                     <Text size="xs" c="dimmed">
                       {ent.isDir ? "" : formatSize(ent.size ?? 0)}
@@ -722,7 +821,7 @@ function Thumb({ host, entry }: { host: PluginHost; entry: ListEntry }) {
     <img src={dataUrl} alt="" loading="lazy" style={thumbStyle} />
   ) : (
     <div style={thumbFallbackStyle}>
-      <IconFor entry={entry} size={candidate ? 30 : 22} />
+      <IconFor entry={entry} size={candidate ? 36 : entry.isDir ? 36 : 28} />
     </div>
   );
 }
@@ -759,8 +858,7 @@ function formatModified(ms: number | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-const SELECTED = "var(--mantine-color-blue-light)";
-const SELECTED_OUTLINE = "1px solid var(--mantine-color-blue-6)";
+
 
 const paneStyle: CSSProperties = {
   display: "flex",
@@ -774,7 +872,7 @@ const addressBarStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 6,
-  padding: "4px 0",
+  padding: "10px 8px",
   flexShrink: 0,
 };
 
@@ -782,10 +880,10 @@ const dirHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  padding: "2px 6px",
+  padding: "7px 10px",
   flexShrink: 0,
   borderBottom: "1px solid var(--mantine-color-default-border)",
-  background: "var(--mantine-color-body)",
+  background: "var(--mantine-color-default-hover)",
 };
 
 const scrollStyle: CSSProperties = {
@@ -799,33 +897,35 @@ const rowHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  padding: "2px 6px",
+  padding: "6px 10px",
+  height: 32,
 };
 
 const listRowStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 6,
-  padding: "3px 6px",
+  padding: "6px 10px",
+  height: 36,
   cursor: "pointer",
 };
 
 const cardsRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 6,
-  padding: "2px 2px",
+  display: "grid",
+  gap: 8,
+  padding: "6px 0",
   height: CARD_ROW_HEIGHT,
 };
 
 const cardStyle: CSSProperties = {
   flex: `1 1 ${CARD_MIN_WIDTH}px`,
-  maxWidth: 220,
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
   gap: 4,
-  padding: 6,
-  borderRadius: 6,
+  padding: 9,
+  minWidth: 0,
+  borderRadius: "var(--mantine-radius-md)",
   border: "1px solid var(--mantine-color-default-border)",
   cursor: "pointer",
   overflow: "hidden",
@@ -835,20 +935,20 @@ const cardStyle: CSSProperties = {
  *  thumbnail has arrived, so the virtualizer's estimate stays true. */
 const thumbStyle: CSSProperties = {
   width: "100%",
-  height: 62,
+  height: 82,
   objectFit: "cover",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
   flexShrink: 0,
   background: "var(--mantine-color-default-hover)",
 };
 
 const thumbFallbackStyle: CSSProperties = {
   width: "100%",
-  height: 62,
+  height: 82,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
   flexShrink: 0,
   background: "var(--mantine-color-default-hover)",
 };

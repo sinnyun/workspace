@@ -3,24 +3,46 @@
   "name": "plugin-file-browser",
   "version": "0.2.0",
   "displayName": "文件浏览",
-  "description": "内容插件：把目录浏览从基座外置进分栏容器的每个 pane-slot，网格卡片按需取缩略图，并发布 focus:changed 驱动 D；自带设置页（默认显示方式 / 缩略图）",
+  "description": "浏览文件夹，切换列表或网格，查看图片缩略图；可设置默认视图与缩略图显示。",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {
     "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "settings-page:file-browser", "export": "SettingsPage", "label": "文件浏览" }
+      {
+        "id": "topbar-zone",
+        "export": "FileBrowserToolbar"
+      },
+      {
+        "id": "settings-page:file-browser",
+        "export": "SettingsPage",
+        "label": "文件浏览"
+      }
     ],
     "provides": []
   },
   "permissions": {
-    "capabilities": ["fs.home", "fs.list", "thumb.image"],
+    "capabilities": [
+      "fs.home",
+      "fs.list",
+      "thumb.image"
+    ],
     "events": {
-      "subscribe": ["sidebar:selection:changed", "slot:registered", "slot:disposed"],
-      "emit": ["focus:changed"]
+      "subscribe": [
+        "sidebar:selection:changed",
+        "slot:registered",
+        "slot:disposed"
+      ],
+      "emit": [
+        "focus:changed"
+      ]
     },
     "slots": {
-      "contribute": ["pane-slot:*", "settings-page:file-browser"]
+      "contribute": [
+        "pane-slot:*",
+        "settings-page:file-browser",
+        "topbar-zone"
+      ]
     }
   }
 }

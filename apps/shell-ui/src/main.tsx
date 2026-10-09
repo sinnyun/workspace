@@ -4,6 +4,8 @@ import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
+import "./styles.css";
+import { theme } from "./theme";
 
 import { App } from "./App";
 import { bus } from "./eventbus";
@@ -29,7 +31,7 @@ async function bootstrap() {
   const root = createRoot(document.getElementById("root")!);
   root.render(
     <React.StrictMode>
-      <MantineProvider defaultColorScheme="light">
+      <MantineProvider theme={theme} defaultColorScheme="light">
         <Notifications position="top-right" />
         <App />
       </MantineProvider>

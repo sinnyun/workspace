@@ -80,7 +80,7 @@ export function HistoryPanel({ host }: SlotProps) {
 
   if (!path) {
     return (
-      <Stack gap="xs">
+      <Stack className="fm-detail-block" gap="sm">
         <Text fw={600}>文件历史</Text>
         <Text size="sm" c="dimmed">
           选择一个文件以查看其历史。
@@ -90,7 +90,7 @@ export function HistoryPanel({ host }: SlotProps) {
   }
 
   return (
-    <Stack gap="xs" style={{ height: "100%" }}>
+    <Stack className="fm-detail-block" gap="sm" style={{ height: "100%" }}>
       <Text fw={600}>文件历史</Text>
       <Code style={{ wordBreak: "break-all" }}>{path}</Code>
 

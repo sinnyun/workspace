@@ -131,7 +131,7 @@
 
 ### 2.1 UI 组件库(★ 已定:Mantine)
 
-**决定**:采用 **Mantine**。理由:电池最全(表格/日期/通知/命令面板/表单/模态一应俱全),主题走 CSS 变量 + CSS Modules,对插件样式隔离友好,密集型桌面应用开发最快。
+**决定**:采用 **Mantine**。主题集中管理共享颜色、字号、圆角、阴影和控件外观；布局使用 Mantine 组件、样式 API 与主题变量，保持运行时插件一致的外观。
 
 采用的 Mantine 生态包:
 - `@mantine/core` + `@mantine/hooks`(基础组件与 hooks)
@@ -140,11 +140,11 @@
 - `@mantine/dates` + `dayjs`(日期/时间线)
 - `@mantine/modals`(命令式模态)、`@mantine/form`(表单)
 
-> Mantine 作为**共享单例**经 import map 提供给前端插件(见 [03-project-layout.md](03-project-layout.md) §5),插件 UI 与基座风格统一、且各自不重复打包。因 Mantine 浮层(Modal/Menu/Tooltip/Notifications)经 portal 渲染到 `document.body`,**插槽不用 Shadow DOM 包裹**(否则浮层丢样式),隔离由 CSS Modules + Mantine CSS 变量承担。
+> Mantine 作为**共享单例**经 import map 提供给前端插件(见 [03-project-layout.md](03-project-layout.md) §5),插件 UI 与基座风格统一、且各自不重复打包。因 Mantine 浮层(Modal/Menu/Tooltip/Notifications)经 portal 渲染到 `document.body`,**插槽不用 Shadow DOM 包裹**(否则浮层丢样式)。基座 Mantine 主题是共享外观来源；普通 CSS 负责布局约束和虚拟内容的专用呈现，颜色等设计值必须使用 Mantine 主题变量。
 
 | 候选(已评估) | 风格 | 隔离友好度 | 电池 | 结论 |
 |---|---|---|---|---|
-| **Mantine** | CSS 变量 + CSS Modules | 高 | 很全 | ★ 采用 |
+| **Mantine** | 共享主题 + Styles API + 主题变量 | 高 | 很全 | ★ 采用 |
 | shadcn/ui + Radix/Base UI + Tailwind | 复制进仓库、无头 | 中高(Tailwind 需 prefix) | 中 | 备选(若日后要极致定制) |
 | MUI | Emotion 运行时 CSS-in-JS | 中 | 很全 | 未采用 |
 | Chakra UI / HeroUI | 现代、主题化 | 中 | 全 | 未采用 |
@@ -197,7 +197,7 @@
 | i18n | `i18next` + `react-i18next`、`lingui` | ★ i18next | |
 | 日期 | `dayjs`、`date-fns` | ★ dayjs | 轻 |
 | 文件大小格式化 | `pretty-bytes`、`filesize` | ★ pretty-bytes | |
-| 样式方案(隔离) | Mantine CSS 变量 + CSS Modules(Vite 内置) | ★ CSS Modules | 配合 Mantine;不用 Shadow DOM(portal 浮层),见 [01-architecture.md](01-architecture.md) §7 |
+| 样式方案 | 基座 Mantine 主题 + Mantine Styles API/主题变量 | ★ Mantine 主题 | 几何布局与虚拟行使用局部结构样式；配合 portal 浮层，不用 Shadow DOM，见 [01-architecture.md](01-architecture.md) §7 |
 | 路由(若需多视图) | `@tanstack/react-router`、`react-router` | 可选 | 文件管理器多半不需要重路由 |
 
 ---
@@ -231,7 +231,7 @@
 | **能力层(原子 Rust)** | ignore/jwalk、notify、blake3/RustCrypto、rusqlite+r2d2、infer/mime_guess、image/fast_image_resize、trash、fs_extra、zip/tar/flate2、tantivy、pdfium-render、encoding_rs、sysinfo、natord |
 | **后端内核(cordis-rs)** | cordis-rs/core/loader/hmr/logger/timer、tracing、serde、figment、thiserror/anyhow、tokio/rayon |
 | **后端插件(Rust)** | 复用能力层 Service;需要时直连 similar/fastcdc 等(经契约) |
-| **前端基座(React)** | React、**Mantine**(core/hooks/spotlight/notifications/dates/modals/form)、TanStack Virtual/Table、react-arborist、zustand、事件总线、CSS Modules |
+| **前端基座(React)** | React、**Mantine**(core/hooks/spotlight/notifications/dates/modals/form，统一主题与组件样式)、TanStack Virtual/Table、react-arborist、zustand、事件总线 |
 | **前端插件(ESM)** | 各自按需:CodeMirror 6、react-diff-view、Shiki、react-markdown、react-pdf、react-photo-view、ECharts、pretty-bytes……(React 与 Mantine 等共享依赖经 import map 走宿主单例) |
 | **工具链** | Vite、cargo、tauri-cli、Biome/clippy、Vitest/nextest、WebDriverIO+tauri-driver、changesets、tauri-action |
 

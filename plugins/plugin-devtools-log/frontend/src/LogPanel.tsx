@@ -115,10 +115,10 @@ export function LogPanel(_props: SlotProps) {
           value={newestFirst ? "新在上" : "旧在上"}
           onChange={(v) => setNewestFirst(v === "新在上")}
         />
-        <ActionIcon size="sm" variant="light" color="gray" title="导出 JSON" onClick={exportJson}>
+        <ActionIcon size="sm" variant="light" color="gray" aria-label="导出日志" title="导出 JSON" onClick={exportJson}>
           ⇩
         </ActionIcon>
-        <ActionIcon size="sm" variant="light" color="red" title="清空" onClick={() => logStore.clear()}>
+        <ActionIcon size="sm" variant="light" color="red" aria-label="清空日志" title="清空" onClick={() => logStore.clear()}>
           ✕
         </ActionIcon>
       </Group>
@@ -169,9 +169,10 @@ function LogRow({
   const hasDetail = Boolean(r.detail);
   return (
     <Box
+      className="fm-log-row"
       style={{
         borderBottom: "1px solid var(--mantine-color-default-border)",
-        padding: "2px 4px",
+        padding: "5px 6px",
         cursor: hasDetail ? "pointer" : "default",
       }}
       onClick={hasDetail ? onToggle : undefined}
@@ -192,6 +193,7 @@ function LogRow({
       </Group>
       {expanded && hasDetail && (
         <Box
+          className="fm-log-detail"
           component="pre"
           mih={0}
           style={{
@@ -201,7 +203,7 @@ function LogRow({
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             background: "var(--mantine-color-dark-8)",
-            borderRadius: 4,
+            borderRadius: "var(--mantine-radius-sm)",
           }}
         >
           {r.detail}

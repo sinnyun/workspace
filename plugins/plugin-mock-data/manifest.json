@@ -3,7 +3,7 @@
   "name": "plugin-mock-data",
   "version": "0.1.0",
   "displayName": "模拟数据 / 压力测试",
-  "description": "开发期数据集视图：列出 /stress 下的模拟卷宗，点击即让中间网格以真实 fs.list + thumb.image 路径加载，用于大数据压力观察",
+  "description": "提供不同规模的模拟文件，检查大量文件下的浏览和显示效果。",
   "author": "you",
   "minHostVersion": "0.1.0",
 

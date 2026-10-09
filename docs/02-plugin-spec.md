@@ -212,7 +212,7 @@ interface HostMetaState {
 - **只经 host**:不得 `import` 另一个插件;不得直接调 `window.__TAURI__`;不得持有全局可变状态污染基座。
 - **能力受白名单约束**:`host.invoke` 的 capability 必须在 manifest `permissions.capabilities` 内,否则 reject。
 - **清理由自己负责**:`on` / `registerSlot` / `onStateChange` 返回的退订函数,必须在卸载钩子里调用。
-- **样式隔离**:UI 统一用 Mantine(共享单例);插件自定义样式走 CSS Modules。不用 Shadow DOM 包裹插槽(Mantine 浮层经 portal 渲染到 body,会丢样式)。
+- **UI 样式统一**:UI 统一用 Mantine(共享单例);颜色、字体、圆角、阴影、焦点与常用控件风格由基座 Mantine 主题集中管理。插件交互优先使用 Mantine 组件，专用内容/虚拟行的局部结构与状态样式引用 Mantine 主题变量。布局 CSS 负责几何、滚动与响应式规则；插件不得另造全局调色板或全局组件皮肤。不用 Shadow DOM 包裹插槽(Mantine 浮层经 portal 渲染到 body,会丢样式)。
 - **主题**:亮/暗由基座的 `MantineProvider` 管(`defaultColorScheme="light"`),插件直接用 `useMantineColorScheme`——React/Mantine 是单例,所以插件与基座读的是**同一份**配色状态,无需自定义事件。颜色一律取 Mantine CSS 变量(`var(--mantine-color-body)`、`var(--mantine-color-dimmed)`…),**不得**写死亮色专属值(如 `--mantine-color-gray-0`),否则暗色下错位。
 
 ### 4.4 骨架示意

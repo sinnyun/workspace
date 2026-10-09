@@ -35,7 +35,7 @@ export function ViewsContainer({ host }: SlotProps) {
   return (
     <div style={{ height: "100%", minHeight: 0 }}>
       {panels.map((slotId) => (
-        <div key={slotId} style={slotId === active ? undefined : hiddenStyle}>
+        <div key={slotId} style={slotId === active ? { display: "block", height: "100%", minHeight: 0 } : hiddenStyle}>
           <Panel host={host} slotId={slotId} />
         </div>
       ))}

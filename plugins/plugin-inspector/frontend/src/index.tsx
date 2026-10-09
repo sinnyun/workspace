@@ -36,13 +36,13 @@ const OWN_LABELS: Record<string, string> = { [INFO_TAB]: "信息" };
 /** Which zones the built-in 信息 tab shows, per opaque focus `kind` (docs/01 §9.3).
  *  Unknown kinds get the plain info zone — the container still carries, never judges. */
 const TEMPLATE: Record<string, string[]> = {
-  file: ["file-extension-zone", "preview-zone", "detail-info-zone"],
-  folder: ["file-extension-zone", "detail-info-zone"],
+  file: ["preview-zone", "detail-info-zone", "file-extension-zone"],
+  folder: ["detail-info-zone", "file-extension-zone"],
 };
 const FALLBACK_ZONES = ["detail-info-zone"];
 /** Chinese names for the zones this container owns. */
 const ZONE_LABELS: Record<string, string> = {
-  "file-extension-zone": "插件预留",
+  "file-extension-zone": "文件扩展",
   "preview-zone": "预览",
   "detail-info-zone": "属性信息",
 };
@@ -71,7 +71,7 @@ export function InspectorContainer({ host }: SlotProps) {
   const selectTab = (tabId: string): void => host.emit(Events.detailTabChanged, { tabId });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+    <div className="fm-inspector" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <FocusHeader focus={meta.focusRef} />
 
       <Tabs
@@ -79,7 +79,7 @@ export function InspectorContainer({ host }: SlotProps) {
         onChange={(v) => {
           if (v) selectTab(String(v));
         }}
-        variant="outline"
+        variant="default"
         styles={{ tab: tabStyle }}
         style={{ flexShrink: 0 }}
       >
@@ -113,20 +113,18 @@ export function InspectorContainer({ host }: SlotProps) {
 function FocusHeader({ focus }: { focus: Ref | null }) {
   if (!focus) {
     return (
-      <Text size="xs" c="dimmed" py={4}>
-        未选择任何项目
-      </Text>
+      <div className="fm-empty" style={{ padding: "24px 10px" }}><span className="fm-empty-icon"><FileText size={26} /></span><Text size="sm" fw={600}>文件信息</Text><Text size="xs" c="dimmed">选中项目，查看预览、属性与历史</Text></div>
     );
   }
   const isDir = focus.kind === "folder";
   return (
-    <Group gap={6} wrap="nowrap" style={headerStyle}>
-      {isDir ? (
-        <FolderClosed size={15} color="var(--mantine-color-yellow-6)" />
+    <Group className="fm-inspector-header" gap={10} wrap="nowrap" style={headerStyle}>
+      <span className="fm-inspector-icon">{isDir ? (
+        <FolderClosed size={23} color="var(--mantine-color-yellow-6)" />
       ) : (
-        <FileText size={15} color="var(--mantine-color-gray-6)" />
+        <FileText size={23} color="var(--mantine-color-gray-6)" />
       )}
-      <div style={{ minWidth: 0 }}>
+      </span><div style={{ minWidth: 0, flex: 1 }}>
         <Text size="sm" fw={600} truncate title={focus.id}>
           {baseName(focus.id)}
         </Text>
@@ -157,16 +155,20 @@ function Zone({ host, slotId }: { host: PluginHost; slotId: string }) {
       {content ? (
         <Outlet id={slotId} />
       ) : (
-        <div style={emptyZoneStyle}>{ZONE_LABELS[slotId] ?? slotId}：暂无插件注入</div>
+        <div className={slotId === "file-extension-zone" ? "fm-extension-placeholder" : undefined} style={emptyZoneStyle}>
+          <Text size="xs" fw={600}>{ZONE_LABELS[slotId] ?? slotId}</Text>
+          <Text size="xs" c="dimmed">{slotId === "file-extension-zone" ? "启用文件扩展插件后，相关功能会显示在这里。" : "暂无内容"}</Text>
+        </div>
       )}
     </div>
   );
 }
 
-const tabStyle: CSSProperties = { fontSize: 12, padding: "2px 10px" };
+const tabStyle: CSSProperties = { fontSize: 12, padding: "10px 12px" };
 
 const headerStyle: CSSProperties = {
-  padding: "6px 2px",
+  padding: "12px 2px",
+  minHeight: 110,
   borderBottom: "1px solid var(--mantine-color-default-border)",
   flexShrink: 0,
   alignItems: "center",
@@ -176,7 +178,7 @@ const paneAreaStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
   overflow: "auto",
-  paddingTop: 6,
+  paddingTop: 12,
 };
 
 /** Hidden, not unmounted: the tab's plugin keeps its local state (docs/02 §4.5). */
@@ -186,6 +188,6 @@ const emptyZoneStyle: CSSProperties = {
   fontSize: 11,
   color: "var(--mantine-color-dimmed)",
   border: "1px dashed var(--mantine-color-default-border)",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
   padding: "4px 6px",
 };

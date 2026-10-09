@@ -89,7 +89,7 @@ const rowStyle: CSSProperties = {
   textAlign: "left",
   cursor: "pointer",
   border: "none",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
   background: "transparent",
   color: "inherit",
 };

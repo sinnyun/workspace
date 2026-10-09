@@ -127,7 +127,7 @@ export function TextPreview({ host }: SlotProps) {
 
   if (!path) {
     return (
-      <Stack gap="xs">
+      <Stack className="fm-detail-block" gap="xs">
         <Group gap={6}>
           <Text size="xs" fw={600}>
             预览
@@ -141,7 +141,7 @@ export function TextPreview({ host }: SlotProps) {
   }
 
   return (
-    <Stack gap={4}>
+    <Stack className="fm-detail-block fm-preview-block" gap={8}>
       <Group gap={6} wrap="nowrap">
         <Text size="xs" fw={600}>
           预览
@@ -158,7 +158,7 @@ export function TextPreview({ host }: SlotProps) {
         </Text>
       ) : (
         <ScrollArea styles={{ viewport: { maxHeight: 220 } }}>
-          <Code block style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>
+          <Code block style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
             {text === null ? (autoLoad ? "载入中…" : "尚未读取") : truncate(text, maxChars)}
           </Code>
         </ScrollArea>

@@ -3,12 +3,12 @@
   "name": "plugin-layout-panes",
   "version": "0.1.0",
   "displayName": "分栏容器",
-  "description": "C 主视图的分栏容器：单栏 / 左右双栏 / 2×2 四栏，提供嵌套槽 pane-slot:<n>（docs/08 §5.1）",
+  "description": "支持单栏、左右双栏和四栏布局，独立浏览不同位置。",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {
     "entry": "frontend/dist/index.js",
-    "slots": [{ "id": "main-view-zone", "export": "PanesContainer" }],
+    "slots": [{ "id": "main-view-zone", "export": "PanesContainer" }, { "id": "topbar-zone", "export": "PanesToolbar" }],
     "provides": ["pane-slot"]
   },
   "permissions": {
@@ -18,7 +18,7 @@
       "emit": ["slot:reconfigured"]
     },
     "slots": {
-      "contribute": ["main-view-zone"]
+      "contribute": ["main-view-zone", "topbar-zone"]
     }
   }
 }

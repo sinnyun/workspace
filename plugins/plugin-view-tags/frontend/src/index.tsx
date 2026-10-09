@@ -11,6 +11,7 @@
  * only plugins interpret `Ref.kind`), and clicking a member publishes
  * `focus:changed`, which is what drives region D.
  */
+import { Tags } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { Events, type Ref, type SlotProps } from "@my-file-manager/plugin-sdk";
@@ -54,11 +55,14 @@ export function RailIcon({ host }: SlotProps) {
   return (
     <button
       type="button"
+      className="fm-rail-button"
+      aria-label="标签"
+      aria-pressed={active === VIEW_ID}
       title="标签"
       onClick={() => host.emit(Events.sidebarViewChanged, { viewId: VIEW_ID })}
       style={railButtonStyle(active === VIEW_ID)}
     >
-      🏷
+      <Tags size={19} />
     </button>
   );
 }
@@ -104,21 +108,21 @@ export function TagsPanel({ host }: SlotProps) {
   const names = Object.keys(store);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-      <div style={headerStyle}>
+    <div className="fm-nav-panel" style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+      <div className="fm-nav-heading" style={headerStyle}>
         <span style={{ color: "var(--mantine-color-dimmed)" }}>标签</span>
       </div>
 
       <div style={{ display: "flex", gap: 4 }}>
         <input
-          style={inputStyle}
+          className="fm-native-input" aria-label="新标签名" style={inputStyle}
           value={draft}
           placeholder="新标签名"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addTag()}
         />
-        <button type="button" onClick={addTag} style={smallButtonStyle}>
-          建
+        <button type="button" onClick={addTag} className="fm-nav-action" style={smallButtonStyle}>
+          新建
         </button>
       </div>
 
@@ -126,7 +130,7 @@ export function TagsPanel({ host }: SlotProps) {
 
       {names.map((name) => (
         <div key={name}>
-          <div style={rowStyle}>
+          <div className="fm-nav-row" style={rowStyle}>
             <button
               type="button"
               onClick={() => {
@@ -144,15 +148,15 @@ export function TagsPanel({ host }: SlotProps) {
                 {(store[name] ?? []).length}
               </span>
             </button>
-            <button type="button" title="删除标签" onClick={() => removeTag(name)} style={smallButtonStyle}>
+            <button type="button" title="删除标签" onClick={() => removeTag(name)} className="fm-nav-action" style={smallButtonStyle}>
               ✕
             </button>
           </div>
 
           {open === name && (
             <div style={{ paddingLeft: 14 }}>
-              <button type="button" onClick={tagFocus} disabled={!focus} style={smallButtonStyle}>
-                ＋ 把焦点加入
+              <button type="button" onClick={tagFocus} disabled={!focus} className="fm-nav-action" style={smallButtonStyle}>
+                ＋ 添加选中项目
               </button>
               {(store[name] ?? []).map((m) => (
                 <div key={m.path} style={rowStyle}>
@@ -173,7 +177,7 @@ export function TagsPanel({ host }: SlotProps) {
                     type="button"
                     title="移出标签"
                     onClick={() => removeMember(name, m.path)}
-                    style={smallButtonStyle}
+                    className="fm-nav-action" style={smallButtonStyle}
                   >
                     ✕
                   </button>
@@ -192,12 +196,12 @@ export function TagsPanel({ host }: SlotProps) {
 
 const railButtonStyle = (active: boolean): CSSProperties => ({
   display: "block",
-  width: 36,
-  height: 36,
+  width: 40,
+  height: 40,
   margin: "2px auto",
   fontSize: 16,
   cursor: "pointer",
-  borderRadius: 6,
+  borderRadius: "var(--mantine-radius-md)",
   border: "none",
   background: active ? "var(--mantine-color-blue-light)" : "transparent",
 });
@@ -213,7 +217,7 @@ const linkButtonStyle: CSSProperties = {
   alignItems: "center",
   textAlign: "left",
   fontSize: 12,
-  padding: "2px 4px",
+  padding: "7px 6px",
   cursor: "pointer",
   border: "none",
   background: "none",
@@ -222,9 +226,9 @@ const linkButtonStyle: CSSProperties = {
 
 const smallButtonStyle: CSSProperties = {
   fontSize: 11,
-  padding: "1px 6px",
+  padding: "4px 7px",
   cursor: "pointer",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
   border: "1px solid var(--mantine-color-default-border)",
   background: "transparent",
 };
@@ -235,5 +239,5 @@ const inputStyle: CSSProperties = {
   padding: "2px 6px",
   fontSize: 12,
   border: "1px solid var(--mantine-color-default-border)",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
 };

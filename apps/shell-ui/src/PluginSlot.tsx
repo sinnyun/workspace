@@ -10,7 +10,7 @@
  * `slot:registered`, unmounting `slot:disposed` (docs/02 §4.5).
  *
  * No Shadow DOM: Mantine overlays portal to document.body and would lose styles
- * inside a shadow root; isolation is Mantine CSS vars + CSS Modules instead
+ * inside a shadow root; shared visual tokens come from the Mantine theme instead
  * (docs/01 §7).
  */
 import {

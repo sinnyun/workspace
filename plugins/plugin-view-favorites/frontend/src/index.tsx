@@ -9,6 +9,7 @@
  * Cascade role: publishes `sidebar:selection:changed` (B → C); reads the opaque
  * `focusRef` only to offer "收藏当前焦点".
  */
+import { Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { Events, type Ref, type SlotProps } from "@my-file-manager/plugin-sdk";
@@ -51,11 +52,14 @@ export function RailIcon({ host }: SlotProps) {
   return (
     <button
       type="button"
+      className="fm-rail-button"
+      aria-label="收藏"
+      aria-pressed={active === VIEW_ID}
       title="收藏"
       onClick={() => host.emit(Events.sidebarViewChanged, { viewId: VIEW_ID })}
       style={railButtonStyle(active === VIEW_ID)}
     >
-      ⭐
+      <Star size={19} />
     </button>
   );
 }
@@ -107,11 +111,11 @@ export function FavoritesPanel({ host }: SlotProps) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
-      <div style={headerStyle}>
+    <div className="fm-nav-panel" style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+      <div className="fm-nav-heading" style={headerStyle}>
         <span style={{ color: "var(--mantine-color-dimmed)" }}>收藏 / 常用位置</span>
-        <button type="button" onClick={addFocus} disabled={!focusPath} style={smallButtonStyle}>
-          ＋ 焦点
+        <button type="button" onClick={addFocus} disabled={!focusPath} className="fm-nav-action" style={smallButtonStyle}>
+          ＋ 收藏
         </button>
       </div>
 
@@ -127,7 +131,7 @@ export function FavoritesPanel({ host }: SlotProps) {
       ))}
       {!favorites.length && (
         <div style={{ color: "var(--mantine-color-dimmed)" }}>
-          暂无收藏：在 C 选中一个对象后点「＋ 焦点」
+          选中文件后点击「＋ 收藏」，即可添加常用位置。
         </div>
       )}
     </div>
@@ -146,13 +150,13 @@ function Row({
   onRemove?: () => void;
 }) {
   return (
-    <div style={rowStyle}>
+    <div className="fm-nav-row" style={rowStyle}>
       <button type="button" onClick={onClick} style={linkButtonStyle}>
         <span style={{ marginRight: 6 }}>{label}</span>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
       </button>
       {onRemove && (
-        <button type="button" title="移除收藏" onClick={onRemove} style={smallButtonStyle}>
+        <button type="button" title="移除收藏" onClick={onRemove} className="fm-nav-action" style={smallButtonStyle}>
           ✕
         </button>
       )}
@@ -162,12 +166,12 @@ function Row({
 
 const railButtonStyle = (active: boolean): CSSProperties => ({
   display: "block",
-  width: 36,
-  height: 36,
+  width: 40,
+  height: 40,
   margin: "2px auto",
   fontSize: 16,
   cursor: "pointer",
-  borderRadius: 6,
+  borderRadius: "var(--mantine-radius-md)",
   border: "none",
   background: active ? "var(--mantine-color-blue-light)" : "transparent",
 });
@@ -183,7 +187,7 @@ const linkButtonStyle: CSSProperties = {
   alignItems: "center",
   textAlign: "left",
   fontSize: 12,
-  padding: "2px 4px",
+  padding: "7px 6px",
   cursor: "pointer",
   border: "none",
   background: "none",
@@ -192,9 +196,9 @@ const linkButtonStyle: CSSProperties = {
 
 const smallButtonStyle: CSSProperties = {
   fontSize: 11,
-  padding: "1px 6px",
+  padding: "4px 7px",
   cursor: "pointer",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-sm)",
   border: "1px solid var(--mantine-color-default-border)",
   background: "transparent",
 };

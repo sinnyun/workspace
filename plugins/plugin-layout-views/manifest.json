@@ -3,7 +3,7 @@
   "name": "plugin-layout-views",
   "version": "0.1.0",
   "displayName": "侧栏视图容器",
-  "description": "B 侧栏的互斥容器：占用 nav-zone，按 activeSidebarView 只呈现一个视图面板，提供嵌套槽 nav-panel:<viewId>",
+  "description": "管理目录树、收藏和标签等侧栏视图，切换时保留各视图状态。",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {

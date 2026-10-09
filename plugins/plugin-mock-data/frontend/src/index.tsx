@@ -27,23 +27,24 @@ export function StressIcon({ host }: SlotProps) {
   return (
     <button
       type="button"
+      className="fm-rail-button" aria-label="模拟数据集" aria-pressed={active === VIEW_ID}
       title="模拟数据集(压力测试)"
       onClick={() => host.emit(Events.sidebarViewChanged, { viewId: VIEW_ID })}
       style={railButtonStyle(active === VIEW_ID)}
     >
-      📊
+      ▥
     </button>
   );
 }
 
 const railButtonStyle = (active: boolean): CSSProperties => ({
   display: "block",
-  width: 36,
-  height: 36,
+  width: 40,
+  height: 40,
   margin: "2px auto",
   fontSize: 16,
   cursor: "pointer",
-  borderRadius: 6,
+  borderRadius: "var(--mantine-radius-md)",
   border: "none",
   background: active ? "var(--mantine-color-blue-light)" : "transparent",
 });

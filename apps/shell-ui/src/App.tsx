@@ -9,17 +9,15 @@
  * counts that used to sit here moved into `plugin-file-browser` (docs/01 §6 red
  * line 2 — the base holds meta state, not business state).
  *
- * Rows, top to bottom: identity + sessions, then the full-width `topbar-zone`
- * toolbar, then A/B/C/D, then the status bar. The toolbar is a base ROW (it spans
- * the whole window) — a plugin that injects there never has to know how wide C is.
+ * Reference layout: brand above A/B, sessions and topbar above C, D spans
+ * the workspace from its top edge. The status bar spans the window bottom.
+ * Navigation remains contributed by plugins into topbar-zone.
  *
  * The tab strip is the BROWSING SESSION layer: each tab owns one cascade snapshot
  * in `state.ts`, and activating a session emits `tab:activated` so the whole group
  * comes back together — that is the "切换会话不混乱" guarantee.
  *
- * Appearance is Mantine's: light by default (`main.tsx`), and the header switch
- * cycles 跟随系统 / 亮 / 暗 through `useMantineColorScheme`. Same provider, same
- * storage key as the settings plugin, so both stay in sync. Collapse flags and
+ * Appearance uses Mantine; theme switching lives in the settings plugin. Collapse flags and
  * panel widths are remembered in localStorage.
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
@@ -27,21 +25,16 @@ import {
   ActionIcon,
   Divider,
   Group,
-  SegmentedControl,
   Text,
   Title,
-  useMantineColorScheme,
 } from "@mantine/core";
 import {
   AppWindowMac,
-  Monitor,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Plus,
-  Sun,
   X,
 } from "lucide-react";
 import { BaseSlots } from "@my-file-manager/plugin-sdk";
@@ -56,13 +49,13 @@ interface ShellLayout {
   drawerOpen: boolean;
 }
 
-const LS_KEY = "fm.shell.layout.v1";
+const LS_KEY = "fm.shell.layout.v2";
 const DEFAULT_LAYOUT: ShellLayout = {
-  bWidth: 220,
-  dWidth: 300,
+  bWidth: 184,
+  dWidth: 320,
   bCollapsed: false,
   dCollapsed: false,
-  drawerOpen: true,
+  drawerOpen: false,
 };
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
@@ -70,7 +63,9 @@ const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.m
 function loadLayout(): ShellLayout {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    return raw ? { ...DEFAULT_LAYOUT, ...(JSON.parse(raw) as Partial<ShellLayout>) } : DEFAULT_LAYOUT;
+    if (raw) return { ...DEFAULT_LAYOUT, ...(JSON.parse(raw) as Partial<ShellLayout>) };
+    const legacy = localStorage.getItem("fm.shell.layout.v1");
+    return legacy ? { ...DEFAULT_LAYOUT, ...(JSON.parse(legacy) as Partial<ShellLayout>), drawerOpen: false } : DEFAULT_LAYOUT;
   } catch {
     return DEFAULT_LAYOUT;
   }
@@ -95,85 +90,65 @@ export function App() {
   const focusRef = useMeta((s) => s.snapshots[s.activeTabId]?.focusRef ?? null);
   const { layout, patch } = useShellLayout();
 
+  const leftWidth = 56 + (layout.bCollapsed ? 0 : clamp(layout.bWidth, 140, 560) + 4);
+  const togglePanel = (which: "b" | "d") => patch(which === "b"
+    ? { bCollapsed: !layout.bCollapsed } : { dCollapsed: !layout.dCollapsed });
+
   return (
-    <div style={rootStyle}>
-      <header style={identityStyle}>
-        <Group gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
-          <AppWindowMac size={18} color="var(--mantine-color-blue-6)" />
-          <Title order={6} tt="none" style={{ whiteSpace: "nowrap" }}>
-            我的文件管理器
-          </Title>
-        </Group>
-        <SessionTabs
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onCreate={() => useMeta.getState().createTab()}
-          onClose={(id) => useMeta.getState().closeTab(id)}
-        />
-        <ThemeSwitch />
-      </header>
+    <div className="fm-shell" style={rootStyle}>
+      <div className="fm-workspace" style={{ display: "grid", gridTemplateColumns: `${leftWidth}px minmax(0, 1fr) ${layout.dCollapsed ? 0 : clamp(layout.dWidth, 180, 640)}px`, flex: 1, minHeight: 0 }}>
+        <div className="fm-left-workspace">
+          <header className="fm-brand" data-collapsed={layout.bCollapsed}>
+            <span className="fm-brand-icon"><AppWindowMac size={24} /></span>
+            <Title className="fm-brand-title" order={6}>我的文件管理器</Title>
+          </header>
+          <div style={bodyStyle}>
+            <nav className="fm-rail" aria-label="视图导航" style={railStyle}>
+              <PluginSlot slotId={BaseSlots.activityRail} />
+            </nav>
+            {!layout.bCollapsed && <>
+              <aside className="fm-sidebar" style={{ ...asideStyle, width: clamp(layout.bWidth, 140, 560) }}>
+                <PluginSlot slotId={BaseSlots.nav} />
+              </aside>
+              <PanelResizer side="b" width={layout.bWidth} onWidth={(w) => patch({ bWidth: w })} />
+            </>}
+          </div>
+        </div>
 
-      {/* Full-width toolbar row: the topbar-zone rail + the base's panel toggles. */}
-      <Toolbar
-        layout={layout}
-        onToggle={(which) =>
-          patch(
-            which === "b"
-              ? { bCollapsed: !layout.bCollapsed }
-              : { dCollapsed: !layout.dCollapsed },
-          )
-        }
-      />
+        <div className="fm-center-workspace">
+          <header className="fm-identity" style={identityStyle}>
+            <PanelToggle side="b" collapsed={layout.bCollapsed} onToggle={() => togglePanel("b")} />
+            <SessionTabs tabs={tabs} activeTabId={activeTabId}
+              onCreate={() => useMeta.getState().createTab()}
+              onClose={(id) => useMeta.getState().closeTab(id)} />
+            <PanelToggle side="d" collapsed={layout.dCollapsed} onToggle={() => togglePanel("d")} />
+          </header>
+          <div className="fm-toolbar" style={toolbarStyle}>
+            <PluginSlot slotId={BaseSlots.topbar} />
+          </div>
+          <main className="fm-main" style={mainStyle}>
+            <PluginSlot slotId={BaseSlots.mainView} />
+          </main>
+        </div>
 
-      <div style={bodyStyle}>
-        {/* A — activity rail: the sidebar VIEW switcher (icons come from view plugins) */}
-        <nav style={railStyle}>
-          <PluginSlot slotId={BaseSlots.activityRail} />
-        </nav>
-
-        {/* B — panel content of the active view (exclusive by plugin-layout-views) */}
-        {!layout.bCollapsed && (
-          <>
-            <aside style={{ ...asideStyle, width: clamp(layout.bWidth, 140, 560) }}>
-              <PluginSlot slotId={BaseSlots.nav} />
-            </aside>
-            <PanelResizer side="b" width={layout.bWidth} onWidth={(w) => patch({ bWidth: w })} />
-          </>
-        )}
-
-        {/* C — main content region (geometry owned by plugin-layout-panes) */}
-        <main style={mainStyle}>
-          <PluginSlot slotId={BaseSlots.mainView} />
-        </main>
-
-        {/* D — detail container region (tabs owned by plugin-inspector) */}
-        {!layout.dCollapsed && (
-          <>
-            <PanelResizer side="d" width={layout.dWidth} onWidth={(w) => patch({ dWidth: w })} />
-            <aside
-              style={{
-                ...asideStyle,
-                width: clamp(layout.dWidth, 180, 640),
-                borderLeft: "1px solid var(--mantine-color-default-border)",
-                borderRight: "none",
-              }}
-            >
-              <PluginSlot slotId={BaseSlots.fileSidebar} />
-            </aside>
-          </>
-        )}
+        {!layout.dCollapsed && <aside className="fm-sidebar fm-details" style={{ ...asideStyle, position: "relative", borderRight: "none", minWidth: 0, overflow: "hidden" }}>
+          <PanelResizer side="d" width={layout.dWidth} onWidth={(w) => patch({ dWidth: w })} />
+          <PluginSlot slotId={BaseSlots.fileSidebar} />
+        </aside>}
       </div>
 
-      <footer style={footerStyle}>
+      <BottomDrawer open={layout.drawerOpen} onToggle={() => patch({ drawerOpen: !layout.drawerOpen })} />
+      <footer className="fm-status" style={footerStyle}>
         <Text size="xs" c="dimmed" truncate style={{ maxWidth: "45%" }}>
-          会话 {activeTabId.replace(/^tab-/, "")} ·{" "}
-          {focusRef ? `${kindLabel(focusRef.kind)} ${focusRef.id}` : "无焦点对象"}
+          会话 {activeTabId.replace(/^tab-/, "")} · {focusRef ? `${kindLabel(focusRef.kind)} ${focusRef.id}` : "未选中项目"}
         </Text>
         <Divider orientation="vertical" />
         <PluginSlot slotId={BaseSlots.statusbar} />
+        <button className="fm-debug-toggle" type="button" aria-expanded={layout.drawerOpen}
+          onClick={() => patch({ drawerOpen: !layout.drawerOpen })}>
+          {layout.drawerOpen ? "收起调试台" : "调试台"}
+        </button>
       </footer>
-
-      <BottomDrawer open={layout.drawerOpen} onToggle={() => patch({ drawerOpen: !layout.drawerOpen })} />
     </div>
   );
 }
@@ -194,12 +169,12 @@ function SessionTabs({
   onClose: (tabId: string) => void;
 }) {
   return (
-    <Group gap={4} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-      <Group gap={0} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+    <Group className="fm-sessions" gap={8} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+      <Group className="fm-session-scroll" gap={6} wrap="nowrap" style={{ flex: "0 1 auto", minWidth: 0 }}>
         {tabs.map((id) => {
           const active = id === activeTabId;
           return (
-            <div key={id} style={sessionTabStyle(active)}>
+            <div key={id} className="fm-session" data-active={active} style={sessionTabStyle(active)}>
               <button
                 type="button"
                 aria-pressed={active}
@@ -237,80 +212,14 @@ function SessionTabs({
   );
 }
 
-/** 跟随系统 / 亮色 / 暗色 — Mantine owns the value and persists it, so the settings
- *  plugin and this switch write the same storage key and stay in sync. */
-function ThemeSwitch() {
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
-  return (
-    <SegmentedControl
-      size="xs"
-      value={colorScheme}
-      onChange={(v) => setColorScheme(v as "auto" | "light" | "dark")}
-      data={[
-        { value: "auto", label: <AutoLabel /> },
-        { value: "light", label: <LightLabel /> },
-        { value: "dark", label: <DarkLabel /> },
-      ]}
-      style={{ flexShrink: 0 }}
-    />
-  );
-}
-
-const AutoLabel = () => (
-  <Group gap={4} wrap="nowrap">
-    <Monitor size={12} />
-    <span>跟随系统</span>
-  </Group>
-);
-const LightLabel = () => (
-  <Group gap={4} wrap="nowrap">
-    <Sun size={12} />
-    <span>亮色</span>
-  </Group>
-);
-const DarkLabel = () => (
-  <Group gap={4} wrap="nowrap">
-    <Moon size={12} />
-    <span>暗色</span>
-  </Group>
-);
-
-/** Navigation toolbar row: the `topbar-zone` extension rail + panel toggles. The address
- *  bar itself belongs to a pane content plugin, not to the shell. */
-function Toolbar({
-  layout,
-  onToggle,
-}: {
-  layout: ShellLayout;
-  onToggle: (which: "b" | "d") => void;
-}) {
-  return (
-    <div style={toolbarStyle}>
-      <PluginSlot slotId={BaseSlots.topbar} />
-      <Group gap={4} wrap="nowrap" style={{ marginLeft: "auto" }}>
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          size="sm"
-          title={layout.bCollapsed ? "展开 B 侧栏" : "折叠 B 侧栏"}
-          aria-label={layout.bCollapsed ? "展开侧栏" : "折叠侧栏"}
-          onClick={() => onToggle("b")}
-        >
-          {layout.bCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        </ActionIcon>
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          size="sm"
-          title={layout.dCollapsed ? "展开 D 详情" : "折叠 D 详情"}
-          aria-label={layout.dCollapsed ? "展开详情" : "折叠详情"}
-          onClick={() => onToggle("d")}
-        >
-          {layout.dCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
-        </ActionIcon>
-      </Group>
-    </div>
-  );
+/** Shell geometry controls; the navigation toolbar itself is plugin-owned. */
+function PanelToggle({ side, collapsed, onToggle }: { side: "b" | "d"; collapsed: boolean; onToggle: () => void }) {
+  const label = side === "b" ? "侧栏" : "详情";
+  return <ActionIcon variant="subtle" color="gray" size="sm"
+    title={`${collapsed ? "展开" : "折叠"}${label}`} aria-label={`${collapsed ? "展开" : "折叠"}${label}`} onClick={onToggle}>
+    {side === "b" ? (collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />)
+      : (collapsed ? <PanelRightOpen size={17} /> : <PanelRightClose size={17} />)}
+  </ActionIcon>;
 }
 
 /** Drag handle that resizes B (left) or D (right); the width lives in ShellLayout. */
@@ -327,6 +236,7 @@ function PanelResizer({
   const max = side === "b" ? 560 : 640;
   return (
     <div
+      className="fm-resizer"
       role="separator"
       aria-orientation="vertical"
       title="拖动调整宽度"
@@ -355,12 +265,14 @@ function PanelResizer({
 
 /** Dev-only debugging region (`bottom-drawer`), collapsible, state remembered. */
 function BottomDrawer({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  if (!open) return null;
   return (
     <section
+      className="fm-drawer"
       style={{
         display: "flex",
         flexDirection: "column",
-        height: open ? 260 : 28,
+        height: open ? 260 : 32,
         minHeight: 28,
         borderTop: "1px solid var(--mantine-color-default-border)",
       }}
@@ -368,6 +280,8 @@ function BottomDrawer({ open, onToggle }: { open: boolean; onToggle: () => void 
       <button
         type="button"
         onClick={onToggle}
+        className="fm-drawer-toggle"
+        aria-expanded={open}
         style={{ ...buttonResetStyle, ...drawerToggleStyle }}
       >
         <span>{open ? "▾" : "▸"}</span>
@@ -393,17 +307,18 @@ const identityStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 12,
-  padding: "4px 10px",
+  padding: "8px 16px",
+  height: 50,
   flexShrink: 0,
 };
 
 const bodyStyle: CSSProperties = { display: "flex", flex: 1, minHeight: 0 };
 
 const railStyle: CSSProperties = {
-  width: 48,
+  width: 56,
   flexShrink: 0,
   borderRight: "1px solid var(--mantine-color-default-border)",
-  padding: 4,
+  padding: "10px 6px",
   overflow: "auto",
   // A flex column so a view plugin can pin itself to the bottom (the settings gear
   // uses `marginTop: auto`) — the base still owns only geometry, never content order.
@@ -414,7 +329,7 @@ const railStyle: CSSProperties = {
 const asideStyle: CSSProperties = {
   flexShrink: 0,
   borderRight: "1px solid var(--mantine-color-default-border)",
-  padding: 8,
+  padding: "12px 10px",
   overflow: "auto",
 };
 
@@ -423,17 +338,18 @@ const mainStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   minWidth: 0,
-  overflow: "auto",
-  padding: "0 8px 8px",
+  minHeight: 0,
+  overflow: "hidden",
+  padding: "12px 16px 16px",
 };
 
 const sessionTabStyle = (active: boolean): CSSProperties => ({
   display: "flex",
   alignItems: "center",
   gap: 2,
-  padding: "2px 4px 2px 8px",
+  padding: "2px 8px 2px 12px",
   fontSize: 12,
-  borderRadius: "4px 4px 0 0",
+  borderRadius: "var(--mantine-radius-md)",
   cursor: "pointer",
   whiteSpace: "nowrap",
   background: active ? "var(--mantine-color-blue-light)" : "transparent",
@@ -459,7 +375,7 @@ const drawerToggleStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  height: 28,
+  height: 32,
   padding: "0 12px",
   color: "var(--mantine-color-dimmed)",
   flexShrink: 0,
@@ -468,12 +384,12 @@ const drawerToggleStyle: CSSProperties = {
 const toolbarStyle: CSSProperties = {
   display: "flex",
   gap: 8,
-  padding: "4px 10px",
+  padding: "6px 16px",
   alignItems: "center",
-  flexWrap: "wrap",
+  minHeight: 50,
   flexShrink: 0,
   borderBottom: "1px solid var(--mantine-color-default-border)",
-  background: "var(--mantine-color-default-filled-hover)",
+  background: "var(--mantine-color-default)",
 };
 
 const footerStyle: CSSProperties = {
@@ -484,6 +400,6 @@ const footerStyle: CSSProperties = {
   borderTop: "1px solid var(--mantine-color-default-border)",
   fontSize: 12,
   color: "var(--mantine-color-dimmed)",
-  minHeight: 26,
+  minHeight: 30,
   flexShrink: 0,
 };

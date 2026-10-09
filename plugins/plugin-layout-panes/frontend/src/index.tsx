@@ -14,8 +14,9 @@
  * `layoutMode`/`panes` are this plugin's LOCAL state, kept per browsing session and
  * remembered in localStorage — the base only supplies the opaque `activeTabId`.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
+import { Button, Menu } from "@mantine/core";
 import { Events, type PluginHost, type SlotProps } from "@my-file-manager/plugin-sdk";
 
 const MODES = [1, 2, 4] as const;
@@ -33,6 +34,44 @@ interface PaneState {
 const DEFAULT_STATE: PaneState = { mode: 1, ids: ["p0"], seq: 1, colPct: 50, rowPct: 50 };
 const LS_KEY = "fm.layout-panes.v1";
 const GAP = 6;
+
+// Both contributions belong to this plugin; pane state stays out of the shell.
+type LayoutController = { mode: Mode; setMode: (mode: Mode) => void };
+const controllers = new Map<string, LayoutController>();
+const listeners = new Set<() => void>();
+const notifyToolbar = () => { for (const listener of listeners) listener(); };
+const subscribeToolbar = (listener: () => void) => {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+};
+
+export function PanesToolbar({ host }: SlotProps) {
+  const [tabId, setTabId] = useState(host.getState().activeTabId);
+  useEffect(() => host.onStateChange((state) => setTabId(state.activeTabId)), [host]);
+  const controller = useSyncExternalStore(subscribeToolbar, () => controllers.get(tabId));
+  if (!controller) return null;
+  return (
+    <div className="fm-layout-toolbar" style={toolbarStyle}>
+      <Menu position="bottom-end" withinPortal>
+        <Menu.Target>
+          <Button className="fm-dropdown-button" variant="default" size="xs" aria-label="分栏布局"
+            rightSection={<span aria-hidden="true">⌄</span>}>
+            {controller.mode === 1 ? "单栏" : controller.mode === 2 ? "双栏" : "四栏"}
+          </Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Label>分栏布局</Menu.Label>
+          {MODES.map((mode) => (
+            <Menu.Item key={mode} onClick={() => controller.setMode(mode)}
+              rightSection={controller.mode === mode ? <span aria-label="当前布局">✓</span> : undefined}>
+              {mode === 1 ? "单栏" : mode === 2 ? "左右双栏" : "四栏"}
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu>
+    </div>
+  );
+}
 
 const clampPct = (n: number): number => Math.min(85, Math.max(15, n));
 /** The widest layout that still fits the number of live panes. */
@@ -82,7 +121,7 @@ export function PanesContainer({ host }: SlotProps) {
     [tabId, host],
   );
 
-  const setMode = (mode: Mode): void => {
+  const setMode = useCallback((mode: Mode): void => {
     if (mode === st.mode) return;
     const ids = [...st.ids];
     let seq = st.seq;
@@ -98,7 +137,11 @@ export function PanesContainer({ host }: SlotProps) {
     for (const slotId of created) {
       host.emit(Events.slotReconfigured, { slotId, action: "add" } as const);
     }
-  };
+  }, [st, commit, host]);
+
+  const controller = useMemo(() => ({ mode: st.mode, setMode }), [st.mode, setMode]);
+  useEffect(() => { controllers.set(tabId, controller); notifyToolbar(); }, [tabId, controller]);
+  useEffect(() => () => { controllers.delete(tabId); notifyToolbar(); }, [tabId]);
 
   const closePane = (id: string): void => {
     if (st.ids.length <= 1) return;
@@ -119,24 +162,7 @@ export function PanesContainer({ host }: SlotProps) {
     commit({ ...st, rowPct: clampPct(st.rowPct + (dy / axis) * 100) });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={toolbarStyle}>
-        <span style={{ color: "var(--mantine-color-dimmed)" }}>分栏</span>
-        {MODES.map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => setMode(m)}
-            style={modeButtonStyle(st.mode === m)}
-          >
-            {m === 1 ? "单栏" : m === 2 ? "左右 2" : "2×2"}
-          </button>
-        ))}
-        <span style={{ marginLeft: "auto", color: "var(--mantine-color-dimmed)" }}>
-          {visible.length} 栏 · {st.ids.length} 个面板
-        </span>
-      </div>
-
+    <div className="fm-layout-panes" data-mode={st.mode} style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       <div style={{ flex: 1, minHeight: 0 }}>
         {/* Keyed by session: a browsing session owns its own pane instances, so a
             pane's local path can never leak into another tab (docs/01 §9.1). The
@@ -197,10 +223,10 @@ function Pane({
   const slotId = `pane-slot:${paneId}`;
   const Outlet = host.provideSlot(slotId);
   return (
-    <section style={{ ...paneStyle(hidden), gridArea: area }}>
-      <div style={paneHeaderStyle}>
+    <section className="fm-pane" style={{ ...paneStyle(hidden), gridArea: area }}>
+      <div className="fm-pane-header" style={paneHeaderStyle}>
         <span title={slotId}>栏 {order}</span>
-        <button type="button" onClick={onClose} title="关闭此栏" style={closeButtonStyle}>
+        <button type="button" className="fm-pane-close" onClick={onClose} aria-label={`关闭栏 ${order}`} title="关闭此栏" style={closeButtonStyle}>
           ✕
         </button>
       </div>
@@ -226,6 +252,7 @@ function Divider({
   const axis = useRef(1);
   return (
     <div
+      className="fm-resizer"
       role="separator"
       aria-orientation={orientation === "col" ? "vertical" : "horizontal"}
       title="拖动调整分栏"
@@ -288,21 +315,10 @@ const toolbarStyle: CSSProperties = {
   display: "flex",
   gap: 6,
   alignItems: "center",
-  padding: "4px 0",
+  padding: 0,
   fontSize: 12,
   flexShrink: 0,
 };
-
-const modeButtonStyle = (active: boolean): CSSProperties => ({
-  fontSize: 12,
-  padding: "1px 8px",
-  borderRadius: 4,
-  cursor: "pointer",
-  background: active ? "var(--mantine-color-blue-light)" : "transparent",
-  border: active
-    ? "1px solid var(--mantine-color-blue-light-border)"
-    : "1px solid var(--mantine-color-default-border)",
-});
 
 /** A pane is a bounded flex column, never a block: the header keeps its own
  *  height and the outlet takes the rest, which is the only thing that gives a
@@ -316,7 +332,7 @@ const paneStyle = (hidden: boolean): CSSProperties => ({
   minWidth: 0,
   minHeight: 0,
   border: "1px solid var(--mantine-color-default-border)",
-  borderRadius: 4,
+  borderRadius: "var(--mantine-radius-md)",
   overflow: "hidden",
 });
 
@@ -332,7 +348,7 @@ const paneHeaderStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 4,
-  padding: "2px 6px",
+  padding: "5px 10px",
   fontSize: 11,
   color: "var(--mantine-color-dimmed)",
   flexShrink: 0,

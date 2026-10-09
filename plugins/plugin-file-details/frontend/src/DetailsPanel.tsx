@@ -72,17 +72,17 @@ export function DetailsPanel({ host }: SlotProps) {
 
   if (!path) {
     return (
-      <Stack gap="xs">
+      <Stack className="fm-detail-block" gap="xs">
         <Title order={6}>文件详情</Title>
         <Text size="sm" c="dimmed">
-          选择一个文件以查看其属性。
+          名称、大小、类型和修改时间会显示在这里。
         </Text>
       </Stack>
     );
   }
 
   return (
-    <Stack gap="xs">
+    <Stack className="fm-detail-block" gap="xs">
       <Group justify="space-between">
         <Title order={6}>文件详情</Title>
         <Badge size="sm" variant="light" color={stat?.isDir ? "blue" : "gray"}>
@@ -92,7 +92,7 @@ export function DetailsPanel({ host }: SlotProps) {
 
       {loading && <Skeleton height={14} radius="xs" />}
 
-      <Table withRowBorders verticalSpacing={2} style={{ fontSize: 12 }}>
+      <Table withRowBorders verticalSpacing={6} style={{ fontSize: 12 }}>
         <Table.Tbody>
           <Table.Tr>
             <Table.Td style={{ color: "var(--mantine-color-dimmed)", width: 72 }}>名称</Table.Td>

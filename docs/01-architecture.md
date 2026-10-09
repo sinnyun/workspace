@@ -156,7 +156,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 - **前端插件 = 运行时加载**:经自定义 Tauri 协议(`plugin://`)下发 ESM 文件,基座用 `import()` 装载。共享依赖(React 等)通过 import map / 全局注入,避免每个插件各打一份。
 - **权限**:每个插件在 manifest 声明所需能力与事件;基座/内核在装载与调用时校验白名单。未声明的能力调用一律拒绝。
 - **错误隔离**:前端插件运行时的异常不得击穿基座(装载失败降级为空插槽 + 记录);后端插件的 fiber panic/错误由内核捕获并 dispose,不影响其它插件与主进程。
-- **样式隔离**:UI 组件库统一用 **Mantine**(作为共享单例提供),前端插件自定义样式走 CSS Modules;**不用 Shadow DOM 包裹插槽**——Mantine 的 Modal/Menu/Tooltip/Notifications 经 portal 渲染到 `document.body`,Shadow DOM 会导致浮层丢样式。主题一致性由 Mantine CSS 变量保证。
+- **统一 UI 与样式**:UI 组件库统一使用 **Mantine**(作为共享单例提供)。颜色、字号、圆角、阴影、焦点和 Mantine 通用控件外观集中在基座 `theme.ts` 的 Mantine 主题中；布局 CSS 处理区域几何、滚动与响应式，文件虚拟行、树节点等自定义内容可定义局部状态外观，但全部引用 Mantine 主题变量。禁止插件另造全局调色板或覆盖 Mantine 内部类名来定义通用主题。**不用 Shadow DOM 包裹插槽**——Mantine 的浮层经 portal 渲染到 `document.body`，Shadow DOM 会导致浮层丢样式。
 
 ---
 
@@ -185,9 +185,12 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 
 ## 9. 界面区域模型与级联状态
 
-界面是一台**级联的选择/派生状态机**,自上而下由"外层区域(基座) + 各区域内容(插件)"构成。本节定区域划分、级联关系与基座/插件归属;具体槽清单见 08 §2,嵌套槽机制见 02 §4.5。**颜色与组件一律复用 Mantine 主题(默认亮色,顶栏可切 跟随系统/亮色/暗色),本节只定布局与状态。**
+界面是一台**级联的选择/派生状态机**,自上而下由"外层区域(基座) + 各区域内容(插件)"构成。本节定区域划分、级联关系与基座/插件归属;具体槽清单见 08 §2,嵌套槽机制见 02 §4.5。**颜色与组件一律复用 Mantine 主题(默认亮色；主题在设置面板中切换),本节只定布局与状态。**
 
 ### 9.1 区域网格(基座持有的外壳)
+
+布局位置以用户提供的 [初始布局图](界面布局.jpg) 为准：品牌区在 A/B 上方跨标签与工具栏两行；标签和工具栏仅位于中间工作区；D 从窗口顶部通高；状态栏处于窗口最底部。调试抽屉默认收起，入口位于状态栏。`plugin-file-browser` 将当前交互栏导航和列表/网格视图选择贡献到已有 `topbar-zone`；`plugin-layout-panes` 在该扩展区贡献分栏下拉按钮。分栏和视图均显示当前选项，菜单分别控制 1/2/4 栏和列表/网格。主题仅在 `plugin-settings` 设置面板中切换。路径、历史、模式与分栏状态仍由各自插件独占；单栏隐藏重复的栏内导航，多栏保留独立栏内工具。顶栏导航跟随当前可见的交互栏，隐藏/关闭栏时回退到可见栏。详情信息页按预览、属性、扩展区排列。
+
 
 ```
 ┌─────┬────────┬───────────────────────────────┬──────────────┐
@@ -224,7 +227,7 @@ activeSidebarView(A) → sidebarSelection(B) → focusRef(C) → activeDetailTab
 
 | 归属 | 内容 |
 |---|---|
-| **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、主题 provider(默认亮色 + 顶栏三态切换控件)、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限、**插件运行态(装载/卸载/启停)由 loader 独占**:它对外提供 `plugins.list`/`plugins.setEnabled` 两个基座前端能力(见 02 §5.3),**哪些插件不可关闭也是基座策略**,manifest 无法自我豁免 |
+| **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、Mantine 主题 provider(默认亮色；主题由设置插件控制)、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限、**插件运行态(装载/卸载/启停)由 loader 独占**:它对外提供 `plugins.list`/`plugins.setEnabled` 两个基座前端能力(见 02 §5.3),**哪些插件不可关闭也是基座策略**,manifest 无法自我豁免 |
 | **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<paneId>`)、`plugin-layout-views`(拥有 B 的视图互斥,提供 `nav-panel:<viewId>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`)、`plugin-settings`(拥有设置悬浮面板的分页,提供 `settings-page:<name>`) |
 | **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` … 各贡献一个 A 图标 + 一个 `nav-panel:<viewId>` 面板 |
 | **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格)、search 结果、archive 等 |

@@ -3,7 +3,7 @@
   "name": "plugin-inspector",
   "version": "0.1.0",
   "displayName": "详情容器",
-  "description": "D 详情容器：tab 条 + 焦点 kind 模板，提供 detail-tab:<name> / preview-zone / detail-info-zone / file-extension-zone",
+  "description": "在右侧查看选中项目的信息、预览和历史记录。",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {

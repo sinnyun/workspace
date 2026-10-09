@@ -3,7 +3,7 @@
   "name": "plugin-settings",
   "version": "0.2.0",
   "displayName": "设置",
-  "description": "A 栏底部齿轮打开悬浮设置面板：软件设置（主题 + 插件启停）与插件设置（各插件自己的分页）",
+  "description": "调整主题、管理插件，并设置各插件的显示偏好。",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {
