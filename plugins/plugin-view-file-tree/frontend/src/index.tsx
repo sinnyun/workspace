@@ -11,17 +11,12 @@
  * no self-hide check lives here. Cascade role: publishes
  * `sidebar:selection:changed` (B → C).
  */
+
+import { Events, errorMessage, type ListEntry, type Ref, type SlotProps } from "@my-file-manager/plugin-sdk";
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderTree } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Tree, type NodeRendererProps } from "react-arborist";
-import {
-  Events,
-  errorMessage,
-  type ListEntry,
-  type Ref,
-  type SlotProps,
-} from "@my-file-manager/plugin-sdk";
+import { useEffect, useRef, useState } from "react";
+import { type NodeRendererProps, Tree } from "react-arborist";
 
 const VIEW_ID = "file-tree";
 const PLUGIN_NAME = "plugin-view-file-tree";
@@ -69,9 +64,7 @@ export function TreePanel({ host }: SlotProps) {
   useEffect(() => {
     const el = box.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() =>
-      setSize({ w: Math.max(80, el.clientWidth), h: Math.max(80, el.clientHeight) }),
-    );
+    const ro = new ResizeObserver(() => setSize({ w: Math.max(80, el.clientWidth), h: Math.max(80, el.clientHeight) }));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -109,7 +102,10 @@ export function TreePanel({ host }: SlotProps) {
   };
 
   return (
-    <div className="fm-nav-panel fm-tree" style={{ display: "flex", flexDirection: "column", gap: 4, height: "100%", minHeight: 0 }}>
+    <div
+      className="fm-nav-panel fm-tree"
+      style={{ display: "flex", flexDirection: "column", gap: 4, height: "100%", minHeight: 0 }}
+    >
       <div className="fm-nav-heading">目录树</div>
       {rootError && <div style={{ color: "var(--mantine-color-red-6)", fontSize: 12 }}>{rootError}</div>}
       <div ref={box} style={{ flex: 1, minHeight: 0 }}>
@@ -157,19 +153,51 @@ export function TreePanel({ host }: SlotProps) {
 /** Keep the tree library's selection/keyboard behavior; customize its visuals. */
 function TreeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
   return (
-    <div ref={dragHandle} style={{ ...style, display: "flex", alignItems: "center", gap: 6, height: "100%", paddingRight: 6 }}>
-      {node.isLeaf ? <span style={{ width: 18, flexShrink: 0 }} /> : (
-        <button type="button" tabIndex={-1} className="fm-tree-toggle"
+    <div
+      ref={dragHandle}
+      style={{ ...style, display: "flex", alignItems: "center", gap: 6, height: "100%", paddingRight: 6 }}
+    >
+      {node.isLeaf ? (
+        <span style={{ width: 18, flexShrink: 0 }} />
+      ) : (
+        <button
+          type="button"
+          tabIndex={-1}
+          className="fm-tree-toggle"
           aria-label={`${node.isOpen ? "折叠" : "展开"}${node.data.name}`}
-          onClick={(e) => { e.stopPropagation(); node.toggle(); }}>
+          onClick={(e) => {
+            e.stopPropagation();
+            node.toggle();
+          }}
+        >
           {node.isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
       )}
-      {node.data.isDir ? (node.isOpen ? <FolderOpen size={16} color="var(--mantine-color-yellow-6)" /> : <Folder size={16} color="var(--mantine-color-yellow-6)" />) : <FileText size={15} color="var(--mantine-color-dimmed)" />}
+      {node.data.isDir ? (
+        node.isOpen ? (
+          <FolderOpen size={16} color="var(--mantine-color-yellow-6)" />
+        ) : (
+          <Folder size={16} color="var(--mantine-color-yellow-6)" />
+        )
+      ) : (
+        <FileText size={15} color="var(--mantine-color-dimmed)" />
+      )}
       {node.isEditing ? (
-        <input autoFocus defaultValue={node.data.name} onBlur={() => node.reset()}
-          onKeyDown={(e) => { if (e.key === "Escape") node.reset(); if (e.key === "Enter") node.submit(e.currentTarget.value); }} />
-      ) : <span title={node.data.path} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{node.data.name}</span>}
+        <input
+          // biome-ignore lint/a11y/noAutofocus: 行内重命名输入框由用户显式进入编辑态时才挂载，挂载即需键盘焦点（并非页面加载抢焦点）
+          autoFocus
+          defaultValue={node.data.name}
+          onBlur={() => node.reset()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") node.reset();
+            if (e.key === "Enter") node.submit(e.currentTarget.value);
+          }}
+        />
+      ) : (
+        <span title={node.data.path} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {node.data.name}
+        </span>
+      )}
     </div>
   );
 }

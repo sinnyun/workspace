@@ -2,5 +2,7 @@ packages:
   - "apps/shell-ui"
   - "core-shared/plugin-sdk"
   - "plugins/*/frontend"
+allowBuilds:
+  lefthook: true
 onlyBuiltDependencies:
   - esbuild

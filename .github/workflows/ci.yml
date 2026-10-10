@@ -1,0 +1,92 @@
+# 门禁总入口(roadmap P6-35):把两侧既有脚本串成 PR 门禁;打 v* 标签时用 tauri-action 出安装包。
+#
+# 平台分工即事实:应用只面向 Windows(COM/Shell/注册表都在 cfg(windows) 里),
+# Rust 侧门禁跑 windows-latest,与本地取证平台一致;前端与供应链审计跑 ubuntu。
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    name: web (lint/typecheck/test/build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 只拦 high 及以上;本机 mirror 源没有 audit 端点,这条只能在 CI 的默认 npm 源上跑。
+      - run: pnpm audit --audit-level=high
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm -r typecheck
+      - run: pnpm test
+      - run: pnpm build:shared
+      - run: pnpm build:plugins
+      - run: pnpm build:shell
+
+  rust:
+    name: rust (fmt/clippy/test/contract)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: contract (TS SDK <-> Rust)
+        run: node apps/shell-ui/scripts/contract-check.mjs
+
+  deny:
+    name: supply chain (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  release:
+    name: release (tauri-action)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/host
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:shared
+      - run: pnpm build:plugins
+      - run: pnpm build:shell
+      # 无签名密钥:出的是未签名 NSIS 草稿版。要签名/更新器时再加 secrets,不改这里的步骤骨架。
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/host
+          tagName: ${{ github.ref_name }}
+          releaseName: "File Manager v__VERSION__"
+          releaseBody: "对应标签提交自动构建的安装包(NSIS)。"
+          releaseDraft: true
+          prerelease: false

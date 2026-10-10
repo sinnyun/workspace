@@ -17,7 +17,7 @@
 | 遍历/监听 | `ignore`(或 `jwalk`)+ `notify` |
 | 哈希 | `blake3`(+ `md-5`/`sha2` 兼容需求) |
 | 存储 | `rusqlite`(bundled SQLite,WAL)+ `refinery` 迁移 |
-| 检索 | `tantivy`(全文)+ SQLite FTS5(轻量场景) |
+| 检索 | SQLite **FTS5**(`rusqlite` bundled 自带,`trigram` 名称索引,见 D24)；正文级全文需要时另开决策门 |
 | 类型/缩略图 | Windows Shell `IThumbnailCache`/thumbnail handlers（规划为 `shell.thumbnail.read`）；`infer` + `mime_guess` 做类型识别 |
 | 后端插件运行时 | cordis-rs(+ loader/logger/timer) |
 | 前端框架 | React 19 + Vite + TypeScript |
@@ -66,8 +66,8 @@
 | 异步 DB | `sqlx`(sqlite) | 备选 sqlx | 想要编译期校验 SQL + 异步时 |
 | 连接池 | `r2d2_sqlite` | ★ r2d2_sqlite | rusqlite 的多线程池 |
 | 迁移 | `refinery`、`sqlx::migrate!` | ★ refinery | 版本化 schema 迁移 |
-| 全文检索 | `tantivy` | ★ tantivy | Lucene 级全文索引,内容搜索插件用 |
-| 轻量全文 | SQLite **FTS5** | 备选 | 数据量小、不想引入 tantivy 时 |
+| 名称检索(子串/中文) | SQLite **FTS5** + `trigram`、`tantivy` | ★ FTS5 | 已采用:`rusqlite` bundled 自带 3.46 的 FTS5,零新依赖;10 万名称建索引 1.2 s、查询 26~33 ms(debug 实测)。spike 见 `core-shared/kernel/tests/search_spike.rs`,决策见 D24 |
+| 正文级全文 | `tantivy`、FTS5 + 正文表 | 备选(未定) | 只有要做正文全文/片段高亮时才重开;Lucene 级引擎的成本要由实际需求支付 |
 
 ### 1.5 类型识别 / 预览 / 媒体
 | 用途 | 候选 | 推荐 | 说明 |
@@ -150,8 +150,8 @@
 ### 2.2 布局 / 大列表 / 树
 | 用途 | 候选 | 推荐 | 说明 |
 |---|---|---|---|
-| 虚拟滚动(列表/网格) | `@tanstack/react-virtual`、`react-window`、`react-virtuoso` | ★ TanStack Virtual | 十万级文件列表不卡;headless 易定制 |
-| 表格(排序/列/选择) | `@tanstack/react-table`、`ag-grid` | ★ TanStack Table | headless;ag-grid 太重 |
+| 虚拟滚动(列表/网格/表格) | `@tanstack/react-virtual`、`react-window`、`react-virtuoso` | ★ TanStack Virtual | 十万级文件列表不卡;headless 易定制;三种显示方式共用一条流(在 `plugin-file-browser` 内) |
+| 表格(排序/列/选择) | `@tanstack/react-table`、`ag-grid` | ★ TanStack Table | headless;ag-grid 太重;落在 `plugin-file-browser` 的表格模式(排序 + 列可见性,**v9 API**,随该插件 dist 打包而非共享单例) |
 | 目录树 | `react-arborist`、自绘(TanStack Virtual) | ★ react-arborist | 虚拟化树,内置 DnD/重命名/键盘 |
 
 > **react-arborist 3.16.0 实测约束(懒加载靠这些事实)**:v3 **没有** `loadChildren`/lazy API,展开时按需取数据要自己挂 `onToggle`。可展开性由**`children` 键的存在性**决定(`Node.isLeaf = !Array.isArray(children)`、`accessChildren = data.children ?? null`),所以未展开目录必须在数据里带 `children: []`(空数组也行)才出箭头,**叶子节点不得带该键**。"展开后为空"与"未展开"数据形状相同,故须用本地 `loaded`/`opened` 集合区分占位行:`(空目录)` 与 `(载入失败，重新展开重试)`(失败时从 `loaded` 移除,重新展开即重试)。`onToggle(id)` 对**叶子**也会触发,须先判 `isDir` 再加载。库自带 react-dnd/react-window/redux 且在模块作用域读 `process.env.NODE_ENV`,浏览器 ESM 场景要在 Vite 里 `define` 该常量。
@@ -169,7 +169,6 @@
 |---|---|---|---|
 | 命令面板 | `@mantine/spotlight`、`cmdk`、`kbar` | ★ @mantine/spotlight | VS Code 式 Ctrl+Shift+P,随 Mantine 生态 |
 | 快捷键 | `react-hotkeys-hook`、`tinykeys` | ★ react-hotkeys-hook | |
-| 拖拽 | `@dnd-kit/core`(+`sortable`)、`react-dnd` | ★ dnd-kit | 拖文件/排序,现代无障碍 |
 | 应用内右键面板 | Mantine `Menu`/Popover + PluginHost context-menu 注册 API | ★ 规划 | 独立 `plugin-context-menu` 负责界面与上下文；业务插件注册菜单项并由自身执行。Tauri 原生 context-menu 不用于本应用扩展面板 |
 | 通知/Toast | `@mantine/notifications`、`sonner`、`react-hot-toast` | ★ @mantine/notifications | 随 Mantine 生态 |
 | 图标 | `lucide-react`、`@tabler/icons-react` | ★ lucide-react | |
@@ -226,7 +225,7 @@
 
 | 架构层(见 [01](01-architecture.md)) | 归入的库 |
 |---|---|
-| **能力层(原子 Rust)** | ignore/jwalk、notify、blake3/RustCrypto、rusqlite+r2d2、infer/mime_guess、Windows Shell `IFileOperation`/`IThumbnailCache` adapters、tantivy、encoding_rs、sysinfo、natord |
+| **能力层(原子 Rust)** | notify(+debouncer)、blake3/sha2、rusqlite(bundled SQLite,WAL + FTS5)、chardetng/encoding_rs、natord、Windows Shell `IFileOperation`/`IThumbnailCache` adapters、png/base64(仅编码 Shell 位图) |
 | **后端内核(cordis-rs)** | cordis-rs/core/loader/hmr/logger/timer、tracing、serde、figment、thiserror/anyhow、tokio/rayon |
 | **后端插件(Rust)** | 复用能力层 Service;需要时直连 similar/fastcdc 等(经契约) |
 | **前端基座(React)** | React、**Mantine**(core/hooks/spotlight/notifications/dates/modals/form，统一主题与组件样式)、TanStack Virtual/Table、react-arborist、zustand、事件总线 |
@@ -242,7 +241,7 @@
 1. **能力层即隔离层**:所有第三方 Rust 库(rusqlite/tantivy/image/notify...)只在 `core-shared/kernel/src/capabilities/` 内被直接引用(该 crate 无 Tauri 依赖,可无头测试);对外只暴露稳定的 `domain.action` 能力契约。换库(如 rusqlite→sqlx)不波及插件。
 2. **前端只经 host/SDK**:前端插件不直接依赖 Tauri/React 内部,只经 `PluginHost` 与 `plugin-sdk`;React 与 **Mantine** 作为共享单例经 import map 提供,插件直接用 Mantine 组件保证风格统一。UI/虚拟化库的替换由基座吸收。
 3. **契约先行**:跨层的数据形状定义在 `core-shared`(TS `plugin-sdk` + Rust `contracts`),库是实现细节。
-4. **重依赖做成插件**:ffmpeg、pdfium、Monaco、tantivy 这类体积/复杂度大的,封进独立能力或独立插件,不进核心路径,按需启用。
+4. **重依赖做成插件**:ffmpeg、pdfium、Monaco、CodeMirror 这类体积/复杂度大的,封进独立能力或独立插件,不进核心路径,按需启用。
 5. **锁版本 + 审计**:lockfile 锁死;`cargo-deny`/`npm audit` 进 CI,防供应链与许可问题。
 
 ---
@@ -256,7 +255,7 @@
 | 应用内通知 | ✅ @mantine/notifications | 系统级通知仍用 tauri-plugin-notification |
 | 代码查看器 | ✅ 默认 CodeMirror 6 | 只读预览;需 VS Code 级编辑再上 Monaco(重),做成独立插件 |
 | DB | ✅ rusqlite + WAL | 若强烈需要异步 + 编译期 SQL 校验再切 sqlx |
-| 全文检索 | ✅ tantivy | 数据量小、想少依赖可退回 SQLite FTS5 |
+| 全文检索 | ✅ SQLite FTS5(`trigram`) | 不引 tantivy:名称检索零新依赖即够(见 D24);正文级全文需要时重开决策门 |
 | Windows 系统缩略图 | 🔵 已定方案，待实现 | `plugin-windows-thumbnails` 经 Windows Shell API 读取/提取，不生成应用缩略图 |
 | 统一文件预览 | 🔵 已定方案，待实现 | 单一 `plugin-preview` 采用 Open File Viewer React SDK；kkFileView 暂不采用（独立 Java/Office 转换服务） |
 
@@ -274,17 +273,18 @@
 | tauri 2 + http + tauri-plugin-fs/dialog/opener | ✅ 已注册并使用 | 接线到能力层→ P6-30 |
 | Tauri path resolver(app_data_dir) | ✅ 在用(未引 `directories`) | — |
 | React 19 + Vite + TS + zustand + @tauri-apps/api | ✅ 在用 | — |
-| Mantine `core`+`hooks`+`notifications`(**7.17.8**) | ✅ 在用(基座外壳与插件 UI 全走 Mantine:SegmentedControl/Tabs/ScrollArea/Table/Timeline/Badge…) | `spotlight/dates/modals/form` 未引 → P6-14/27;**改 `plugin-sdk` 源码或升 Mantine 版本后必须 `pnpm build:shared`**——插件运行时 import 的是 `shared-dist*/plugin-sdk.js` 预打包件,漏建会在加载时报 "does not provide an export named …" |
+| Mantine `core`+`hooks`+`notifications`(**7.17.8**) | ✅ 在用(基座外壳与插件 UI 全走 Mantine:SegmentedControl/Tabs/ScrollArea/Table/Timeline/Badge…) | `dates/modals/form` 未引 → P6-27;`spotlight` 已引(命令面板,进共享集只一份 store,见 D25);**改 `plugin-sdk` 源码或升 Mantine 版本后必须 `pnpm build:shared`**——插件运行时 import 的是 `shared-dist*/plugin-sdk.js` 预打包件,漏建会在加载时报 "does not provide an export named …" |
 | 并行遍历 `ignore`/`jwalk` + `rayon` | ❌ 未引(`fs.list` 现同步 `read_dir`) | P6-1 |
 | `natord` | ✅ 在用(`fs.list` 出参自然序、忽略大小写) | — |
-| 旧 `image` + `base64` 缩略图链 | ✅ 当前代码在用，目标需移除 | P6-66：替换为 Windows Shell 系统缩略图；删除应用生成与 canvas mock 路径 |
+| 旧 `image` + `base64` 缩略图链 | ✅ 应用自制生成链已删除(P6-66)；`png`/`base64` 只在 Windows 侧把 Shell 返回的位图编码成 data URL | — |
 | `trash`/`fs_extra` | 不再选用 | `plugin-file-ops` 将 Windows 文件写操作交给系统 Shell `IFileOperation` |
 | Lore Rust 核心/`lore-vm` | ❌ 未引 | P6-69/70：先固定 revision 并验证 Windows、API、磁盘格式及是否需服务端；若需要 sidecar，复核 D4 单进程决策 |
-| `sysinfo`/`infer`/`mime_guess`/`encoding_rs`/`chardetng`/`similar`/`tantivy`/`fastcdc` | ❌ 未引 | P6-1…13(对应功能建时接入；`similar`/`fastcdc` 需随 Lore 迁移复核) |
-| 前端功能库:`@tanstack/react-virtual`、`react-arborist`、`lucide-react` | ✅ 在用(各自打进插件 dist,不进共享集):虚拟滚动=`plugin-file-browser` 列表+网格单条流;树=`plugin-view-file-tree`;图标=基座外壳 + browser + inspector | 剩余:P6-16/18/19/21/22 |
-| 前端功能库(TanStack Table、dnd-kit、react-hotkeys-hook、codemirror、shiki、react-diff-view、react-markdown、react-pdf、react-photo-view、echarts、dayjs、pretty-bytes、i18next) | ❌ 未引 | P6-14…27(功能插件化时接入) |
+| `chardetng` + `encoding_rs` | ✅ 在用(`fs.readText` 的编码猜测与解码) | — |
+| `sysinfo`/`infer`/`mime_guess` | ❌ 不引 | 内核单表 `file.kind` + 直接 Win32,见 D20 |
+| `similar`/`fastcdc`/`tantivy` | ❌ 未引 | `similar`/`fastcdc` 随 Lore 迁移才需要(已暂缓,见 D21);`tantivy` 由 D24 换成 SQLite FTS5,正文级全文出现时才重开 |
+| 前端功能库:`@tanstack/react-virtual`、`@tanstack/react-table`、`react-arborist`、`lucide-react`、`echarts`、`@open-file-viewer/*`、`pdfjs-dist`、`dayjs`、`pretty-bytes`、`@mantine/spotlight` | ✅ 在用(功能库各自打进所属插件 dist,不进共享集;`dayjs`/`pretty-bytes` 内联在 `shared/plugin-sdk.js` 里只有一份,`@mantine/spotlight` 在共享集里只有一份 store,见 D25):虚拟滚动 + 表格=`plugin-file-browser`(列表/网格/表格一条流);树=`plugin-view-file-tree`;图标=基座外壳 + browser + inspector;treemap=`plugin-storage-analysis`;命令面板=`plugin-command-palette` | 剩余:CodeMirror/Shiki(P6-23)、react-diff-view(P6-24)、i18next(P6-26) |
 | `tauri-plugin-notification`/`-window-state`/`-single-instance` | ❌ 未引 | P6-28/29 |
-| 工具链:Biome / Vitest / nextest / cargo-deny / lefthook / changesets / GitHub Actions+tauri-action / WebDriverIO+tauri-driver | ❌ 全无(现仅 `cargo test`、`node --test`、手写 `contract-check`) | P6-31…40 |
+| 工具链:Biome / rustfmt + clippy / Vitest / nextest / cargo-deny / lefthook / changesets / GitHub Actions+tauri-action / WebDriverIO+tauri-driver | 部分在用:**`Biome` ✅**(`biome.jsonc` + `pnpm lint`/`format`,116 文件零诊断,见 04 P6-31 取证)、**`rustfmt` + `clippy` ✅**(`pnpm lint:rust`/`format:check:rust`,Rust 全 workspace 零 fmt diff、`-D warnings` 零报告,见 04 P6-32 取证)、**`Vitest`+`@testing-library/react` ✅**(shell-ui `pnpm test`,14 测含 `PluginSlot` 错误边界,见 04 P6-33 取证)、**`cargo-deny` ✅**(`deny.toml` advisories·bans·licenses·sources 四类全绿,见 04 P6-36 取证)、**`lefthook` ✅**(`lefthook.yml` pre-commit 三 job:biome --staged / typecheck / rustfmt,见 04 P6-37 取证)、**`GitHub Actions` + `tauri-action` ✅**(`.github/workflows/ci.yml` 四 job:web / rust(Windows)/ deny / release 标签触发,见 04 P6-35 取证);其余 ❌:`cargo-nextest`(暂用 `cargo test`)、`changesets`、`WebDriverIO+tauri-driver` | P6-34/38/39/40 |
 | `cordis-loader`、`cordis-timer` | ⚠️ **在 workspace 声明但零引用**(死声明) | 不删除,由 P6-41/P6-42 转正启用 |
 | `cordis-hmr`、`cordis-rs-include` | ❌ 未声明/未用 | 热替换需求出现时再评估 |
 

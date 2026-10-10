@@ -15,8 +15,9 @@ use std::time::Duration;
 use cordis_core::{Context, Routing};
 use fm_contracts::events::{FileChanged, FileChangedArgs};
 use notify_debouncer_full::{
-    DebounceEventResult, Debouncer, RecommendedCache, new_debouncer,
+    new_debouncer,
     notify::{EventKind, RecommendedWatcher},
+    DebounceEventResult, Debouncer, RecommendedCache,
 };
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;

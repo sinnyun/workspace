@@ -9,9 +9,11 @@
  * reference on click, which the center grid's browser pane follows — the point is
  * that the pressure test runs through the real rendering path, not a side panel.
  */
-import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
+
 import { Events, type PluginHost, type SlotProps } from "@my-file-manager/plugin-sdk";
+import { Database } from "lucide-react";
+import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { MockDatasetView } from "./MockDatasetView";
 
 const VIEW_ID = "stress";
@@ -27,12 +29,14 @@ export function StressIcon({ host }: SlotProps) {
   return (
     <button
       type="button"
-      className="fm-rail-button" aria-label="模拟数据集" aria-pressed={active === VIEW_ID}
+      className="fm-rail-button"
+      aria-label="模拟数据集"
+      aria-pressed={active === VIEW_ID}
       title="模拟数据集(压力测试)"
       onClick={() => host.emit(Events.sidebarViewChanged, { viewId: VIEW_ID })}
       style={railButtonStyle(active === VIEW_ID)}
     >
-      ▥
+      <Database size={19} />
     </button>
   );
 }

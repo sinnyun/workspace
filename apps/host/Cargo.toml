@@ -4,6 +4,7 @@ description = "Tauri v2 host shell: wires fm-kernel (capabilities + cordis-rs ke
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [lib]
 name = "fm_host_lib"

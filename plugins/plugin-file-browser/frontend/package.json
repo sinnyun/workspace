@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "@my-file-manager/plugin-sdk": "workspace:*",
@@ -18,6 +19,7 @@
     "react": "^19.0.0"
   },
   "dependencies": {
+    "@tanstack/react-table": "^9.2.8",
     "@tanstack/react-virtual": "^3.14.13",
     "lucide-react": "^1.52.0"
   }

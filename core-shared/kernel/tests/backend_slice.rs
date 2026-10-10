@@ -11,11 +11,11 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cordis_core::event::{ListenerRegistrationError, observer};
+use cordis_core::event::{observer, ListenerRegistrationError};
 use cordis_core::{Context, Plugin};
 use fm_contracts::capability::HashAlgo;
-use fm_contracts::{DbApi, HashApi};
 use fm_contracts::events::{HistoryUpdated, HistoryUpdatedArgs};
+use fm_contracts::{DbApi, HashApi};
 use fm_kernel::capabilities::CapabilitySet;
 use fm_kernel::kernel::Kernel;
 use tokio::sync::mpsc;
@@ -108,8 +108,16 @@ async fn backend_slice_records_history_and_emits_update() {
         .db
         .read_log("history", &path)
         .expect("read history log");
-    assert_eq!(log.len(), 1, "expected exactly one snapshot, got {}", log.len());
-    let recorded_hash = log[0].get("hash").and_then(|h| h.as_str()).expect("hash field");
+    assert_eq!(
+        log.len(),
+        1,
+        "expected exactly one snapshot, got {}",
+        log.len()
+    );
+    let recorded_hash = log[0]
+        .get("hash")
+        .and_then(|h| h.as_str())
+        .expect("hash field");
     assert_eq!(recorded_hash, expected_hash, "recorded hash mismatch");
 
     // 7. Re-emitting for unchanged content records nothing new (idempotency).
@@ -130,5 +138,9 @@ async fn backend_slice_records_history_and_emits_update() {
 
     // 8. Deterministic teardown.
     kernel.shutdown().await;
-    assert_eq!(kernel.fiber_count(), 0, "roster must be empty after shutdown");
+    assert_eq!(
+        kernel.fiber_count(),
+        0,
+        "roster must be empty after shutdown"
+    );
 }

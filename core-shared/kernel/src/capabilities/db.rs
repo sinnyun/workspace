@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 use fm_contracts::capability::{CapabilityError, DbApi};
 
@@ -76,26 +76,21 @@ impl DbApi for SqliteDb {
         Ok(())
     }
 
-    fn get(
-        &self,
-        store: &str,
-        key: &str,
-    ) -> Result<Option<serde_json::Value>, CapabilityError> {
+    fn get(&self, store: &str, key: &str) -> Result<Option<serde_json::Value>, CapabilityError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT value FROM kv WHERE store = ?1 AND key = ?2")
             .map_err(map_sql)?;
         let mut rows = stmt.query(params![store, key]).map_err(map_sql)?;
         match rows.next().map_err(map_sql)? {
-            Some(row) => Ok(Some(to_json(row.get::<_, String>(0).map_err(map_sql)?.as_str())?)),
+            Some(row) => Ok(Some(to_json(
+                row.get::<_, String>(0).map_err(map_sql)?.as_str(),
+            )?)),
             None => Ok(None),
         }
     }
 
-    fn list(
-        &self,
-        store: &str,
-    ) -> Result<Vec<(String, serde_json::Value)>, CapabilityError> {
+    fn list(&self, store: &str) -> Result<Vec<(String, serde_json::Value)>, CapabilityError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT key, value FROM kv WHERE store = ?1 ORDER BY key")
@@ -126,11 +121,7 @@ impl DbApi for SqliteDb {
         Ok(())
     }
 
-    fn read_log(
-        &self,
-        store: &str,
-        key: &str,
-    ) -> Result<Vec<serde_json::Value>, CapabilityError> {
+    fn read_log(&self, store: &str, key: &str) -> Result<Vec<serde_json::Value>, CapabilityError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT value FROM log WHERE store = ?1 AND key = ?2 ORDER BY seq")

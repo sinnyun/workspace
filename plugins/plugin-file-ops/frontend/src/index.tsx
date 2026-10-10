@@ -25,7 +25,7 @@
  * for its toolbar-owned actions: a component that mounts once owns the items
  * that must exist once.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+
 import {
   ActionIcon,
   Button,
@@ -53,6 +53,7 @@ import type {
   SlotProps,
 } from "@my-file-manager/plugin-sdk";
 import { Capabilities, Events, FrontendCapabilities } from "@my-file-manager/plugin-sdk";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const FILE = "file";
 const FOLDER = "folder";
@@ -71,7 +72,14 @@ const ILLEGAL_NAME = /[<>:"/\\|?*]/;
 
 type Pending =
   | { kind: "rename"; path: string; name: string; error: string | null }
-  | { kind: "transfer"; op: "copy" | "move"; sources: string[]; destination: string; conflict: FileConflictPolicy; error: string | null }
+  | {
+      kind: "transfer";
+      op: "copy" | "move";
+      sources: string[];
+      destination: string;
+      conflict: FileConflictPolicy;
+      error: string | null;
+    }
   | { kind: "create"; dir: string; name: string; error: string | null }
   | { kind: "delete"; sources: string[]; error: string | null };
 
@@ -100,8 +108,7 @@ const parentOf = (path: string): string => {
   return i > 0 ? path.slice(0, i) : "";
 };
 
-const isAddressable = (ref: Ref | null): ref is Ref =>
-  !!ref && (ref.kind === FILE || ref.kind === FOLDER);
+const isAddressable = (ref: Ref | null): ref is Ref => !!ref && (ref.kind === FILE || ref.kind === FOLDER);
 
 /** The items an action applies to: the right-clicked target plus the multi-select
  *  siblings the browser already folded into the context (P7-12 selection rules). */
@@ -298,7 +305,7 @@ export function OperationStatus({ host }: SlotProps) {
 
   const pickDestination = useCallback(async (): Promise<void> => {
     const form = pendingRef.current;
-    if (!form || form.kind !== "transfer") return;
+    if (form?.kind !== "transfer") return;
     try {
       const picked = await host.invoke<PickOut>(Capabilities.shellPickDirectory, {
         title: "选择目标文件夹",
@@ -309,9 +316,7 @@ export function OperationStatus({ host }: SlotProps) {
       if (picked.cancelled) return;
       const dir = picked.paths[0];
       if (!dir) return;
-      setPending((cur) =>
-        cur && cur.kind === "transfer" ? { ...cur, destination: dir, error: null } : cur,
-      );
+      setPending((cur) => (cur && cur.kind === "transfer" ? { ...cur, destination: dir, error: null } : cur));
     } catch (err) {
       setPending((cur) =>
         cur && cur.kind === "transfer" ? { ...cur, error: `选择文件夹失败：${errorMessage(err)}` } : cur,
@@ -346,8 +351,10 @@ export function OperationStatus({ host }: SlotProps) {
     const busy = (): boolean => liveRef.current !== null;
     const single = (context: ContextMenuContext): boolean =>
       SURFACE_ITEM.has(context.surfaceId) && targetsOf(context).length === 1 && !busy();
-    const many = (surface: (context: ContextMenuContext) => boolean) => (context: ContextMenuContext): boolean =>
-      surface(context) && targetsOf(context).length > 0 && !busy();
+    const many =
+      (surface: (context: ContextMenuContext) => boolean) =>
+      (context: ContextMenuContext): boolean =>
+        surface(context) && targetsOf(context).length > 0 && !busy();
 
     const offOpen = menu.registerItem({
       id: "fileOps.open",
@@ -423,8 +430,7 @@ export function OperationStatus({ host }: SlotProps) {
       label: "新建文件夹",
       order: 30,
       group: "collect",
-      when: (context) =>
-        context.surfaceId === SURFACE_EMPTY && context.targetRef?.kind === FOLDER && !busy(),
+      when: (context) => context.surfaceId === SURFACE_EMPTY && context.targetRef?.kind === FOLDER && !busy(),
       execute: (context) => {
         const dir = context.targetRef?.id ?? "";
         if (dir) setPending({ kind: "create", dir, name: "新建文件夹", error: null });
@@ -540,8 +546,7 @@ export function OperationStatus({ host }: SlotProps) {
             <Text size="xs" truncate title={`operationId: ${live.id}`}>
               {LIVE_TEXT(live)}
             </Text>
-            <Button size="compact-xs" variant="subtle" onClick={cancelLive}
-              data-testid="file-ops-cancel">
+            <Button size="compact-xs" variant="subtle" onClick={cancelLive} data-testid="file-ops-cancel">
               取消
             </Button>
           </>
@@ -551,13 +556,23 @@ export function OperationStatus({ host }: SlotProps) {
               {summaryOf(last).text}
             </Text>
             {last.result.items.some((i) => i.outcome === "failed") && (
-              <Button size="compact-xs" variant="subtle" onClick={() => setDetails(true)}
-                data-testid="file-ops-details">
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                onClick={() => setDetails(true)}
+                data-testid="file-ops-details"
+              >
                 详情
               </Button>
             )}
-            <ActionIcon size="xs" variant="subtle" color="gray" title="清除结果" aria-label="清除结果"
-              onClick={() => setLast(null)}>
+            <ActionIcon
+              size="xs"
+              variant="subtle"
+              color="gray"
+              title="清除结果"
+              aria-label="清除结果"
+              onClick={() => setLast(null)}
+            >
               ×
             </ActionIcon>
           </>
@@ -616,22 +631,17 @@ export function OperationStatus({ host }: SlotProps) {
                 label="目标文件夹"
                 data-testid="file-ops-destination"
                 value={pending.destination}
-                onChange={(e) =>
-                  setPending({ ...pending, destination: e.currentTarget.value, error: null })
-                }
+                onChange={(e) => setPending({ ...pending, destination: e.currentTarget.value, error: null })}
                 miw={0}
               />
-              <Button variant="light" onClick={() => void pickDestination()}
-                data-testid="file-ops-pick">
+              <Button variant="light" onClick={() => void pickDestination()} data-testid="file-ops-pick">
                 浏览
               </Button>
             </Group>
             <SegmentedControl
               data={CONFLICT_LABELS.map((c) => ({ label: c.label, value: c.value }))}
               value={pending.conflict}
-              onChange={(value) =>
-                setPending({ ...pending, conflict: value as FileConflictPolicy, error: null })
-              }
+              onChange={(value) => setPending({ ...pending, conflict: value as FileConflictPolicy, error: null })}
               fullWidth
             />
             <Text size="xs" c="dimmed">
@@ -648,11 +658,7 @@ export function OperationStatus({ host }: SlotProps) {
           <Button variant="subtle" onClick={() => setPending(null)}>
             取消
           </Button>
-          <Button
-            onClick={() => void confirmPending()}
-            loading={submitting}
-            data-testid="file-ops-confirm"
-          >
+          <Button onClick={() => void confirmPending()} loading={submitting} data-testid="file-ops-confirm">
             {pending?.kind === "transfer" ? OP_LABELS[pending.op] : pending?.kind === "create" ? "创建" : "重命名"}
           </Button>
         </Group>
@@ -687,8 +693,7 @@ export function OperationStatus({ host }: SlotProps) {
           <Button variant="subtle" onClick={() => setPending(null)}>
             取消
           </Button>
-          <Button color="red" onClick={() => void confirmPending()} loading={submitting}
-            data-testid="file-ops-confirm">
+          <Button color="red" onClick={() => void confirmPending()} loading={submitting} data-testid="file-ops-confirm">
             移到回收站
           </Button>
         </Group>
@@ -699,8 +704,8 @@ export function OperationStatus({ host }: SlotProps) {
           <>
             <ScrollArea h={260}>
               <Stack gap={2}>
-                {last.result.items.map((item, index) => (
-                  <Group key={`${item.source}-${index}`} gap={6} wrap="nowrap">
+                {last.result.items.map((item) => (
+                  <Group key={item.source} gap={6} wrap="nowrap">
                     <Text size="xs" w={72} c={item.outcome === "failed" ? "red" : "dimmed"} inline>
                       {OUTCOME_LABELS[item.outcome]}
                     </Text>

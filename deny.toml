@@ -1,0 +1,46 @@
+# 供应链审计(roadmap P6-36):cargo-deny 配置,CI 的 deny job 会执行 check。
+# 与运行期事实一致:依赖图按发布目标 Windows x64 解析。
+
+[graph]
+targets = [{ triple = "x86_64-pc-windows-msvc" }]
+
+[advisories]
+version = 2
+# 有漏洞与已下架(yanked)包一律失败。
+yanked = "deny"
+ignore = [
+  # instant 是 unmaintained(非漏洞)标记,传递自 notify 7 → notify-types → instant;
+  # 该 crate 在非 wasm 目标(本应用只有 Windows)上就是 std::time 的透传,无行为与安全影响。
+  # 清除它要升 notify 8,会改文件监视运行时行为,归专门批次处理,不在本批顺手升级。
+  "RUSTSEC-2024-0384",
+]
+
+[licenses]
+version = 2
+# 宽松许可 + MPL-2.0 白名单(MPL-2.0 是文件级 copyleft,作依赖使用无碍;tauri 的 CSS 栈用到)。
+# 列表外一律失败——加白即人工复核过。
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "Zlib",
+  "0BSD",
+  "CC0-1.0",
+  "Unlicense",
+  "Unicode-3.0",
+  "MPL-2.0",
+]
+
+[bans]
+# 内部 crate 用无版本的 path 依赖是本 workspace 的刻意形态,不算 wildcard。
+allow-wildcard-paths = true
+# tauri 依赖树里同一 crate 多版本很常见,先报告不拦;真正的双版本引入要人工看。
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

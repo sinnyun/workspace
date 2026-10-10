@@ -39,7 +39,8 @@
 |---|---|---|
 | [plugin-file-ops.md](plugin-file-ops.md) | `plugin-file-ops` Windows 原生文件操作 | 已交付（批次 5；经系统 Shell 执行） |
 | [plugin-windows-thumbnails.md](plugin-windows-thumbnails.md) | `plugin-windows-thumbnails` Windows 系统缩略图 | 能力已交付为 `shell.thumbnail.read`（批次 4）；独立设置页插件仍未落 |
-| [plugin-search.md](plugin-search.md) | `plugin-search` 搜索 | 规划，索引引擎待选 |
+| [plugin-search.md](plugin-search.md) | `plugin-search` 搜索 | 已交付（批次 9；FTS5 名称索引，定案 05 D24） |
+| [plugin-command-palette.md](plugin-command-palette.md) | `plugin-command-palette` 命令面板 | 已交付（批次 9；命令登记簿归基座，定案 05 D25） |
 | [plugin-storage-analysis.md](plugin-storage-analysis.md) | `plugin-storage-analysis` 空间分析 | 已交付（批次 7） |
 | [plugin-history-metadata.md](plugin-history-metadata.md) | `plugin-history-metadata` 历史版本信息 | 规划（保存并展示 Lore revision 对应的缩略图和文件属性） |
 | [plugin-context-menu.md](plugin-context-menu.md) | `plugin-context-menu` 右键菜单框架 | 已交付（批次 3；统一面板，业务插件贡献动作） |
@@ -52,4 +53,4 @@
 
 纯文本读取与预览偏好都由 `plugin-preview` 承载，仓库里没有独立的文本预览插件。注意宿主端插件发现是**扫描 `plugins/` 目录**（无 allowlist）：目录存在就会被真机装载，所以插件目录的新增与删除都要显式确认，dev 注册表不能当作隔离手段。
 
-命令面板当前是基座预留槽，不是已注册插件；SDK 尚无插件命令注册 API。全局命令功能见 [09 插件功能规格与交互数据契约](../09-plugin-functional-spec.md)，在 API 单独设计前，不给业务插件伪造命令接口。
+命令面板是已注册插件 `plugin-command-palette`；命令登记簿、快捷键调度与卸载清理归基座命令服务（`apps/shell-ui/src/commands.ts`），业务插件经 manifest `commands` 半区授权使用（05 D25）。全局命令功能清单见 [09 插件功能规格与交互数据契约](../09-plugin-functional-spec.md)。

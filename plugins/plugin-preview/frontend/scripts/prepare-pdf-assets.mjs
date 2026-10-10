@@ -15,10 +15,11 @@ const dist = resolve(frontend, "dist");
 const require = createRequire(resolve(frontend, "noop.js"));
 const pdfjs = resolve(require.resolve("pdfjs-dist/package.json"), "..");
 
-const files = [
-  ["build/pdf.worker.min.mjs", "pdf.worker.min.mjs"],
+const files = [["build/pdf.worker.min.mjs", "pdf.worker.min.mjs"]];
+const dirs = [
+  ["cmaps", "pdfcmaps"],
+  ["standard_fonts", "pdffonts"],
 ];
-const dirs = [["cmaps", "pdfcmaps"], ["standard_fonts", "pdffonts"]];
 
 function missing(what) {
   console.error(`prepare-pdf-assets: ${what} not found under ${pdfjs}`);

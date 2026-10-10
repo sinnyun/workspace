@@ -26,8 +26,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use fm_contracts::capability::{
-    CapabilityError, FsResourceApi, MAX_RESOURCE_CHUNK_BYTES, ReadResourceIn, ReadResourceOut,
-    ResourceIn, ResourceOut, RESOURCE_TTL_MS,
+    CapabilityError, FsResourceApi, ReadResourceIn, ReadResourceOut, ResourceIn, ResourceOut,
+    MAX_RESOURCE_CHUNK_BYTES, RESOURCE_TTL_MS,
 };
 
 use crate::capabilities::file_kind::kind_of_extension;
@@ -241,9 +241,8 @@ impl FsResourceApi for Resources {
 /// and never past the end of what the handle was bound to.
 fn clamp_length(requested: u64, offset: u64, total: u64) -> usize {
     let remaining = total.saturating_sub(offset);
-    usize::try_from(requested.min(remaining).min(MAX_RESOURCE_CHUNK_BYTES)).unwrap_or(
-        MAX_RESOURCE_CHUNK_BYTES as usize,
-    )
+    usize::try_from(requested.min(remaining).min(MAX_RESOURCE_CHUNK_BYTES))
+        .unwrap_or(MAX_RESOURCE_CHUNK_BYTES as usize)
 }
 
 /// Read `length` bytes starting at `offset`. `length` is already clamped, so this
@@ -281,7 +280,9 @@ mod tests {
 
     fn open(resources: &Resources, path: &str) -> ResourceOut {
         resources
-            .open(&ResourceIn { path: path.to_owned() })
+            .open(&ResourceIn {
+                path: path.to_owned(),
+            })
             .expect("opens")
     }
 
@@ -306,7 +307,10 @@ mod tests {
         assert_eq!(out.path, path, "the handle echoes what it is bound to");
         assert_eq!(out.byte_length, 5);
         assert_eq!(out.mime.as_deref(), Some("text/plain"));
-        assert!(out.expires_ms > Resources::now_ms(), "the deadline is in the future");
+        assert!(
+            out.expires_ms > Resources::now_ms(),
+            "the deadline is in the future"
+        );
         assert!(
             !out.handle.contains("note.txt") && !out.handle.contains('\\'),
             "a handle is an opaque token, never a path"
@@ -331,7 +335,9 @@ mod tests {
         );
 
         let blank = resources
-            .open(&ResourceIn { path: "   ".to_owned() })
+            .open(&ResourceIn {
+                path: "   ".to_owned(),
+            })
             .expect_err("nothing to bind");
         assert!(
             blank.to_string().starts_with("invalid argument:"),
@@ -419,13 +425,14 @@ mod tests {
             "closing twice is a race, not a failure"
         );
         assert!(
-            resources.read(&ReadResourceIn {
-                handle: out.handle.clone(),
-                offset: 0,
-                length: 8,
-                request_token: None,
-            })
-            .is_err(),
+            resources
+                .read(&ReadResourceIn {
+                    handle: out.handle.clone(),
+                    offset: 0,
+                    length: 8,
+                    request_token: None,
+                })
+                .is_err(),
             "a closed handle reads nothing"
         );
 
@@ -479,11 +486,7 @@ mod tests {
             ("noextension", None),
         ] {
             let path = written(dir.path(), name, b"x");
-            assert_eq!(
-                open(&resources, &path).mime.as_deref(),
-                expected,
-                "{name}"
-            );
+            assert_eq!(open(&resources, &path).mime.as_deref(), expected, "{name}");
         }
     }
 }

@@ -83,3 +83,29 @@ impl Event for ScanDoneEvent {
     type Args = crate::capability::ScanDone;
     type Output = ();
 }
+
+/// Emitted while a `search.index.start` job walks the roots. Counters only:
+/// the entry ceiling means the total is unknown up front.
+///
+/// Results themselves are **not** an event. `search.query` is paged
+/// request/response (`offset` + `hasMore`), which gives the same incremental
+/// behaviour without a second channel that has to be correlated with a query —
+/// the roadmap's `search:results` name was folded into it (docs/05 D24).
+pub struct SearchIndexProgressEvent;
+
+impl Event for SearchIndexProgressEvent {
+    const NAME: &'static str = "search:index-progress";
+    type Args = crate::capability::SearchIndexProgress;
+    type Output = ();
+}
+
+/// Emitted once when an indexing job reaches a terminal state, partial or not.
+/// Separate from progress so a cancelled job cannot be inferred from a missing
+/// tick, exactly like `scan:done`.
+pub struct SearchIndexDoneEvent;
+
+impl Event for SearchIndexDoneEvent {
+    const NAME: &'static str = "search:index-done";
+    type Args = crate::capability::SearchIndexDone;
+    type Output = ();
+}

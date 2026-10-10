@@ -9,18 +9,11 @@
  *
  * Uses Mantine from the shared singleton (import map) so it themes with the base.
  */
-import { useCallback, useEffect, useState } from "react";
-import {
-  Stack,
-  Text,
-  Timeline,
-  Loader,
-  Center,
-  Code,
-  ScrollArea,
-} from "@mantine/core";
+
+import { Center, Code, Loader, ScrollArea, Stack, Text, Timeline } from "@mantine/core";
 import type { HostMetaState, SlotProps } from "@my-file-manager/plugin-sdk";
-import { Events } from "@my-file-manager/plugin-sdk";
+import { Events, formatDateTime, formatSize } from "@my-file-manager/plugin-sdk";
+import { useCallback, useEffect, useState } from "react";
 
 interface HistoryEntry {
   hash: string;
@@ -105,14 +98,11 @@ export function HistoryPanel({ host }: SlotProps) {
       ) : (
         <ScrollArea style={{ flex: 1 }}>
           <Timeline active={entries.length} bulletSize={14} lineWidth={1}>
-            {[...entries].reverse().map((e, i) => (
-              <Timeline.Item
-                key={`${e.at}-${i}`}
-                title={new Date(e.at).toLocaleString()}
-              >
+            {[...entries].reverse().map((e) => (
+              <Timeline.Item key={`${e.at}-${e.hash}`} title={formatDateTime(e.at)}>
                 <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>
                   {e.hash.slice(0, 16)}
-                  {typeof e.size === "number" ? ` · ${e.size}B` : ""}
+                  {typeof e.size === "number" ? ` · ${formatSize(e.size)}` : ""}
                 </Text>
               </Timeline.Item>
             ))}

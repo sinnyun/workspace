@@ -6,21 +6,24 @@
  * mounted to stay responsive when the buffer is full — this is a debug tool, so
  * it must not itself become the slow thing on screen.
  */
-import { useMemo, useState, useSyncExternalStore } from "react";
+
 import {
-  Stack,
-  Group,
-  Text,
-  Title,
-  Badge,
   ActionIcon,
-  TextInput,
-  ScrollArea,
+  Badge,
   Box,
+  Group,
+  ScrollArea,
   SegmentedControl,
+  Stack,
+  Text,
+  TextInput,
+  Title,
 } from "@mantine/core";
 import type { SlotProps } from "@my-file-manager/plugin-sdk";
-import { logStore, type LogRecord, type LogLevel } from "./store";
+import { formatClock } from "@my-file-manager/plugin-sdk";
+import { Download, Trash2 } from "lucide-react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { type LogLevel, type LogRecord, logStore } from "./store";
 
 const LEVELS: LogLevel[] = ["error", "warn", "info", "log", "perf"];
 const LEVEL_COLOR: Record<LogLevel, string> = {
@@ -31,13 +34,6 @@ const LEVEL_COLOR: Record<LogLevel, string> = {
   perf: "violet",
 };
 
-const TIME_FMT = new Intl.DateTimeFormat("zh-CN", {
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
-
 const WINDOW = 1000;
 
 export function LogPanel(_props: SlotProps) {
@@ -47,6 +43,7 @@ export function LogPanel(_props: SlotProps) {
   const [newestFirst, setNewestFirst] = useState(true);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 计数由 store 当前记录派生，records 变化后必须重算
   const counts = useMemo(() => logStore.counts(), [records]);
 
   const filtered = useMemo(() => {
@@ -116,10 +113,17 @@ export function LogPanel(_props: SlotProps) {
           onChange={(v) => setNewestFirst(v === "新在上")}
         />
         <ActionIcon size="sm" variant="light" color="gray" aria-label="导出日志" title="导出 JSON" onClick={exportJson}>
-          ⇩
+          <Download size={14} />
         </ActionIcon>
-        <ActionIcon size="sm" variant="light" color="red" aria-label="清空日志" title="清空" onClick={() => logStore.clear()}>
-          ✕
+        <ActionIcon
+          size="sm"
+          variant="light"
+          color="red"
+          aria-label="清空日志"
+          title="清空"
+          onClick={() => logStore.clear()}
+        >
+          <Trash2 size={14} />
         </ActionIcon>
       </Group>
 
@@ -138,12 +142,7 @@ export function LogPanel(_props: SlotProps) {
         ) : (
           <Stack gap={0}>
             {shown.map((r) => (
-              <LogRow
-                key={r.id}
-                record={r}
-                expanded={expanded.has(r.id)}
-                onToggle={() => toggleExpand(r.id)}
-              />
+              <LogRow key={r.id} record={r} expanded={expanded.has(r.id)} onToggle={() => toggleExpand(r.id)} />
             ))}
             {filtered.length > WINDOW && (
               <Text size="xs" c="dimmed" p={4}>
@@ -157,15 +156,7 @@ export function LogPanel(_props: SlotProps) {
   );
 }
 
-function LogRow({
-  record: r,
-  expanded,
-  onToggle,
-}: {
-  record: LogRecord;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
+function LogRow({ record: r, expanded, onToggle }: { record: LogRecord; expanded: boolean; onToggle: () => void }) {
   const hasDetail = Boolean(r.detail);
   return (
     <Box
@@ -179,7 +170,7 @@ function LogRow({
     >
       <Group gap={6} wrap="nowrap" style={{ alignItems: "flex-start" }}>
         <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-          {TIME_FMT.format(r.at)}
+          {formatClock(r.at)}
         </Text>
         <Badge size="xs" color={LEVEL_COLOR[r.level]} variant="light" style={{ minWidth: 44, textAlign: "center" }}>
           {r.level}

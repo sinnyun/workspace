@@ -13,14 +13,9 @@
  * inside a shadow root; shared visual tokens come from the Mantine theme instead
  * (docs/01 §7).
  */
-import {
-  Component,
-  useEffect,
-  useSyncExternalStore,
-  type ComponentType,
-  type ReactNode,
-} from "react";
-import { slotPrefix, type SlotOutletProps, type SlotProps } from "@my-file-manager/plugin-sdk";
+
+import { type SlotOutletProps, type SlotProps, slotPrefix } from "@my-file-manager/plugin-sdk";
+import { Component, type ComponentType, type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { slotRegistry } from "./slots";
 
 interface Props {
@@ -29,10 +24,7 @@ interface Props {
 
 /** Per-plugin render isolation (roadmap P5-1): a component that throws during
  *  render degrades to a placeholder instead of unmounting the whole shell. */
-class PluginErrorBoundary extends Component<
-  { plugin: string; children: ReactNode },
-  { error: Error | null }
-> {
+class PluginErrorBoundary extends Component<{ plugin: string; children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
 
   static getDerivedStateFromError(error: Error) {
@@ -100,10 +92,7 @@ export function SlotOutlet({ slotId, provider }: { slotId: string; provider: str
  *  (`pane-slot:0` -> `pane-slot:7`); anything else falls back to the bound id, so
  *  a container can never render a base slot or another plugin's nested slot
  *  through an outlet it was only granted for its own prefix (docs/02 §8). */
-export function makeSlotOutlet(
-  provider: string,
-  slotId: string,
-): ComponentType<SlotOutletProps> {
+export function makeSlotOutlet(provider: string, slotId: string): ComponentType<SlotOutletProps> {
   const boundPrefix = slotPrefix(slotId);
   const Outlet = ({ id }: SlotOutletProps) => {
     const target = id && slotPrefix(id) === boundPrefix ? id : slotId;

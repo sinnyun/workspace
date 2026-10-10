@@ -10,7 +10,7 @@
  */
 import type { PluginHost } from "@my-file-manager/plugin-sdk";
 import { Events } from "@my-file-manager/plugin-sdk";
-import { logStore, type LogLevel } from "./store";
+import { type LogLevel, logStore } from "./store";
 
 function fmtArg(a: unknown): string {
   if (typeof a === "string") return a;
@@ -36,7 +36,7 @@ function wrapConsole(): () => void {
     const level = map[key as string];
     const orig = console[key].bind(console);
     originals[key] = console[key];
-    (console as any)[key] = (...args: unknown[]) => {
+    (console as unknown as Record<string, (...a: unknown[]) => void>)[key] = (...args: unknown[]) => {
       logStore.add(level, "console", args.map(fmtArg).join(" "));
       (orig as (...a: unknown[]) => void)(...args);
     };
@@ -73,11 +73,7 @@ function installPerfObserver(): () => void {
   try {
     observer = new PerformanceObserver((list) => {
       for (const e of list.getEntries()) {
-        logStore.add(
-          e.duration >= 100 ? "warn" : "perf",
-          "perf",
-          `主线程长任务 ${e.duration.toFixed(0)}ms`,
-        );
+        logStore.add(e.duration >= 100 ? "warn" : "perf", "perf", `主线程长任务 ${e.duration.toFixed(0)}ms`);
       }
     });
     observer.observe({ type: "longtask", buffered: true });

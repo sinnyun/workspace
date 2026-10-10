@@ -14,10 +14,12 @@
  * `layoutMode`/`panes` are this plugin's LOCAL state, kept per browsing session and
  * remembered in localStorage — the base only supplies the opaque `activeTabId`.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
+
 import { Button, Menu } from "@mantine/core";
 import { Events, type PluginHost, type SlotProps } from "@my-file-manager/plugin-sdk";
+import { Check, ChevronDown, X } from "lucide-react";
+import type { CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 const MODES = [1, 2, 4] as const;
 type Mode = (typeof MODES)[number];
@@ -39,10 +41,14 @@ const GAP = 6;
 type LayoutController = { mode: Mode; setMode: (mode: Mode) => void };
 const controllers = new Map<string, LayoutController>();
 const listeners = new Set<() => void>();
-const notifyToolbar = () => { for (const listener of listeners) listener(); };
+const notifyToolbar = () => {
+  for (const listener of listeners) listener();
+};
 const subscribeToolbar = (listener: () => void) => {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  return () => {
+    listeners.delete(listener);
+  };
 };
 
 export function PanesToolbar({ host }: SlotProps) {
@@ -54,16 +60,30 @@ export function PanesToolbar({ host }: SlotProps) {
     <div className="fm-layout-toolbar" style={toolbarStyle}>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
-          <Button className="fm-dropdown-button" variant="default" size="xs" aria-label="分栏布局"
-            rightSection={<span aria-hidden="true">⌄</span>}>
+          <Button
+            className="fm-dropdown-button"
+            variant="default"
+            size="xs"
+            aria-label="分栏布局"
+            rightSection={<ChevronDown size={14} />}
+          >
             {controller.mode === 1 ? "单栏" : controller.mode === 2 ? "双栏" : "四栏"}
           </Button>
         </Menu.Target>
         <Menu.Dropdown>
           <Menu.Label>分栏布局</Menu.Label>
           {MODES.map((mode) => (
-            <Menu.Item key={mode} onClick={() => controller.setMode(mode)}
-              rightSection={controller.mode === mode ? <span aria-label="当前布局">✓</span> : undefined}>
+            <Menu.Item
+              key={mode}
+              onClick={() => controller.setMode(mode)}
+              rightSection={
+                controller.mode === mode ? (
+                  <span title="当前布局">
+                    <Check size={14} />
+                  </span>
+                ) : undefined
+              }
+            >
               {mode === 1 ? "单栏" : mode === 2 ? "左右双栏" : "四栏"}
             </Menu.Item>
           ))}
@@ -75,8 +95,7 @@ export function PanesToolbar({ host }: SlotProps) {
 
 const clampPct = (n: number): number => Math.min(85, Math.max(15, n));
 /** The widest layout that still fits the number of live panes. */
-const fitMode = (count: number, want: Mode): Mode =>
-  count >= 4 ? want : count >= 2 ? (want === 4 ? 2 : want) : 1;
+const fitMode = (count: number, want: Mode): Mode => (count >= 4 ? want : count >= 2 ? (want === 4 ? 2 : want) : 1);
 
 function loadAll(): Record<string, PaneState> {
   try {
@@ -121,35 +140,50 @@ export function PanesContainer({ host }: SlotProps) {
     [tabId, host],
   );
 
-  const setMode = useCallback((mode: Mode): void => {
-    if (mode === st.mode) return;
-    const ids = [...st.ids];
-    let seq = st.seq;
-    const created: string[] = [];
-    while (ids.length < mode) {
-      const id = `p${seq++}`;
-      ids.push(id);
-      created.push(`pane-slot:${id}`);
-    }
-    commit({ ...st, mode, ids, seq });
-    // docs/02 §4.5: a pane added is announced after the state lands, so the
-    // outlet exists and content plugins can inject into it.
-    for (const slotId of created) {
-      host.emit(Events.slotReconfigured, { slotId, action: "add" } as const);
-    }
-  }, [st, commit, host]);
+  const setMode = useCallback(
+    (mode: Mode): void => {
+      if (mode === st.mode) return;
+      const ids = [...st.ids];
+      let seq = st.seq;
+      const created: string[] = [];
+      while (ids.length < mode) {
+        const id = `p${seq++}`;
+        ids.push(id);
+        created.push(`pane-slot:${id}`);
+      }
+      commit({ ...st, mode, ids, seq });
+      // docs/02 §4.5: a pane added is announced after the state lands, so the
+      // outlet exists and content plugins can inject into it.
+      for (const slotId of created) {
+        host.emit(Events.slotReconfigured, { slotId, action: "add" } as const);
+      }
+    },
+    [st, commit, host],
+  );
 
   const controller = useMemo(() => ({ mode: st.mode, setMode }), [st.mode, setMode]);
-  useEffect(() => { controllers.set(tabId, controller); notifyToolbar(); }, [tabId, controller]);
-  useEffect(() => () => { controllers.delete(tabId); notifyToolbar(); }, [tabId]);
+  useEffect(() => {
+    controllers.set(tabId, controller);
+    notifyToolbar();
+  }, [tabId, controller]);
+  useEffect(
+    () => () => {
+      controllers.delete(tabId);
+      notifyToolbar();
+    },
+    [tabId],
+  );
 
   const closePane = (id: string): void => {
     if (st.ids.length <= 1) return;
     const ids = st.ids.filter((x) => x !== id);
-    commit({ ...st, ids, mode: fitMode(ids.length, st.mode) }, {
-      slotId: `pane-slot:${id}`,
-      action: "remove",
-    });
+    commit(
+      { ...st, ids, mode: fitMode(ids.length, st.mode) },
+      {
+        slotId: `pane-slot:${id}`,
+        action: "remove",
+      },
+    );
   };
 
   const visible = st.ids.slice(0, Math.min(st.ids.length, st.mode));
@@ -162,7 +196,11 @@ export function PanesContainer({ host }: SlotProps) {
     commit({ ...st, rowPct: clampPct(st.rowPct + (dy / axis) * 100) });
 
   return (
-    <div className="fm-layout-panes" data-mode={st.mode} style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+    <div
+      className="fm-layout-panes"
+      data-mode={st.mode}
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
+    >
       <div style={{ flex: 1, minHeight: 0 }}>
         {/* Keyed by session: a browsing session owns its own pane instances, so a
             pane's local path can never leak into another tab (docs/01 §9.1). The
@@ -226,8 +264,15 @@ function Pane({
     <section className="fm-pane" style={{ ...paneStyle(hidden), gridArea: area }}>
       <div className="fm-pane-header" style={paneHeaderStyle}>
         <span title={slotId}>栏 {order}</span>
-        <button type="button" className="fm-pane-close" onClick={onClose} aria-label={`关闭栏 ${order}`} title="关闭此栏" style={closeButtonStyle}>
-          ✕
+        <button
+          type="button"
+          className="fm-pane-close"
+          onClick={onClose}
+          aria-label={`关闭栏 ${order}`}
+          title="关闭此栏"
+          style={closeButtonStyle}
+        >
+          <X size={12} />
         </button>
       </div>
       <div style={paneOutletStyle}>
@@ -251,6 +296,7 @@ function Divider({
   const anchor = useRef<{ x: number; y: number } | null>(null);
   const axis = useRef(1);
   return (
+    // biome-ignore lint/a11y/useSemanticElements: 指针拖拽的分栏条是交互式 window splitter；<hr> 无可交互语义且会带入默认样式
     <div
       className="fm-resizer"
       role="separator"

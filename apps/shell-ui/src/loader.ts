@@ -27,22 +27,15 @@
  * Outside Tauri (browser dev) `listPlugins` returns [], so the shell runs with
  * no plugins rather than crashing.
  */
+
+import type { PluginInfo, PluginManifest, PluginModule, SlotProps } from "@my-file-manager/plugin-sdk";
+import { FrontendCapabilities, slotPrefix, validateManifest } from "@my-file-manager/plugin-sdk";
 import type { ComponentType } from "react";
-import type {
-  PluginInfo,
-  PluginManifest,
-  PluginModule,
-  SlotProps,
-} from "@my-file-manager/plugin-sdk";
-import {
-  FrontendCapabilities,
-  slotPrefix,
-  validateManifest,
-} from "@my-file-manager/plugin-sdk";
-import { createHost, type LoadedPluginHandle } from "./host";
-import { slotRegistry } from "./slots";
-import { invokeCapability, registerBaseCapability } from "./invoke";
+import { commandService } from "./commands";
 import { contextMenuService } from "./contextmenu";
+import { createHost, type LoadedPluginHandle } from "./host";
+import { invokeCapability, registerBaseCapability } from "./invoke";
+import { slotRegistry } from "./slots";
 
 export interface LoadedPlugin extends LoadedPluginHandle {
   manifest: PluginManifest;
@@ -55,12 +48,7 @@ const DISABLED_KEY = "fm.plugins.disabled.v1";
  *  geometry — or no way back, since the switch lives inside that panel — so the
  *  base refuses to disable them. Base policy, never manifest-supplied: a plugin
  *  cannot grant itself immunity. */
-const CORE_PLUGINS = new Set([
-  "plugin-layout-panes",
-  "plugin-layout-views",
-  "plugin-inspector",
-  "plugin-settings",
-]);
+const CORE_PLUGINS = new Set(["plugin-layout-panes", "plugin-layout-views", "plugin-inspector", "plugin-settings"]);
 
 /** Discovered index (all plugins, enabled or not) and the nested-slot prefixes it
  *  provides — computed once, because a disabled container's prefix must still
@@ -73,15 +61,13 @@ function readDisabled(): Set<string> {
   try {
     const raw = localStorage.getItem(DISABLED_KEY);
     const names = raw ? (JSON.parse(raw) as unknown) : [];
-    return new Set(
-      Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : [],
-    );
+    return new Set(Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : []);
   } catch {
     return new Set();
   }
 }
 
-let disabled = readDisabled();
+const disabled = readDisabled();
 let slotsChanged: () => void = () => {};
 
 function persistDisabled(): void {
@@ -174,6 +160,7 @@ async function loadOne(manifest: PluginManifest): Promise<void> {
         // (including nested slots whose outlet React never got to unmount).
         slotRegistry.releasePlugin(manifest.name);
         contextMenuService.releasePlugin(manifest.name);
+        commandService.releasePlugin(manifest.name);
         slotsChanged();
       },
     };

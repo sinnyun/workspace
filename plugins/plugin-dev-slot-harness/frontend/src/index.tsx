@@ -1,5 +1,5 @@
 /**
- * Dev-only nested-slot harness — the runtime evidence for roadmap P6-45.
+ * Dev-only harness — the runtime evidence for roadmap P6-45 and P7-30.
  *
  * It plays BOTH roles at once so the whole path is exercised in a real browser:
  *  - as a CONTAINER it provides two nested outlets (`dev-pane:0`, `dev-pane:1`)
@@ -8,15 +8,22 @@
  *  - as CONTENT it injects a card into each outlet through `host.contributeToSlot`
  *    in `activate`, and the card renders the `slotId` it was injected into.
  *
- * It also makes two deliberately FORBIDDEN attempts — injecting into
- * `file-sidebar-zone` (absent from its `permissions.slots.contribute`) and
- * providing `forbidden-prefix:0` (absent from `frontend.provides`). Both must be
- * refused by the base with a `[host:...] denied` warning and render nothing:
- * that is docs/02 §8 enforced at runtime rather than in a review comment.
+ * It also makes deliberately FORBIDDEN attempts, each of which must be refused by
+ * the base with a warning and produce nothing — docs/02 §8 and docs/04 P7-30
+ * enforced at runtime rather than in a review comment:
+ *  - inject into `file-sidebar-zone` (absent from `permissions.slots.contribute`);
+ *  - provide `forbidden-prefix:0` (absent from `frontend.provides`);
+ *  - claim the command palette via `commands.provide()` (register granted,
+ *    provide NOT);
+ *  - register `harness.bad-shortcut` with a malformed `"Ctrl+"`;
+ *  - register `harness.dup-shortcut` on `"Ctrl+Shift+F"`, already claimed by
+ *    `search.open`.
+ * None of the refused commands may appear in the palette.
  */
-import { useEffect, useState } from "react";
+
 import type { PluginHost, SlotProps } from "@my-file-manager/plugin-sdk";
-import { Events, disposer } from "@my-file-manager/plugin-sdk";
+import { disposer, Events } from "@my-file-manager/plugin-sdk";
+import { useEffect, useState } from "react";
 
 /** The component injected into each nested outlet: proves the outlet hands the
  *  contributor its own gated host plus the nested slot identity. */
@@ -38,12 +45,22 @@ function PaneCard({ host, slotId }: SlotProps) {
 }
 
 export function activate(host: PluginHost): () => void {
-  const offs = [
-    host.contributeToSlot("dev-pane:0", PaneCard),
-    host.contributeToSlot("dev-pane:1", PaneCard),
-  ];
+  const offs = [host.contributeToSlot("dev-pane:0", PaneCard), host.contributeToSlot("dev-pane:1", PaneCard)];
   host.contributeToSlot("file-sidebar-zone", PaneCard); // must be DENIED
   host.provideSlot("forbidden-prefix:0"); // must be DENIED
+  host.commands?.provide(); // must be DENIED (provide not granted)
+  host.commands?.register({
+    id: "harness.bad-shortcut",
+    title: "非法快捷键自检",
+    shortcut: "Ctrl+", // malformed — the whole command must be refused
+    run: () => {},
+  });
+  host.commands?.register({
+    id: "harness.dup-shortcut",
+    title: "重复快捷键自检",
+    shortcut: "Ctrl+Shift+F", // claimed by search.open — must be refused
+    run: () => {},
+  });
   return disposer(...offs);
 }
 

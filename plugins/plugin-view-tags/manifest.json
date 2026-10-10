@@ -14,10 +14,10 @@
     ]
   },
   "permissions": {
-    "capabilities": [],
+    "capabilities": ["db.tags.*"],
     "events": {
       "subscribe": [],
-      "emit": ["sidebar:view:changed", "sidebar:selection:changed", "focus:changed"]
+      "emit": ["sidebar:view:changed", "sidebar:selection:changed", "focus:changed", "tags:updated"]
     },
     "slots": {
       "contribute": ["activity-rail-zone", "nav-panel:tags"]

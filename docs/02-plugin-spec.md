@@ -89,7 +89,8 @@ plugin-<name>/
 | `permissions.capabilities` | ✓ | 允许调用的能力白名单,支持 `*` 通配 |
 | `permissions.events.subscribe/emit` | ✓ | 允许订阅/发出的事件白名单 |
 | `permissions.slots.contribute[]` | | 允许注入的槽(含他插件提供的嵌套槽)前缀白名单;注入未声明的槽被拒 |
-| `permissions.contextMenu.open/contribute` | | 规划字段；分别授权表面插件请求右键面板、业务插件注册右键动作；默认拒绝，插件卸载时撤销注册 |
+| `permissions.contextMenu.open/contribute` | | 分别授权表面插件请求右键面板、业务插件注册右键动作；默认拒绝，插件卸载时撤销注册(P6-72 已交付) |
+| `permissions.commands.register/provide` | | 分别授权业务插件注册命令、面板插件领取唯一 launcher；整个 `commands` 段缺席 = 没有 `host.commands` 面；命令 id 全局唯一、快捷键先到先得(重复/非法整体拒绝)，插件卸载/停用时命令与快捷键一并移除(P7-30 已交付) |
 
 > **权限即契约**:未在 `permissions` 声明的能力调用或事件收发,一律被基座/内核拒绝。这既是安全边界,也让插件依赖关系可静态审计。
 
@@ -186,10 +187,16 @@ interface PluginHost {
   onSlotsChange(cb: () => void): () => void;      // 注册表变化(挂载/卸载/注入/移除)
   slotLabel(slotId: string): string | undefined;  // 贡献者为自己那个槽声明的显示名(manifest `slots[].label`)
 
-  // —— UI:应用级右键菜单(规划，见 P6-72；动作回调归注册插件所有)——
+  // —— UI:应用级右键菜单(已落地,见 P6-72；动作回调归注册插件所有)——
   contextMenu: {
     open(context: ContextMenuOpenContext): void; // 内容区域请求框架显示面板
     registerItem(item: ContextMenuItem): () => void; // 返回卸载句柄
+  };
+
+  // —— UI:全局命令(已落地,见 P7-30；注册面/面板面各自授权,缺省即无此字段)——
+  commands?: {
+    register(descriptor: CommandDescriptor): () => void; // 返回卸载句柄
+    provide(): CommandLauncher | null;                    // 面板插件领取唯一 launcher,先到先得
   };
 
   // —— 事件(前端总线,含桥接来的后端事件)——
@@ -226,6 +233,22 @@ interface ContextMenuItem {
   when(context: ContextMenuContext): boolean;
   enabled(context: ContextMenuContext): boolean | { enabled: false; reason: string };
   execute(context: ContextMenuContext, signal: AbortSignal): void | Promise<void>;
+}
+
+interface CommandDescriptor {
+  id: string;              // 全局唯一
+  title: string;           // 面板里显示的命令名
+  group?: string;          // 分组(与 title 一起参与面板过滤)
+  subtitle?: string;
+  shortcut?: string;       // 规范形 `Ctrl+Shift+P`;非法或与既有命令重复 → 整条命令被拒
+  run(): void | Promise<void>;   // 抛出的错误由基座捕获,面板就地显示
+}
+interface CommandLauncher {   // 只有面板提供者(commands.provide)拿得到
+  commands(): Array<{ owner: string; descriptor: CommandDescriptor }>;
+  onChange(cb: () => void): () => void;                          // 命令增删通知
+  run(target: { owner: string; id: string }): Promise<boolean>;  // false=被拒或抛错,原因在 lastError()
+  executing(): { owner: string; id: string } | null;             // 忙于执行时的那条命令
+  lastError(): { id: string; message: string } | null;
 }
 
 // 基座只存不透明引用,不解释 kind 的业务含义(见 01 §9.2)
@@ -426,6 +449,8 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 - `PluginHost` 加**只寻址**的发现面 `name`/`contributedSlots(prefix?)`/`providedSlots(prefix?)`/`onSlotsChange(cb)`(§4.2、§4.5);它们不改变任何已冻结形状,容器与内容插件靠它们跟随动态槽,无需理解彼此内部。
 - §6.4 的**级联协调事件**与 §4.5 的**嵌套槽生命周期事件**是**前端总线专用**,只在 `plugin-sdk`(TS)定义,不进 Rust 契约、不参与 `contract:check`(该命令只管跨 IPC 的能力/领域事件/DTO)。
 - §5.3 的**基座前端能力**(`plugins.list`/`plugins.setEnabled`)同上:提供方在前端,没有 Rust 对应物,故住在独立的 `FrontendCapabilities` 常量里而非 `Capabilities`——`Capabilities` 必须继续与 `capability::names` 全等。附带新增的 `PluginInfo`/`PluginSetEnabledArgs` 也只是 TS 侧形状。
+- manifest 新增可选字段 `permissions.commands`(缺省=无命令面;Rust `fm_contracts::manifest` 与 TS SDK 两侧同步,`validate` 接受缺席)。
+- `PluginHost` 加 `commands` 面(`register`/`provide`,§4.2)与 TS 侧形状 `CommandDescriptor`/`CommandLauncher`;命令只在前端总线内执行与调度(基座命令服务,见 05 D25),无 Rust 契约、不进 `contract:check`。
 
 ---
 
@@ -440,5 +465,6 @@ B 区一次只显示一个视图,这是**容器 `plugin-layout-views` 的职责*
 | 内容 `contributeToSlot` | 目标槽前缀 ∈ `permissions.slots.contribute`(他插件嵌套槽须显式授权),否则拒绝注入 |
 | 运行时 `invoke` | capability ∈ 白名单,否则 reject |
 | `invoke` 启停他人 | `plugins.setEnabled` 的 `name` 若是基座判定的**核心插件**(三容器 + 设置面板),loader 直接返回中文错误,不执行 |
+| 命令注册/领取 | `permissions.commands` 未授权即告警拒绝(`register` 返回空句柄、`provide` 返回 null);命令 id 全局唯一,快捷键一对一(重复或非法整体拒绝,不留死键) |
 | 运行时 `emit/on` | event ∈ 白名单,否则忽略并告警 |
-| 卸载 | 调用前端卸载钩子 / dispose 后端 fiber,校验 Effect 全部回收 |
+| 卸载 | 调用前端卸载钩子 / dispose 后端 fiber,校验 Effect 全部回收;该插件的命令、快捷键与(若持有)面板提供者身份一并移除 |

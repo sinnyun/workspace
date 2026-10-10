@@ -3,7 +3,7 @@
   "name": "plugin-dev-slot-harness",
   "version": "0.1.0",
   "displayName": "嵌套槽运行时自检（仅 dev）",
-  "description": "开发期验证 P6-45：容器 provideSlot 出口、contributeToSlot 注入、slot:registered/disposed 广播，以及越权提供/注入被基座拒绝",
+  "description": "开发期验证 P6-45 与 P7-30：容器 provideSlot 出口、contributeToSlot 注入、slot:registered/disposed 广播，以及越权提供/注入、越权领取命令面板、非法/重复快捷键被基座拒绝",
   "author": "you",
   "minHostVersion": "0.1.0",
 
@@ -21,6 +21,7 @@
       "subscribe": ["slot:registered", "slot:reconfigured", "slot:disposed"],
       "emit": []
     },
-    "slots": { "contribute": ["bottom-drawer", "dev-pane:*"] }
+    "slots": { "contribute": ["bottom-drawer", "dev-pane:*"] },
+    "commands": { "register": true }
   }
 }

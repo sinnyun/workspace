@@ -11,7 +11,7 @@
  * store is the only consumer that applies them. So there is no second way to mutate
  * meta-state, and every applier is idempotent (no echo-driven re-renders).
  */
-import { create } from "zustand";
+
 import type {
   DetailTabChangedArgs,
   HostMetaState,
@@ -20,6 +20,7 @@ import type {
   TabActivatedArgs,
 } from "@my-file-manager/plugin-sdk";
 import { Events } from "@my-file-manager/plugin-sdk";
+import { create } from "zustand";
 import { bus } from "./eventbus";
 
 /** One session's cascade snapshot (`activeTabId` is the session itself). */
@@ -122,12 +123,8 @@ export function initCascadeBus(): void {
   wired = true;
 
   bus.on<TabActivatedArgs>(Events.tabActivated, (p) => applyTabActivated(p.tabId));
-  bus.on<SidebarViewChangedArgs>(Events.sidebarViewChanged, (p) =>
-    patchActive({ activeSidebarView: p.viewId }),
-  );
-  bus.on<Ref | null>(Events.sidebarSelectionChanged, (p) =>
-    patchActive({ sidebarSelection: p ?? null }),
-  );
+  bus.on<SidebarViewChangedArgs>(Events.sidebarViewChanged, (p) => patchActive({ activeSidebarView: p.viewId }));
+  bus.on<Ref | null>(Events.sidebarSelectionChanged, (p) => patchActive({ sidebarSelection: p ?? null }));
   bus.on<Ref | null>(Events.focusChanged, (p) => {
     const ref = p ?? null;
     if (!patchActive({ focusRef: ref })) return;
@@ -135,15 +132,12 @@ export function initCascadeBus(): void {
     // `focus:changed`, kept so file-oriented plugins keep working unchanged.
     bus.emit(Events.selectionChanged, { fileId: ref?.kind === "file" ? ref.id : null });
   });
-  bus.on<DetailTabChangedArgs>(Events.detailTabChanged, (p) =>
-    patchActive({ activeDetailTab: p.tabId }),
-  );
+  bus.on<DetailTabChangedArgs>(Events.detailTabChanged, (p) => patchActive({ activeDetailTab: p.tabId }));
 }
 
 // Only the base's own session container publishes through the bus directly;
 // plugins reach the same events through their gated host.emit.
-export const activateTab = (tabId: string): void =>
-  bus.emit(Events.tabActivated, { tabId } satisfies TabActivatedArgs);
+export const activateTab = (tabId: string): void => bus.emit(Events.tabActivated, { tabId } satisfies TabActivatedArgs);
 
 /** Snapshot for PluginHost.getState() — the active session's cascade, flattened. */
 export function metaSnapshot(): HostMetaState {

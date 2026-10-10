@@ -29,6 +29,7 @@ const FRONTEND_ONLY_EVENTS = new Set([
   "focus:changed",
   "detail:tab:changed",
   "preview:state:changed",
+  "tags:updated",
   "slot:registered",
   "slot:reconfigured",
   "slot:disposed",
@@ -40,7 +41,7 @@ function dumpRust() {
     encoding: "utf8",
   });
   if (r.status !== 0) {
-    console.error("cargo fm-contract-dump failed:\n" + (r.stderr || r.stdout));
+    console.error(`cargo fm-contract-dump failed:\n${r.stderr || r.stdout}`);
     process.exit(2);
   }
   return JSON.parse(r.stdout);
@@ -83,7 +84,9 @@ function check(label, rust, ts) {
     console.log(`  ok   ${label}`);
   } else {
     failures.push(label);
-    console.log(`  FAIL ${label}\n         rust: ${JSON.stringify(sorted(rust))}\n         ts:   ${JSON.stringify(sorted(ts))}`);
+    console.log(
+      `  FAIL ${label}\n         rust: ${JSON.stringify(sorted(rust))}\n         ts:   ${JSON.stringify(sorted(ts))}`,
+    );
   }
 }
 
@@ -94,7 +97,11 @@ const sdkEvents = Object.values(parseConstObject(src, "Events"));
 const sdkCaps = Object.values(parseConstObject(src, "Capabilities"));
 
 console.log("contract check: TS SDK <-> fm-contracts (Rust)");
-check("event names", Object.keys(rust.events), sdkEvents.filter((e) => !FRONTEND_ONLY_EVENTS.has(e)));
+check(
+  "event names",
+  Object.keys(rust.events),
+  sdkEvents.filter((e) => !FRONTEND_ONLY_EVENTS.has(e)),
+);
 // Each event publishes the name of its payload interface alongside its field
 // names, so a new event is covered without this script having to know about it.
 for (const [name, spec] of Object.entries(rust.events)) {

@@ -56,190 +56,766 @@ pub struct KindEntry {
 /// call that happens once per *visible* row and already sits behind a `stat`.
 pub const BY_EXTENSION: &[KindEntry] = &[
     // Prose, logs and configuration: decodable text with no code shape.
-    KindEntry { extension: "txt", kind: FileKind::Text, mime: Some("text/plain") },
-    KindEntry { extension: "text", kind: FileKind::Text, mime: Some("text/plain") },
-    KindEntry { extension: "log", kind: FileKind::Text, mime: Some("text/plain") },
-    KindEntry { extension: "md", kind: FileKind::Markdown, mime: Some("text/markdown") },
-    KindEntry { extension: "markdown", kind: FileKind::Markdown, mime: Some("text/markdown") },
-    KindEntry { extension: "rst", kind: FileKind::Text, mime: None },
+    KindEntry {
+        extension: "txt",
+        kind: FileKind::Text,
+        mime: Some("text/plain"),
+    },
+    KindEntry {
+        extension: "text",
+        kind: FileKind::Text,
+        mime: Some("text/plain"),
+    },
+    KindEntry {
+        extension: "log",
+        kind: FileKind::Text,
+        mime: Some("text/plain"),
+    },
+    KindEntry {
+        extension: "md",
+        kind: FileKind::Markdown,
+        mime: Some("text/markdown"),
+    },
+    KindEntry {
+        extension: "markdown",
+        kind: FileKind::Markdown,
+        mime: Some("text/markdown"),
+    },
+    KindEntry {
+        extension: "rst",
+        kind: FileKind::Text,
+        mime: None,
+    },
     // Config: `ini`/`cfg`/`conf`/`properties` have no code shape to highlight.
-    KindEntry { extension: "ini", kind: FileKind::Text, mime: None },
-    KindEntry { extension: "cfg", kind: FileKind::Text, mime: None },
-    KindEntry { extension: "conf", kind: FileKind::Text, mime: None },
-    KindEntry { extension: "properties", kind: FileKind::Text, mime: None },
-    KindEntry { extension: "env", kind: FileKind::Text, mime: None },
-    KindEntry { extension: "diff", kind: FileKind::Text, mime: Some("text/x-diff") },
-    KindEntry { extension: "patch", kind: FileKind::Text, mime: Some("text/x-patch") },
+    KindEntry {
+        extension: "ini",
+        kind: FileKind::Text,
+        mime: None,
+    },
+    KindEntry {
+        extension: "cfg",
+        kind: FileKind::Text,
+        mime: None,
+    },
+    KindEntry {
+        extension: "conf",
+        kind: FileKind::Text,
+        mime: None,
+    },
+    KindEntry {
+        extension: "properties",
+        kind: FileKind::Text,
+        mime: None,
+    },
+    KindEntry {
+        extension: "env",
+        kind: FileKind::Text,
+        mime: None,
+    },
+    KindEntry {
+        extension: "diff",
+        kind: FileKind::Text,
+        mime: Some("text/x-diff"),
+    },
+    KindEntry {
+        extension: "patch",
+        kind: FileKind::Text,
+        mime: Some("text/x-patch"),
+    },
     // Source code and structured data.
-    KindEntry { extension: "rs", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "ts", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "tsx", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "js", kind: FileKind::Code, mime: Some("text/javascript") },
-    KindEntry { extension: "mjs", kind: FileKind::Code, mime: Some("text/javascript") },
-    KindEntry { extension: "cjs", kind: FileKind::Code, mime: Some("text/javascript") },
-    KindEntry { extension: "jsx", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "py", kind: FileKind::Code, mime: Some("text/x-python") },
-    KindEntry { extension: "go", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "c", kind: FileKind::Code, mime: Some("text/x-c") },
-    KindEntry { extension: "h", kind: FileKind::Code, mime: Some("text/x-c") },
-    KindEntry { extension: "cpp", kind: FileKind::Code, mime: Some("text/x-c") },
-    KindEntry { extension: "hpp", kind: FileKind::Code, mime: Some("text/x-c") },
-    KindEntry { extension: "cs", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "java", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "rb", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "php", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "swift", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "kt", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "lua", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "sql", kind: FileKind::Code, mime: Some("application/sql") },
+    KindEntry {
+        extension: "rs",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "ts",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "tsx",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "js",
+        kind: FileKind::Code,
+        mime: Some("text/javascript"),
+    },
+    KindEntry {
+        extension: "mjs",
+        kind: FileKind::Code,
+        mime: Some("text/javascript"),
+    },
+    KindEntry {
+        extension: "cjs",
+        kind: FileKind::Code,
+        mime: Some("text/javascript"),
+    },
+    KindEntry {
+        extension: "jsx",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "py",
+        kind: FileKind::Code,
+        mime: Some("text/x-python"),
+    },
+    KindEntry {
+        extension: "go",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "c",
+        kind: FileKind::Code,
+        mime: Some("text/x-c"),
+    },
+    KindEntry {
+        extension: "h",
+        kind: FileKind::Code,
+        mime: Some("text/x-c"),
+    },
+    KindEntry {
+        extension: "cpp",
+        kind: FileKind::Code,
+        mime: Some("text/x-c"),
+    },
+    KindEntry {
+        extension: "hpp",
+        kind: FileKind::Code,
+        mime: Some("text/x-c"),
+    },
+    KindEntry {
+        extension: "cs",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "java",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "rb",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "php",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "swift",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "kt",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "lua",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "sql",
+        kind: FileKind::Code,
+        mime: Some("application/sql"),
+    },
     // A PowerShell script is text an editor opens, not a binary the Shell runs:
     // the default handler is Notepad unless the user reassociated it.
-    KindEntry { extension: "ps1", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "psm1", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "sh", kind: FileKind::Code, mime: Some("application/x-sh") },
-    KindEntry { extension: "json", kind: FileKind::Code, mime: Some("application/json") },
-    KindEntry { extension: "jsonc", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "jsonl", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "yaml", kind: FileKind::Code, mime: Some("application/yaml") },
-    KindEntry { extension: "yml", kind: FileKind::Code, mime: Some("application/yaml") },
-    KindEntry { extension: "toml", kind: FileKind::Code, mime: Some("application/toml") },
-    KindEntry { extension: "xml", kind: FileKind::Code, mime: Some("application/xml") },
-    KindEntry { extension: "xsl", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "lock", kind: FileKind::Code, mime: None },
-    KindEntry { extension: "html", kind: FileKind::Code, mime: Some("text/html") },
-    KindEntry { extension: "htm", kind: FileKind::Code, mime: Some("text/html") },
-    KindEntry { extension: "css", kind: FileKind::Code, mime: Some("text/css") },
-    KindEntry { extension: "svg", kind: FileKind::Vector, mime: Some("image/svg+xml") },
-    KindEntry { extension: "ai", kind: FileKind::Vector, mime: Some("application/illustrator") },
+    KindEntry {
+        extension: "ps1",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "psm1",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "sh",
+        kind: FileKind::Code,
+        mime: Some("application/x-sh"),
+    },
+    KindEntry {
+        extension: "json",
+        kind: FileKind::Code,
+        mime: Some("application/json"),
+    },
+    KindEntry {
+        extension: "jsonc",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "jsonl",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "yaml",
+        kind: FileKind::Code,
+        mime: Some("application/yaml"),
+    },
+    KindEntry {
+        extension: "yml",
+        kind: FileKind::Code,
+        mime: Some("application/yaml"),
+    },
+    KindEntry {
+        extension: "toml",
+        kind: FileKind::Code,
+        mime: Some("application/toml"),
+    },
+    KindEntry {
+        extension: "xml",
+        kind: FileKind::Code,
+        mime: Some("application/xml"),
+    },
+    KindEntry {
+        extension: "xsl",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "lock",
+        kind: FileKind::Code,
+        mime: None,
+    },
+    KindEntry {
+        extension: "html",
+        kind: FileKind::Code,
+        mime: Some("text/html"),
+    },
+    KindEntry {
+        extension: "htm",
+        kind: FileKind::Code,
+        mime: Some("text/html"),
+    },
+    KindEntry {
+        extension: "css",
+        kind: FileKind::Code,
+        mime: Some("text/css"),
+    },
+    KindEntry {
+        extension: "svg",
+        kind: FileKind::Vector,
+        mime: Some("image/svg+xml"),
+    },
+    KindEntry {
+        extension: "ai",
+        kind: FileKind::Vector,
+        mime: Some("application/illustrator"),
+    },
     // Raster pictures a thumbnail/preview path can decode.
-    KindEntry { extension: "jpg", kind: FileKind::Image, mime: Some("image/jpeg") },
-    KindEntry { extension: "jpeg", kind: FileKind::Image, mime: Some("image/jpeg") },
-    KindEntry { extension: "png", kind: FileKind::Image, mime: Some("image/png") },
-    KindEntry { extension: "gif", kind: FileKind::Image, mime: Some("image/gif") },
-    KindEntry { extension: "bmp", kind: FileKind::Image, mime: Some("image/bmp") },
-    KindEntry { extension: "webp", kind: FileKind::Image, mime: Some("image/webp") },
-    KindEntry { extension: "avif", kind: FileKind::Image, mime: Some("image/avif") },
-    KindEntry { extension: "tiff", kind: FileKind::Image, mime: Some("image/tiff") },
-    KindEntry { extension: "tif", kind: FileKind::Image, mime: Some("image/tiff") },
-    KindEntry { extension: "heic", kind: FileKind::Image, mime: Some("image/heic") },
-    KindEntry { extension: "heif", kind: FileKind::Image, mime: Some("image/heif") },
+    KindEntry {
+        extension: "jpg",
+        kind: FileKind::Image,
+        mime: Some("image/jpeg"),
+    },
+    KindEntry {
+        extension: "jpeg",
+        kind: FileKind::Image,
+        mime: Some("image/jpeg"),
+    },
+    KindEntry {
+        extension: "png",
+        kind: FileKind::Image,
+        mime: Some("image/png"),
+    },
+    KindEntry {
+        extension: "gif",
+        kind: FileKind::Image,
+        mime: Some("image/gif"),
+    },
+    KindEntry {
+        extension: "bmp",
+        kind: FileKind::Image,
+        mime: Some("image/bmp"),
+    },
+    KindEntry {
+        extension: "webp",
+        kind: FileKind::Image,
+        mime: Some("image/webp"),
+    },
+    KindEntry {
+        extension: "avif",
+        kind: FileKind::Image,
+        mime: Some("image/avif"),
+    },
+    KindEntry {
+        extension: "tiff",
+        kind: FileKind::Image,
+        mime: Some("image/tiff"),
+    },
+    KindEntry {
+        extension: "tif",
+        kind: FileKind::Image,
+        mime: Some("image/tiff"),
+    },
+    KindEntry {
+        extension: "heic",
+        kind: FileKind::Image,
+        mime: Some("image/heic"),
+    },
+    KindEntry {
+        extension: "heif",
+        kind: FileKind::Image,
+        mime: Some("image/heif"),
+    },
     // Icons are a small bitmap *container*, not vector art: keeping them in
     // `Image` is what lets the bitmap decoder read them. `wmf`/`emf` are the
     // opposite — Windows metafiles really are drawing instructions.
-    KindEntry { extension: "ico", kind: FileKind::Image, mime: Some("image/vnd.microsoft.icon") },
-    KindEntry { extension: "cur", kind: FileKind::Image, mime: None },
-    KindEntry { extension: "cr2", kind: FileKind::Image, mime: None },
-    KindEntry { extension: "nef", kind: FileKind::Image, mime: None },
-    KindEntry { extension: "arw", kind: FileKind::Image, mime: None },
-    KindEntry { extension: "wmf", kind: FileKind::Vector, mime: Some("image/x-wmf") },
-    KindEntry { extension: "emf", kind: FileKind::Vector, mime: Some("image/x-emf") },
+    KindEntry {
+        extension: "ico",
+        kind: FileKind::Image,
+        mime: Some("image/vnd.microsoft.icon"),
+    },
+    KindEntry {
+        extension: "cur",
+        kind: FileKind::Image,
+        mime: None,
+    },
+    KindEntry {
+        extension: "cr2",
+        kind: FileKind::Image,
+        mime: None,
+    },
+    KindEntry {
+        extension: "nef",
+        kind: FileKind::Image,
+        mime: None,
+    },
+    KindEntry {
+        extension: "arw",
+        kind: FileKind::Image,
+        mime: None,
+    },
+    KindEntry {
+        extension: "wmf",
+        kind: FileKind::Vector,
+        mime: Some("image/x-wmf"),
+    },
+    KindEntry {
+        extension: "emf",
+        kind: FileKind::Vector,
+        mime: Some("image/x-emf"),
+    },
     // Video the Shell can actually decode (Media Foundation): previewable, not
     // just iconisable.
-    KindEntry { extension: "mp4", kind: FileKind::Video, mime: Some("video/mp4") },
-    KindEntry { extension: "m4v", kind: FileKind::Video, mime: Some("video/mp4") },
-    KindEntry { extension: "mov", kind: FileKind::Video, mime: Some("video/quicktime") },
-    KindEntry { extension: "webm", kind: FileKind::Video, mime: Some("video/webm") },
-    KindEntry { extension: "wmv", kind: FileKind::Video, mime: Some("video/x-ms-wmv") },
+    KindEntry {
+        extension: "mp4",
+        kind: FileKind::Video,
+        mime: Some("video/mp4"),
+    },
+    KindEntry {
+        extension: "m4v",
+        kind: FileKind::Video,
+        mime: Some("video/mp4"),
+    },
+    KindEntry {
+        extension: "mov",
+        kind: FileKind::Video,
+        mime: Some("video/quicktime"),
+    },
+    KindEntry {
+        extension: "webm",
+        kind: FileKind::Video,
+        mime: Some("video/webm"),
+    },
+    KindEntry {
+        extension: "wmv",
+        kind: FileKind::Video,
+        mime: Some("video/x-ms-wmv"),
+    },
     // The `Container` variant's own examples: a stock Shell has no decoder for
     // these, so it can only iconise them and no previewer may be offered.
-    KindEntry { extension: "mkv", kind: FileKind::Container, mime: Some("video/x-matroska") },
-    KindEntry { extension: "avi", kind: FileKind::Container, mime: Some("video/x-msvideo") },
-    KindEntry { extension: "mpg", kind: FileKind::Container, mime: Some("video/mpeg") },
-    KindEntry { extension: "mpeg", kind: FileKind::Container, mime: Some("video/mpeg") },
-    KindEntry { extension: "flv", kind: FileKind::Container, mime: Some("video/x-flv") },
-    KindEntry { extension: "vob", kind: FileKind::Container, mime: None },
+    KindEntry {
+        extension: "mkv",
+        kind: FileKind::Container,
+        mime: Some("video/x-matroska"),
+    },
+    KindEntry {
+        extension: "avi",
+        kind: FileKind::Container,
+        mime: Some("video/x-msvideo"),
+    },
+    KindEntry {
+        extension: "mpg",
+        kind: FileKind::Container,
+        mime: Some("video/mpeg"),
+    },
+    KindEntry {
+        extension: "mpeg",
+        kind: FileKind::Container,
+        mime: Some("video/mpeg"),
+    },
+    KindEntry {
+        extension: "flv",
+        kind: FileKind::Container,
+        mime: Some("video/x-flv"),
+    },
+    KindEntry {
+        extension: "vob",
+        kind: FileKind::Container,
+        mime: None,
+    },
     // Audio — including the video containers whose payload is a stream we play
     // (`mp3`/`m4a`), which is what the variant's doc says to do.
-    KindEntry { extension: "mp3", kind: FileKind::Audio, mime: Some("audio/mpeg") },
-    KindEntry { extension: "m4a", kind: FileKind::Audio, mime: Some("audio/mp4") },
-    KindEntry { extension: "flac", kind: FileKind::Audio, mime: Some("audio/flac") },
-    KindEntry { extension: "wav", kind: FileKind::Audio, mime: Some("audio/wav") },
-    KindEntry { extension: "aac", kind: FileKind::Audio, mime: Some("audio/aac") },
-    KindEntry { extension: "ogg", kind: FileKind::Audio, mime: Some("audio/ogg") },
-    KindEntry { extension: "oga", kind: FileKind::Audio, mime: Some("audio/ogg") },
-    KindEntry { extension: "opus", kind: FileKind::Audio, mime: Some("audio/opus") },
-    KindEntry { extension: "wma", kind: FileKind::Audio, mime: Some("audio/x-ms-wma") },
-    KindEntry { extension: "mid", kind: FileKind::Audio, mime: Some("audio/midi") },
-    KindEntry { extension: "pdf", kind: FileKind::Pdf, mime: Some("application/pdf") },
+    KindEntry {
+        extension: "mp3",
+        kind: FileKind::Audio,
+        mime: Some("audio/mpeg"),
+    },
+    KindEntry {
+        extension: "m4a",
+        kind: FileKind::Audio,
+        mime: Some("audio/mp4"),
+    },
+    KindEntry {
+        extension: "flac",
+        kind: FileKind::Audio,
+        mime: Some("audio/flac"),
+    },
+    KindEntry {
+        extension: "wav",
+        kind: FileKind::Audio,
+        mime: Some("audio/wav"),
+    },
+    KindEntry {
+        extension: "aac",
+        kind: FileKind::Audio,
+        mime: Some("audio/aac"),
+    },
+    KindEntry {
+        extension: "ogg",
+        kind: FileKind::Audio,
+        mime: Some("audio/ogg"),
+    },
+    KindEntry {
+        extension: "oga",
+        kind: FileKind::Audio,
+        mime: Some("audio/ogg"),
+    },
+    KindEntry {
+        extension: "opus",
+        kind: FileKind::Audio,
+        mime: Some("audio/opus"),
+    },
+    KindEntry {
+        extension: "wma",
+        kind: FileKind::Audio,
+        mime: Some("audio/x-ms-wma"),
+    },
+    KindEntry {
+        extension: "mid",
+        kind: FileKind::Audio,
+        mime: Some("audio/midi"),
+    },
+    KindEntry {
+        extension: "pdf",
+        kind: FileKind::Pdf,
+        mime: Some("application/pdf"),
+    },
     // Archives *and* disk images: a previewer can list all of them. Windows
     // mounts `iso`/`vhd` itself, so "only iconisable" would be a lie.
-    KindEntry { extension: "zip", kind: FileKind::Archive, mime: Some("application/zip") },
-    KindEntry { extension: "tar", kind: FileKind::Archive, mime: Some("application/x-tar") },
-    KindEntry { extension: "gz", kind: FileKind::Archive, mime: Some("application/gzip") },
-    KindEntry { extension: "tgz", kind: FileKind::Archive, mime: Some("application/gzip") },
-    KindEntry { extension: "bz2", kind: FileKind::Archive, mime: Some("application/x-bzip2") },
-    KindEntry { extension: "xz", kind: FileKind::Archive, mime: Some("application/x-xz") },
-    KindEntry { extension: "7z", kind: FileKind::Archive, mime: Some("application/x-7z-compressed") },
-    KindEntry { extension: "rar", kind: FileKind::Archive, mime: Some("application/vnd.rar") },
-    KindEntry { extension: "cab", kind: FileKind::Archive, mime: Some("application/vnd.ms-cab-compressed") },
-    KindEntry { extension: "iso", kind: FileKind::Archive, mime: Some("application/x-iso9660-image") },
-    KindEntry { extension: "vhd", kind: FileKind::Archive, mime: Some("application/x-vhd") },
-    KindEntry { extension: "vhdx", kind: FileKind::Archive, mime: Some("application/x-vhdx") },
+    KindEntry {
+        extension: "zip",
+        kind: FileKind::Archive,
+        mime: Some("application/zip"),
+    },
+    KindEntry {
+        extension: "tar",
+        kind: FileKind::Archive,
+        mime: Some("application/x-tar"),
+    },
+    KindEntry {
+        extension: "gz",
+        kind: FileKind::Archive,
+        mime: Some("application/gzip"),
+    },
+    KindEntry {
+        extension: "tgz",
+        kind: FileKind::Archive,
+        mime: Some("application/gzip"),
+    },
+    KindEntry {
+        extension: "bz2",
+        kind: FileKind::Archive,
+        mime: Some("application/x-bzip2"),
+    },
+    KindEntry {
+        extension: "xz",
+        kind: FileKind::Archive,
+        mime: Some("application/x-xz"),
+    },
+    KindEntry {
+        extension: "7z",
+        kind: FileKind::Archive,
+        mime: Some("application/x-7z-compressed"),
+    },
+    KindEntry {
+        extension: "rar",
+        kind: FileKind::Archive,
+        mime: Some("application/vnd.rar"),
+    },
+    KindEntry {
+        extension: "cab",
+        kind: FileKind::Archive,
+        mime: Some("application/vnd.ms-cab-compressed"),
+    },
+    KindEntry {
+        extension: "iso",
+        kind: FileKind::Archive,
+        mime: Some("application/x-iso9660-image"),
+    },
+    KindEntry {
+        extension: "vhd",
+        kind: FileKind::Archive,
+        mime: Some("application/x-vhd"),
+    },
+    KindEntry {
+        extension: "vhdx",
+        kind: FileKind::Archive,
+        mime: Some("application/x-vhdx"),
+    },
     // Office: the legacy binary types have no registered media type worth
     // claiming, so they report `None` rather than a made-up one.
-    KindEntry { extension: "doc", kind: FileKind::Document, mime: None },
+    KindEntry {
+        extension: "doc",
+        kind: FileKind::Document,
+        mime: None,
+    },
     KindEntry {
         extension: "docx",
         kind: FileKind::Document,
         mime: Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     },
-    KindEntry { extension: "odt", kind: FileKind::Document, mime: Some("application/vnd.oasis.opendocument.text") },
-    KindEntry { extension: "rtf", kind: FileKind::Document, mime: Some("application/rtf") },
-    KindEntry { extension: "epub", kind: FileKind::Document, mime: Some("application/epub+zip") },
-    KindEntry { extension: "xls", kind: FileKind::Sheet, mime: None },
+    KindEntry {
+        extension: "odt",
+        kind: FileKind::Document,
+        mime: Some("application/vnd.oasis.opendocument.text"),
+    },
+    KindEntry {
+        extension: "rtf",
+        kind: FileKind::Document,
+        mime: Some("application/rtf"),
+    },
+    KindEntry {
+        extension: "epub",
+        kind: FileKind::Document,
+        mime: Some("application/epub+zip"),
+    },
+    KindEntry {
+        extension: "xls",
+        kind: FileKind::Sheet,
+        mime: None,
+    },
     KindEntry {
         extension: "xlsx",
         kind: FileKind::Sheet,
         mime: Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     },
-    KindEntry { extension: "ods", kind: FileKind::Sheet, mime: Some("application/vnd.oasis.opendocument.spreadsheet") },
+    KindEntry {
+        extension: "ods",
+        kind: FileKind::Sheet,
+        mime: Some("application/vnd.oasis.opendocument.spreadsheet"),
+    },
     // `csv` is a sheet, not prose: the previewer renders it as a grid, and the
     // alternative (text) would silently lose the column view the user expects.
-    KindEntry { extension: "csv", kind: FileKind::Sheet, mime: Some("text/csv") },
-    KindEntry { extension: "tsv", kind: FileKind::Sheet, mime: Some("text/tab-separated-values") },
-    KindEntry { extension: "ppt", kind: FileKind::Presentation, mime: None },
+    KindEntry {
+        extension: "csv",
+        kind: FileKind::Sheet,
+        mime: Some("text/csv"),
+    },
+    KindEntry {
+        extension: "tsv",
+        kind: FileKind::Sheet,
+        mime: Some("text/tab-separated-values"),
+    },
+    KindEntry {
+        extension: "ppt",
+        kind: FileKind::Presentation,
+        mime: None,
+    },
     KindEntry {
         extension: "pptx",
         kind: FileKind::Presentation,
         mime: Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
     },
-    KindEntry { extension: "odp", kind: FileKind::Presentation, mime: Some("application/vnd.oasis.opendocument.presentation") },
-    KindEntry { extension: "key", kind: FileKind::Presentation, mime: None },
-    KindEntry { extension: "ttf", kind: FileKind::Font, mime: Some("font/ttf") },
-    KindEntry { extension: "otf", kind: FileKind::Font, mime: Some("font/otf") },
-    KindEntry { extension: "woff", kind: FileKind::Font, mime: Some("font/woff") },
-    KindEntry { extension: "woff2", kind: FileKind::Font, mime: Some("font/woff2") },
+    KindEntry {
+        extension: "odp",
+        kind: FileKind::Presentation,
+        mime: Some("application/vnd.oasis.opendocument.presentation"),
+    },
+    KindEntry {
+        extension: "key",
+        kind: FileKind::Presentation,
+        mime: None,
+    },
+    KindEntry {
+        extension: "ttf",
+        kind: FileKind::Font,
+        mime: Some("font/ttf"),
+    },
+    KindEntry {
+        extension: "otf",
+        kind: FileKind::Font,
+        mime: Some("font/otf"),
+    },
+    KindEntry {
+        extension: "woff",
+        kind: FileKind::Font,
+        mime: Some("font/woff"),
+    },
+    KindEntry {
+        extension: "woff2",
+        kind: FileKind::Font,
+        mime: Some("font/woff2"),
+    },
     // Binaries: never previewed, only revealed or opened with care (contract
     // doc on `Executable`). `msi`/`msp` install, `sys`/`ocx` are loaded.
-    KindEntry { extension: "exe", kind: FileKind::Executable, mime: Some("application/x-msdownload") },
-    KindEntry { extension: "dll", kind: FileKind::Executable, mime: Some("application/x-msdownload") },
-    KindEntry { extension: "ocx", kind: FileKind::Executable, mime: None },
-    KindEntry { extension: "sys", kind: FileKind::Executable, mime: None },
-    KindEntry { extension: "msi", kind: FileKind::Executable, mime: Some("application/x-msdownload") },
-    KindEntry { extension: "msp", kind: FileKind::Executable, mime: None },
-    KindEntry { extension: "appx", kind: FileKind::Executable, mime: Some("application/vnd.ms-appx") },
-    KindEntry { extension: "msix", kind: FileKind::Executable, mime: None },
-    KindEntry { extension: "com", kind: FileKind::Executable, mime: None },
-    KindEntry { extension: "scr", kind: FileKind::Executable, mime: None },
+    KindEntry {
+        extension: "exe",
+        kind: FileKind::Executable,
+        mime: Some("application/x-msdownload"),
+    },
+    KindEntry {
+        extension: "dll",
+        kind: FileKind::Executable,
+        mime: Some("application/x-msdownload"),
+    },
+    KindEntry {
+        extension: "ocx",
+        kind: FileKind::Executable,
+        mime: None,
+    },
+    KindEntry {
+        extension: "sys",
+        kind: FileKind::Executable,
+        mime: None,
+    },
+    KindEntry {
+        extension: "msi",
+        kind: FileKind::Executable,
+        mime: Some("application/x-msdownload"),
+    },
+    KindEntry {
+        extension: "msp",
+        kind: FileKind::Executable,
+        mime: None,
+    },
+    KindEntry {
+        extension: "appx",
+        kind: FileKind::Executable,
+        mime: Some("application/vnd.ms-appx"),
+    },
+    KindEntry {
+        extension: "msix",
+        kind: FileKind::Executable,
+        mime: None,
+    },
+    KindEntry {
+        extension: "com",
+        kind: FileKind::Executable,
+        mime: None,
+    },
+    KindEntry {
+        extension: "scr",
+        kind: FileKind::Executable,
+        mime: None,
+    },
     // Batch files belong here, not with source code: double-clicking one *runs*
     // it, which is the care the `Executable` doc asks the UI to take.
-    KindEntry { extension: "bat", kind: FileKind::Executable, mime: None },
-    KindEntry { extension: "cmd", kind: FileKind::Executable, mime: None },
+    KindEntry {
+        extension: "bat",
+        kind: FileKind::Executable,
+        mime: None,
+    },
+    KindEntry {
+        extension: "cmd",
+        kind: FileKind::Executable,
+        mime: None,
+    },
     // Specialist payloads we can only iconise (`Model`'s own doc).
-    KindEntry { extension: "blend", kind: FileKind::Model, mime: None },
-    KindEntry { extension: "dwg", kind: FileKind::Model, mime: Some("image/vnd.dwg") },
-    KindEntry { extension: "dxf", kind: FileKind::Model, mime: Some("image/vnd.dxf") },
-    KindEntry { extension: "step", kind: FileKind::Model, mime: Some("model/step") },
-    KindEntry { extension: "stp", kind: FileKind::Model, mime: Some("model/step") },
-    KindEntry { extension: "iges", kind: FileKind::Model, mime: Some("model/iges") },
-    KindEntry { extension: "igs", kind: FileKind::Model, mime: Some("model/iges") },
-    KindEntry { extension: "stl", kind: FileKind::Model, mime: Some("model/stl") },
-    KindEntry { extension: "obj", kind: FileKind::Model, mime: Some("model/obj") },
-    KindEntry { extension: "glb", kind: FileKind::Model, mime: Some("model/gltf-binary") },
-    KindEntry { extension: "gltf", kind: FileKind::Model, mime: Some("model/gltf+json") },
-    KindEntry { extension: "fbx", kind: FileKind::Model, mime: None },
-    KindEntry { extension: "3ds", kind: FileKind::Model, mime: None },
-    KindEntry { extension: "u3d", kind: FileKind::Model, mime: Some("model/u3d") },
+    KindEntry {
+        extension: "blend",
+        kind: FileKind::Model,
+        mime: None,
+    },
+    KindEntry {
+        extension: "dwg",
+        kind: FileKind::Model,
+        mime: Some("image/vnd.dwg"),
+    },
+    KindEntry {
+        extension: "dxf",
+        kind: FileKind::Model,
+        mime: Some("image/vnd.dxf"),
+    },
+    KindEntry {
+        extension: "step",
+        kind: FileKind::Model,
+        mime: Some("model/step"),
+    },
+    KindEntry {
+        extension: "stp",
+        kind: FileKind::Model,
+        mime: Some("model/step"),
+    },
+    KindEntry {
+        extension: "iges",
+        kind: FileKind::Model,
+        mime: Some("model/iges"),
+    },
+    KindEntry {
+        extension: "igs",
+        kind: FileKind::Model,
+        mime: Some("model/iges"),
+    },
+    KindEntry {
+        extension: "stl",
+        kind: FileKind::Model,
+        mime: Some("model/stl"),
+    },
+    KindEntry {
+        extension: "obj",
+        kind: FileKind::Model,
+        mime: Some("model/obj"),
+    },
+    KindEntry {
+        extension: "glb",
+        kind: FileKind::Model,
+        mime: Some("model/gltf-binary"),
+    },
+    KindEntry {
+        extension: "gltf",
+        kind: FileKind::Model,
+        mime: Some("model/gltf+json"),
+    },
+    KindEntry {
+        extension: "fbx",
+        kind: FileKind::Model,
+        mime: None,
+    },
+    KindEntry {
+        extension: "3ds",
+        kind: FileKind::Model,
+        mime: None,
+    },
+    KindEntry {
+        extension: "u3d",
+        kind: FileKind::Model,
+        mime: Some("model/u3d"),
+    },
 ];
 
 /// [`FileKind`] for one extension, plus its registered media type.
@@ -251,9 +827,7 @@ pub fn kind_of_extension(extension: &str) -> (FileKind, Option<&'static str>) {
     BY_EXTENSION
         .iter()
         .find(|entry| entry.extension == extension)
-        .map_or((FileKind::Unknown, None), |entry| {
-            (entry.kind, entry.mime)
-        })
+        .map_or((FileKind::Unknown, None), |entry| (entry.kind, entry.mime))
 }
 
 /// The extension of a path: lowercase, no dot, `""` when there is none.
@@ -267,16 +841,14 @@ pub fn kind_of_extension(extension: &str) -> (FileKind, Option<&'static str>) {
 /// `Path::extension` — otherwise the table would need a row for every dotfile
 /// spelled without its dot.
 fn extension_of(path: &str) -> String {
-    let trimmed = path.trim_end_matches(|c| c == '/' || c == '\\');
+    let trimmed = path.trim_end_matches(['/', '\\']);
     let name = match trimmed.rfind(['/', '\\']) {
         Some(index) => &trimmed[index + 1..],
         None => trimmed,
     };
     match name.rfind('.') {
         // Index 0 is a dotfile; a trailing dot (`a.`) has no extension either.
-        Some(index) if index > 0 && index + 1 < name.len() => {
-            name[index + 1..].to_lowercase()
-        }
+        Some(index) if index > 0 && index + 1 < name.len() => name[index + 1..].to_lowercase(),
         _ => String::new(),
     }
 }
@@ -297,9 +869,7 @@ impl FileKindApi for FileKinds {
     fn classify(&self, path: &str, is_dir: bool) -> Result<FileKindOut, CapabilityError> {
         if path.trim().is_empty() {
             // Chinese because the host surfaces this text to the user.
-            return Err(CapabilityError::InvalidArgument(
-                "路径为空".to_owned(),
-            ));
+            return Err(CapabilityError::InvalidArgument("路径为空".to_owned()));
         }
         // A directory answer carries no extension: `folder.zip` opened as a folder
         // is a folder, and reporting `zip` would have the UI offer "list archive"
@@ -348,7 +918,11 @@ mod tests {
                 "lookup keys are compared as written: `{}` would never match",
                 entry.extension
             );
-            assert!(!entry.extension.contains('.'), "`{}` carries a dot", entry.extension);
+            assert!(
+                !entry.extension.contains('.'),
+                "`{}` carries a dot",
+                entry.extension
+            );
         }
     }
 
@@ -373,7 +947,9 @@ mod tests {
             r"C:\Videos\mkv",
             r"C:\No Extension",
         ] {
-            let out = FileKinds.classify(path, true).expect("a directory classifies");
+            let out = FileKinds
+                .classify(path, true)
+                .expect("a directory classifies");
             assert_eq!(out.kind, FileKind::Directory, "{path}");
             assert_eq!(out.extension, "", "{path} carries no extension");
             assert_eq!(out.mime, None, "{path}");
@@ -493,7 +1069,10 @@ mod tests {
         assert!(json.get("mime").is_some(), "mime must be present as null");
         assert_eq!(json["mime"], serde_json::Value::Null);
 
-        assert_eq!(serde_json::to_value(FileKind::Markdown).expect("md"), "markdown");
+        assert_eq!(
+            serde_json::to_value(FileKind::Markdown).expect("md"),
+            "markdown"
+        );
         assert_eq!(
             serde_json::to_value(FileKind::Directory).expect("dir"),
             "directory"

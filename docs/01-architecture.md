@@ -190,7 +190,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 
 ### 9.1 区域网格(基座持有的外壳)
 
-布局位置以用户提供的 [初始布局图](界面布局.jpg) 为准：品牌区在 A/B 上方跨标签与工具栏两行；标签和工具栏仅位于中间工作区；D 从窗口顶部通高；状态栏处于窗口最底部。调试抽屉默认收起，入口位于状态栏。`plugin-file-browser` 将当前交互栏导航和列表/网格视图选择贡献到已有 `topbar-zone`；`plugin-layout-panes` 在该扩展区贡献分栏下拉按钮。分栏和视图均显示当前选项，菜单分别控制 1/2/4 栏和列表/网格。主题仅在 `plugin-settings` 设置面板中切换。路径、历史、模式与分栏状态仍由各自插件独占；单栏隐藏重复的栏内导航，多栏保留独立栏内工具。顶栏导航跟随当前可见的交互栏，隐藏/关闭栏时回退到可见栏。详情信息页按预览、属性、扩展区排列。
+布局位置以用户提供的 [初始布局图](界面布局.jpg) 为准：品牌区在 A/B 上方跨标签与工具栏两行；标签和工具栏仅位于中间工作区；D 从窗口顶部通高；状态栏处于窗口最底部。调试抽屉默认收起，入口位于状态栏。`plugin-file-browser` 将当前交互栏导航和列表/网格/表格视图选择贡献到已有 `topbar-zone`；`plugin-layout-panes` 在该扩展区贡献分栏下拉按钮。分栏和视图均显示当前选项，菜单分别控制 1/2/4 栏和列表/网格/表格。主题仅在 `plugin-settings` 设置面板中切换。路径、历史、模式与分栏状态仍由各自插件独占；单栏隐藏重复的栏内导航，多栏保留独立栏内工具。顶栏导航跟随当前可见的交互栏，隐藏/关闭栏时回退到可见栏。详情信息页按预览、属性、扩展区排列。
 
 
 ```
@@ -209,7 +209,7 @@ Config ──Plugin::prepare()──▶ Input ──PreparedPlugin::from_input()
 
 - **A 活动栏**:**侧栏视图的切换器**(不是浏览标签)。选哪个图标 → B 显示对应视图。底部"设置"入口由 `plugin-settings` 自己贡献齿轮图标(基座不硬编码),点击打开**悬浮面板**(Mantine `Popover`,经 portal 渲染,不占六区任何一格)——设置不是一种侧栏视图,不进 B 的互斥集合。各视图插件向 `activity-rail-zone` 注入图标。
 - **B 侧栏**:当前 A 视图的**面板内容**(文件树 / 收藏列表 / 标签列表 / 模拟数据…)。`nav-zone` 由**容器插件 `plugin-layout-views`** 占用,它向下提供 `nav-panel:<viewId>` 并**负责视图互斥**(只显示活动视图,其余隐藏);视图插件不得自己判断活动视图来 self-hide。
-- **C 主视图**:B 选中项的**内容展开**(选中文件夹→该目录文件列表;选中标签→该标签下文件)。外层由**分栏容器插件 `plugin-layout-panes`** 占用,可切 1 栏 / 左右 2 栏 / 2×2 四栏,向下提供 `pane-slot:<paneId>`;`plugin-file-browser` 按 outlet 自动为每栏注入一个独立实例(各自目录与**独立历史栈**(后退/前进/上级/刷新)、列表或网格模式、选择)。容器头部显示中文 `栏 N`,槽 id 只作悬停提示。
+- **C 主视图**:B 选中项的**内容展开**(选中文件夹→该目录文件列表;选中标签→该标签下文件)。外层由**分栏容器插件 `plugin-layout-panes`** 占用,可切 1 栏 / 左右 2 栏 / 2×2 四栏,向下提供 `pane-slot:<paneId>`;`plugin-file-browser` 按 outlet 自动为每栏注入一个独立实例(各自目录与**独立历史栈**(后退/前进/上级/刷新)、列表/网格/表格模式与各自的表格排序、选择)。容器头部显示中文 `栏 N`,槽 id 只作悬停提示。
 - **栏高不变量由容器 owner 强制**:`plugin-layout-panes` 把每个栏渲染成**有界 flex 列**(栅格行轨 `minmax(0,1fr)` + 栏 `display:flex/min-height:0`),outlet 只 `overflow:hidden` **不滚动**——滚动权属于内容插件。这样插件里的虚拟滚动(见 08 §5.1)天然拿到确定视口高度,内容插件无须各自猜测父容器高度。
 - **D 详情容器**:焦点对象的**上下文检查器**,由 `plugin-inspector` 占用 `file-sidebar-zone`,用 tab 承载。顶部是**焦点标题条**(名称 / 整路径 / 类型徽标);tab 条 = 基座"信息" + `contributedSlots("detail-tab")` 扫到的插件页,**标题取贡献者自己声明的 `host.slotLabel(id)`**(容器不硬编码他插件的名字);正交于**内容模板**(随焦点 kind 切换:文件 = 扩展区+预览+信息 / 文件夹 = 扩展区+信息 / 其他 = 仅信息),空区域显示中文占位。
 - **顶部多标签页**:独立的**浏览会话**层。每个会话各持一份 `{activeSidebarView, sidebarSelection, focusRef, activeDetailTab}` 元状态快照,分栏容器另持该会话的 `{mode, ids, colPct, rowPct}`;切会话整组还原——这是"切换不混乱"的保证。分栏**面板实例按会话隔离**,两个会话不共享同一个 `pane-slot:p0`。
@@ -231,7 +231,8 @@ activeSidebarView(A) → sidebarSelection(B) → focusRef(C) → activeDetailTab
 | **基座(外壳,不做插件)** | 窗口、根挂载、**外层区域网格**(A/B/C/D/工具栏/状态栏)、顶部多标签会话容器、Mantine 主题 provider(默认亮色；主题由设置插件控制)、元状态总线、嵌套槽运行时(见 02 §4.5)、插件加载/权限、**插件运行态(装载/卸载/启停)由 loader 独占**:它对外提供 `plugins.list`/`plugins.setEnabled` 两个基座前端能力(见 02 §5.3),**哪些插件不可关闭也是基座策略**,manifest 无法自我豁免 |
 | **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<paneId>`)、`plugin-layout-views`(拥有 B 的视图互斥,提供 `nav-panel:<viewId>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`)、`plugin-settings`(拥有设置悬浮面板的分页,提供 `settings-page:<name>`) |
 | **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` … 各贡献一个 A 图标 + 一个 `nav-panel:<viewId>` 面板 |
-| **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格)、search 结果、storage-analysis 等 |
+| **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格 / 表格) |
+| **浮层插件(自有面板,不占六区)** | `plugin-search`(topbar 入口 → 固定 620×640 浮层)、`plugin-storage-analysis`(topbar 入口 → 固定 560×640 浮层)、`plugin-context-menu`(右键面板)、`plugin-command-palette`(Ctrl+Shift+P 面板) |
 | **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history; Lore 版本操作/时间线)、`plugin-history-metadata`(history-record:metadata; 版本缩略图/属性的保存与展示)、`plugin-file-details`(信息表 + BLAKE3,注入 detail-info-zone)、`plugin-preview`(preview-zone,统一格式预览)、`plugin-file-ops`(操作按钮) |
 | **功能插件(注入设置面板)** | 任何插件都可贡献 `settings-page:<name>` 一页(标题写自己的 `slots[].label`):页内容只该插件认得,读写**自己的** localStorage 键,并由同插件内的模块级偏好 store 广播给已渲染的实例,使设置**即时生效**而不经基座状态 |
 

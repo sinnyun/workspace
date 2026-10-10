@@ -131,7 +131,10 @@ impl ShellThumbs {
 // `pub(crate)`: `shell_ops` bounds Shell *operations* with the same gate, and a
 // second copy of a subtle deadline-aware counter in the same crate would be two
 // places to get the poisoning case wrong. Behaviour is unchanged.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider takes permits"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider takes permits")
+)]
 pub(crate) mod gate {
     use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
     use std::time::Instant;
@@ -217,35 +220,34 @@ mod platform {
     use std::time::Instant;
 
     use base64::Engine as _;
-    use windows::core::{Error, HRESULT, Interface, PCWSTR};
+    use windows::core::{Error, Interface, HRESULT, PCWSTR};
     use windows::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_NOT_SUPPORTED,
+        ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_NO_MORE_ITEMS,
         ERROR_PATH_NOT_FOUND, ERROR_PRIVILEGE_NOT_HELD, ERROR_SHARING_VIOLATION, E_ACCESSDENIED,
         E_FAIL, E_NOINTERFACE, E_NOTIMPL, E_UNEXPECTED, STG_E_ACCESSDENIED, STG_E_FILENOTFOUND,
         STG_E_PATHNOTFOUND,
     };
     use windows::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DeleteObject, DIB_RGB_COLORS, GetDIBits,
-        GetDC, GetObjectW, HBITMAP, HDC, HGDIOBJ, ReleaseDC,
+        DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ,
     };
     use windows::Win32::System::Com::{
         CoInitializeEx, CoUninitialize, IBindCtx, COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::{
-        IShellItem, ISharedBitmap, IThumbnailCache, SHCreateItemFromParsingName, WTS_ALPHATYPE,
-        WTS_CACHED, WTS_CACHEFLAGS, WTS_DEFAULT, WTS_E_DATAFILEUNAVAILABLE,
-        WTS_E_EXTRACTIONBLOCKED, WTS_E_EXTRACTIONPENDING, WTS_E_EXTRACTIONTIMEDOUT,
-        WTS_E_FAILEDEXTRACTION, WTS_E_FASTEXTRACTIONNOTSUPPORTED,
-        WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER, WTS_E_SURROGATEUNAVAILABLE, WTS_EXTRACT,
-        WTS_INCACHEONLY, WTS_SCALETOREQUESTEDSIZE, WTS_SCALEUP, WTS_THUMBNAILID, WTSAT_ARGB,
-        WTSAT_RGB, WTSAT_UNKNOWN,
+        ISharedBitmap, IShellItem, IThumbnailCache, SHCreateItemFromParsingName, WTSAT_ARGB,
+        WTSAT_RGB, WTSAT_UNKNOWN, WTS_ALPHATYPE, WTS_CACHED, WTS_CACHEFLAGS, WTS_DEFAULT,
+        WTS_EXTRACT, WTS_E_DATAFILEUNAVAILABLE, WTS_E_EXTRACTIONBLOCKED, WTS_E_EXTRACTIONPENDING,
+        WTS_E_EXTRACTIONTIMEDOUT, WTS_E_FAILEDEXTRACTION, WTS_E_FASTEXTRACTIONNOTSUPPORTED,
+        WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER, WTS_E_SURROGATEUNAVAILABLE, WTS_INCACHEONLY,
+        WTS_SCALETOREQUESTEDSIZE, WTS_SCALEUP, WTS_THUMBNAILID,
     };
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, HICON, ICONINFO};
 
     use fm_contracts::capability::{ShellThumbnailOut, ThumbnailPolicy, ThumbnailState};
 
     use super::gate::Permit;
-    use super::{REQUEST_BUDGET, ShellThumbs};
+    use super::{ShellThumbs, REQUEST_BUDGET};
 
     /// Declines that mean "the file is not there (or its data is not offline)".
     const MISSING: &[HRESULT] = &[
@@ -892,10 +894,7 @@ mod tests {
             let err = thumbs
                 .read(path, 128, ThumbnailPolicy::Extract)
                 .expect_err("a blank path is a caller bug");
-            assert!(
-                err.to_string().starts_with("invalid argument:"),
-                "{err}"
-            );
+            assert!(err.to_string().starts_with("invalid argument:"), "{err}");
         }
     }
 
@@ -908,7 +907,11 @@ mod tests {
             .expect("a valid request never errors");
         assert_honest(&out);
         #[cfg(windows)]
-        assert_eq!(out.state, ThumbnailState::Missing, "pre-flight stats the file");
+        assert_eq!(
+            out.state,
+            ThumbnailState::Missing,
+            "pre-flight stats the file"
+        );
     }
 
     #[cfg(not(windows))]
@@ -918,7 +921,10 @@ mod tests {
             .read(ANY_FILE, 128, ThumbnailPolicy::Extract)
             .expect("unsupported is still an answer");
         assert_eq!(out.state, ThumbnailState::UnsupportedPlatform);
-        assert_eq!(serde_json::to_value(out.state).unwrap(), "unsupported-platform");
+        assert_eq!(
+            serde_json::to_value(out.state).unwrap(),
+            "unsupported-platform"
+        );
         assert_honest(&out);
         assert!(!out.from_cache);
     }
@@ -1008,7 +1014,6 @@ mod tests {
         use crate::capabilities::shell_thumb::platform::{
             bgra_to_rgba, classify_decline, derives_from_cache, encode_png, shell_path, Stage,
         };
-        use base64::Engine as _;
         use ::windows::core::HRESULT;
         use ::windows::Win32::Foundation::{
             E_ACCESSDENIED, E_FAIL, E_NOINTERFACE, E_UNEXPECTED, STG_E_FILENOTFOUND,
@@ -1017,6 +1022,7 @@ mod tests {
             WTS_CACHED, WTS_DEFAULT, WTS_E_EXTRACTIONTIMEDOUT,
             WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER,
         };
+        use base64::Engine as _;
 
         /// RGBA rows -> PNG, for a test fixture the Shell can actually thumbnail.
         fn write_png(
@@ -1084,7 +1090,10 @@ mod tests {
             let extract = thumbs
                 .read(&path, 32, ThumbnailPolicy::Extract)
                 .expect("a valid request never errors");
-            println!("extract   -> state={:?} edge={} from_cache={}", extract.state, extract.edge, extract.from_cache);
+            println!(
+                "extract   -> state={:?} edge={} from_cache={}",
+                extract.state, extract.edge, extract.from_cache
+            );
             super::assert_honest(&extract);
 
             // Second ask, cache-only: whatever it reports must still be honest, and
@@ -1093,7 +1102,10 @@ mod tests {
             let cache_only = thumbs
                 .read(&path, 32, ThumbnailPolicy::CacheOnly)
                 .expect("a valid request never errors");
-            println!("cacheOnly -> state={:?} edge={} from_cache={}", cache_only.state, cache_only.edge, cache_only.from_cache);
+            println!(
+                "cacheOnly -> state={:?} edge={} from_cache={}",
+                cache_only.state, cache_only.edge, cache_only.from_cache
+            );
             super::assert_honest(&cache_only);
 
             match extract.state {
@@ -1141,7 +1153,10 @@ mod tests {
                 .read(&path, 32, ThumbnailPolicy::Extract)
                 .expect("a valid request never errors");
             let ThumbnailState::Ready = out.state else {
-                println!("skipped: the Shell answered {:?}, no pixels to check", out.state);
+                println!(
+                    "skipped: the Shell answered {:?}, no pixels to check",
+                    out.state
+                );
                 return;
             };
             let (width, height, rgba) = decode(out.data_url.as_deref().unwrap());
@@ -1168,13 +1183,19 @@ mod tests {
         fn relative_and_verbatim_paths_are_reachable_by_the_shell() {
             // `shell_path` is what keeps `\\?\`-verbatim input (which `std::fs`
             // produces) from becoming a spurious `missing`.
-            assert_eq!(shell_path(r"\\?\C:\Windows\explorer.exe"), r"C:\Windows\explorer.exe");
+            assert_eq!(
+                shell_path(r"\\?\C:\Windows\explorer.exe"),
+                r"C:\Windows\explorer.exe"
+            );
             assert_eq!(
                 shell_path(r"\\?\UNC\server\share\a.png"),
                 r"\\server\share\a.png"
             );
             let absolute = shell_path(r"C:\Windows\explorer.exe");
-            assert!(absolute.eq_ignore_ascii_case(r"C:\Windows\explorer.exe"), "{absolute}");
+            assert!(
+                absolute.eq_ignore_ascii_case(r"C:\Windows\explorer.exe"),
+                "{absolute}"
+            );
             let relative = shell_path("Cargo.toml");
             assert!(
                 std::path::Path::new(&relative).is_absolute(),
@@ -1220,7 +1241,11 @@ mod tests {
 
             // A cache-only call that got as far as the cache and found nothing.
             assert_eq!(
-                classify_decline(WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER, CacheOnly, Stage::Thumbnail),
+                classify_decline(
+                    WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER,
+                    CacheOnly,
+                    Stage::Thumbnail
+                ),
                 ThumbnailState::CacheMiss,
                 "under `WTS_INCACHEONLY` a decline means nothing was cached"
             );
@@ -1231,7 +1256,11 @@ mod tests {
 
             // The same failure on the extract path means no handler can serve it.
             assert_eq!(
-                classify_decline(WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER, Extract, Stage::Thumbnail),
+                classify_decline(
+                    WTS_E_NOSTORAGEPROVIDERTHUMBNAILHANDLER,
+                    Extract,
+                    Stage::Thumbnail
+                ),
                 ThumbnailState::UnsupportedType
             );
             assert_eq!(

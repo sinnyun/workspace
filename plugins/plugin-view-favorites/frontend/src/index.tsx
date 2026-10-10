@@ -24,21 +24,22 @@
  *   (surfaces `favorites.item` / `favorites.empty`) and register the 打开 /
  *   在文件列表中定位 / 移除收藏 / 收藏当前焦点 actions; no menu is drawn here.
  */
-import { Star } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+
 import { Badge, Button, Group, Loader, Stack, Text, UnstyledButton } from "@mantine/core";
 import {
   Capabilities,
+  type ContextMenuContext,
   Events,
   errorMessage,
-  type ContextMenuContext,
   type HostMetaState,
   type PluginHost,
   type Ref,
   type SlotProps,
   type StatOut,
 } from "@my-file-manager/plugin-sdk";
+import { File, Folder, Home, Star, X } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const VIEW_ID = "favorites";
 const LS_KEY = "fm.view-favorites.v1";
@@ -161,10 +162,7 @@ function clearStore(): string | null {
 
 /** One `fs.stat` round trip -> the entry's status. A rejection means the path is
  *  gone; a type contradiction means the record no longer matches what is there. */
-async function checkPath(
-  host: PluginHost,
-  fav: Favorite,
-): Promise<{ path: string; status: PathStatus }> {
+async function checkPath(host: PluginHost, fav: Favorite): Promise<{ path: string; status: PathStatus }> {
   try {
     const out = await host.invoke<StatOut>(Capabilities.fsStat, { path: fav.path });
     const expectDir = fav.kind === "folder" ? true : fav.kind === "file" ? false : null;
@@ -177,10 +175,7 @@ async function checkPath(
 
 export function RailIcon({ host }: SlotProps) {
   const [active, setActive] = useState(host.getState().activeSidebarView === VIEW_ID);
-  useEffect(
-    () => host.onStateChange((s) => setActive(s.activeSidebarView === VIEW_ID)),
-    [host],
-  );
+  useEffect(() => host.onStateChange((s) => setActive(s.activeSidebarView === VIEW_ID)), [host]);
   return (
     <button
       type="button"
@@ -212,15 +207,13 @@ export function FavoritesPanel({ host }: SlotProps) {
   /** 首屏：列表在第一次渲染时就同步读自本地存储并通过结构校验，
    *  路径是否存在交给下面的后台效应，任何能力调用都不阻塞这一屏。 */
   const [stored] = useState(readStore);
-  const [favorites, setFavorites] = useState<Favorite[]>(
-    "favorites" in stored ? stored.favorites : [],
-  );
+  const [favorites, setFavorites] = useState<Favorite[]>("favorites" in stored ? stored.favorites : []);
   const [issue, setIssue] = useState<StorageIssue | null>("issue" in stored ? stored.issue : null);
   const [writeHint, setWriteHint] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, PathStatus>>({});
   const [notice, setNotice] = useState<Notice | null>(null);
   const [home, setHome] = useState<HomeState>({ state: "loading" });
-  const [homeAttempt, setHomeAttempt] = useState(0);
+  const [_homeAttempt, setHomeAttempt] = useState(0);
   const [ghosts, setGhosts] = useState<Favorite[]>([]);
   const [recheck, setRecheck] = useState(0);
 
@@ -239,29 +232,32 @@ export function FavoritesPanel({ host }: SlotProps) {
     [],
   );
 
-  const live = (): boolean => alive.current && generation.current === pluginGeneration;
+  const live = useCallback((): boolean => alive.current && generation.current === pluginGeneration, []);
 
   /** Replace the status map, pruning paths that are no longer listed: an expired
    *  validation result can never overwrite what the list already says. */
-  const writeStatus = (patch: Record<string, PathStatus>): void => {
-    const listed = new Set(listRef.current.map((f) => f.path));
-    const next: Record<string, PathStatus> = {};
-    for (const [path, s] of Object.entries(statusRef.current)) {
-      if (listed.has(path)) next[path] = s;
-    }
-    for (const [path, s] of Object.entries(patch)) {
-      if (listed.has(path)) next[path] = s;
-    }
-    statusRef.current = next;
-    if (live()) setStatus(next);
-  };
+  const writeStatus = useCallback(
+    (patch: Record<string, PathStatus>): void => {
+      const listed = new Set(listRef.current.map((f) => f.path));
+      const next: Record<string, PathStatus> = {};
+      for (const [path, s] of Object.entries(statusRef.current)) {
+        if (listed.has(path)) next[path] = s;
+      }
+      for (const [path, s] of Object.entries(patch)) {
+        if (listed.has(path)) next[path] = s;
+      }
+      statusRef.current = next;
+      if (live()) setStatus(next);
+    },
+    [live],
+  );
 
   useEffect(
     () =>
       host.onStateChange((s) => {
         if (live()) setMeta(s);
       }),
-    [host],
+    [host, live],
   );
 
   // —— 主页路径：fs.home 的加载中/成功/失败各自有独立状态与重试 ——
@@ -279,19 +275,18 @@ export function FavoritesPanel({ host }: SlotProps) {
     return () => {
       cancelled = true;
     };
-  }, [host, homeAttempt]);
+  }, [host, live]);
 
   // —— 后台一次性校验：只补没查过的路径；「重新校验」清空重跑 ——
   const pathsKey = useMemo(() => favorites.map((f) => f.path).join("\u0000"), [favorites]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 增删收藏（路径集合变化）后必须重跑，补齐新路径的校验
   useEffect(() => {
     const fresh = nonceRef.current !== recheck;
     nonceRef.current = recheck;
     const base = fresh ? {} : statusRef.current;
     // "checking" is not a result: an in-flight pass cancelled by a re-mount or a
     // list change must be re-issued, otherwise those rows stay 载入中 forever.
-    const pending = listRef.current.filter(
-      (f) => base[f.path] !== "valid" && base[f.path] !== "missing",
-    );
+    const pending = listRef.current.filter((f) => base[f.path] !== "valid" && base[f.path] !== "missing");
     if (fresh && !pending.length) {
       writeStatus({});
       return;
@@ -317,7 +312,7 @@ export function FavoritesPanel({ host }: SlotProps) {
     return () => {
       cancelled = true;
     };
-  }, [host, pathsKey, recheck]);
+  }, [host, pathsKey, recheck, writeStatus, live]);
 
   /** 正在淡出的行：仍留在界面上，但已经不在列表与存储里，因此不可再点。 */
   const ghostSet = useMemo(() => new Set(ghosts.map((g) => g.path)), [ghosts]);
@@ -522,6 +517,7 @@ export function FavoritesPanel({ host }: SlotProps) {
   const homeRow = home.state === "ready" ? (home.path ?? "") : "";
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: 面板根容器只把空白区右键转发给共享菜单面板；容器本体不是交互控件
     <div
       className="fm-nav-panel"
       style={panelStyle}
@@ -576,7 +572,7 @@ export function FavoritesPanel({ host }: SlotProps) {
             style={closeStyle}
             onClick={() => setNotice(null)}
           >
-            ✕
+            <X size={12} />
           </UnstyledButton>
         </Group>
       )}
@@ -634,7 +630,7 @@ export function FavoritesPanel({ host }: SlotProps) {
       )}
       {homeRow && (
         <Row
-          icon="⌂"
+          icon={<Home size={14} />}
           name={basename(homeRow) || homeRow}
           path={homeRow}
           status="valid"
@@ -647,31 +643,27 @@ export function FavoritesPanel({ host }: SlotProps) {
               sourcePlugin: host.name,
             } satisfies Ref)
           }
-          onMenu={
-            host.contextMenu ? openRowMenu(null, homeRow, "folder") : undefined
-          }
+          onMenu={host.contextMenu ? openRowMenu(null, homeRow, "folder") : undefined}
         />
       )}
 
-      {[...favorites, ...ghosts.filter((g) => !favorites.some((f) => f.path === g.path))].map(
-        (f) => {
-          const ghost = ghostSet.has(f.path);
-          return (
-            <Row
-              key={f.path}
-              icon={f.kind === "folder" ? "📁" : "📄"}
-              name={f.name}
-              path={f.path}
-              status={ghost ? "valid" : (status[f.path] ?? "checking")}
-              faded={ghost}
-              active={selection?.id === f.path && selection?.kind === f.kind}
-              onOpen={() => open(f)}
-              onRemove={() => remove(f)}
-              onMenu={host.contextMenu ? openRowMenu(f, f.path, f.kind) : undefined}
-            />
-          );
-        },
-      )}
+      {[...favorites, ...ghosts.filter((g) => !favorites.some((f) => f.path === g.path))].map((f) => {
+        const ghost = ghostSet.has(f.path);
+        return (
+          <Row
+            key={f.path}
+            icon={f.kind === "folder" ? <Folder size={14} /> : <File size={14} />}
+            name={f.name}
+            path={f.path}
+            status={ghost ? "valid" : (status[f.path] ?? "checking")}
+            faded={ghost}
+            active={selection?.id === f.path && selection?.kind === f.kind}
+            onOpen={() => open(f)}
+            onRemove={() => remove(f)}
+            onMenu={host.contextMenu ? openRowMenu(f, f.path, f.kind) : undefined}
+          />
+        );
+      })}
 
       {!favorites.length && !ghosts.length && !issue && (
         <Text size="xs" c="dimmed">
@@ -808,9 +800,7 @@ const rowButtonStyle = (active: boolean, invalid: boolean): CSSProperties => ({
   border: "none",
   borderRadius: "var(--mantine-radius-sm)",
   background: active ? "var(--mantine-color-blue-light)" : "transparent",
-  color: invalid
-    ? "var(--mantine-color-dimmed)"
-    : "var(--mantine-color-text)",
+  color: invalid ? "var(--mantine-color-dimmed)" : "var(--mantine-color-text)",
   overflow: "hidden",
 });
 

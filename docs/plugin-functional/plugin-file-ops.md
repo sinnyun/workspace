@@ -39,7 +39,7 @@
 - 已冻结的 Rust/SDK 能力：`shell.fileOperation`（`op`: copy/move/rename/create/delete，`toRecycleBin` 默认真）、`shell.cancelFileOperation`、`shell.openPath`、`shell.revealItemInDir`、`shell.pickFile`、`shell.pickDirectory`，以及同期冻结的 `file.kind`。DTO 在 `core-shared/contracts`（`FileOperationIn/Out/Progress/Item/Result`、`PickIn/PickOut`），经 `contract:check` 与 SDK 对齐。
 - `shell.fileOperation` **只回执**（`operationId` + `queued` + `total` + `indeterminate: true`），真相一律走 `shell:operation:progress` / `shell:operation:done`：一次批量 Shell 调用可以活过任何合理的请求超时，所以调用本身不假装知道结果。终态载荷给逐项 `FileOperationItem`（`completed/renamed/skipped/failed/cancelled` + `reason` + Shell 原文 `message`）和 `crossVolumeMove`。
 - `plugin-file-browser` 按 `file:changed` 重读可见列表；**该事件的载荷口径是条目路径**（与 watcher 同一说法），不是目录——每个订阅者自己判断这条路径是否落在自己正在显示的东西里。watcher 继续发布外部变更，供 `plugin-file-history` 等订阅者处理。操作插件不直接刷新或修改其他插件内部状态。
-- 当前基座没有通用命令注册接口，命令面板入口暂不列为已实现功能；注册 API 完成后再接入。
+- 基座命令服务（`commands` 半区）已交付（05 D25）；file-ops 目前没有注册任何命令，接入前其动作不会出现在命令面板里。
 - 右键动作通过 `host.contextMenu.registerItem` 注册，handler 仍由本插件调用自身能力；菜单框架只负责显示/派发，不复制 file-ops 业务逻辑。
 
 ## 存储与平台边界

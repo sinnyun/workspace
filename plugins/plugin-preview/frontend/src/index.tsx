@@ -19,35 +19,20 @@
  * what makes a late answer from the previous file unable to paint itself onto
  * this one.
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
+
 import { Badge, Button, Group, NativeSelect, Stack, Text, TextInput } from "@mantine/core";
-// `?inline`: a runtime ESM plugin has no build step that could emit a separate
-// stylesheet the base would link, so the viewer's CSS rides inside this bundle
-// and is attached as one `<style>` element on activation. Every rule in it is
-// scoped to `.ofv-*`, so nothing here reaches the app's own markup.
-import ofvStyles from "@open-file-viewer/core/style.css?inline";
-import {
-  archivePlugin,
-  audioPlugin,
-  imagePlugin,
-  officePlugin,
-  pdfPlugin,
-  textPlugin,
-  videoPlugin,
-} from "@open-file-viewer/core";
-import { FileViewer } from "@open-file-viewer/react";
 import {
   Capabilities,
-  Events,
   decodeResourceChunk,
+  Events,
   errorMessage,
+  type FileKind,
+  type FileKindOut,
+  formatSize,
+  type HostMetaState,
   MAX_PREVIEW_BYTES,
   MAX_RESOURCE_CHUNK_BYTES,
   MAX_TEXT_READ_BYTES,
-  type FileKind,
-  type FileKindOut,
-  type HostMetaState,
   type PluginHost,
   type PreviewState,
   type PreviewStateChangedArgs,
@@ -58,6 +43,23 @@ import {
   type ShellThumbnailOut,
   type SlotProps,
 } from "@my-file-manager/plugin-sdk";
+import {
+  archivePlugin,
+  audioPlugin,
+  imagePlugin,
+  officePlugin,
+  pdfPlugin,
+  textPlugin,
+  videoPlugin,
+} from "@open-file-viewer/core";
+// `?inline`: a runtime ESM plugin has no build step that could emit a separate
+// stylesheet the base would link, so the viewer's CSS rides inside this bundle
+// and is attached as one `<style>` element on activation. Every rule in it is
+// scoped to `.ofv-*`, so nothing here reaches the app's own markup.
+import ofvStyles from "@open-file-viewer/core/style.css?inline";
+import { FileViewer } from "@open-file-viewer/react";
+import type { CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 const VIEWER_STYLE_ID = "ofv-viewer-style";
 
@@ -194,10 +196,7 @@ interface Prefs {
 const DEFAULT_PREFS: Prefs = { maxTextChars: 200_000, defaultFit: "contain" };
 
 const clampChars = (n: number): number =>
-  Math.min(
-    MAX_CHARS_LIMIT,
-    Math.max(MIN_CHARS, Math.round(Number.isFinite(n) ? n : DEFAULT_PREFS.maxTextChars)),
-  );
+  Math.min(MAX_CHARS_LIMIT, Math.max(MIN_CHARS, Math.round(Number.isFinite(n) ? n : DEFAULT_PREFS.maxTextChars)));
 
 /** The legacy text-preview page only ever had two options, and only one of them
  *  survives here: `autoLoad` must NOT become "auto preview" — the new default is
@@ -217,7 +216,10 @@ function readPrefs(): Prefs {
     if (legacy) {
       const old = JSON.parse(legacy) as { maxChars?: number };
       localStorage.removeItem(LEGACY_KEY);
-      const migrated: Prefs = { ...DEFAULT_PREFS, maxTextChars: clampChars(old.maxChars ?? DEFAULT_PREFS.maxTextChars) };
+      const migrated: Prefs = {
+        ...DEFAULT_PREFS,
+        maxTextChars: clampChars(old.maxChars ?? DEFAULT_PREFS.maxTextChars),
+      };
       localStorage.setItem(PREFS_KEY, JSON.stringify(migrated));
       return migrated;
     }
@@ -319,6 +321,7 @@ export function PreviewPanel({ host }: SlotProps) {
 
   /** A new focus means a new everything: back to 缩略图, drop the old bytes and
    *  the old handle. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 焦点换文件即整板重置——seq 递增让旧文件的迟到响应失效，并回缩略图
   useEffect(() => {
     seqRef.current += 1;
     setMode("thumbnail");
@@ -458,17 +461,15 @@ export function PreviewPanel({ host }: SlotProps) {
       if (seqRef.current !== seq) return;
       if (out.state === "too-large") {
         setPhase("too-large");
-        setDetail(
-          `文本预览上限 ${formatBytes(MAX_TEXT_READ_BYTES)}，这个文件 ${formatBytes(out.byteLength)}。`,
-        );
+        setDetail(`文本预览上限 ${formatSize(MAX_TEXT_READ_BYTES)}，这个文件 ${formatSize(out.byteLength)}。`);
         return;
       }
       if (out.state === "binary" || out.text === null) {
         setPhase("unsupported");
-        setDetail(`这不是文本文件（${formatBytes(out.byteLength)}），无法按文本预览。`);
+        setDetail(`这不是文本文件（${formatSize(out.byteLength)}），无法按文本预览。`);
         return;
       }
-      setEncoding(`编码 ${out.encoding ?? "UTF-8"} · ${formatBytes(out.byteLength)}`);
+      setEncoding(`编码 ${out.encoding ?? "UTF-8"} · ${formatSize(out.byteLength)}`);
       setFileName(nameOf(target));
       setFile(new Blob([out.text], { type: mime ?? "text/plain" }));
       setPhase("ready");
@@ -512,9 +513,7 @@ export function PreviewPanel({ host }: SlotProps) {
       if (loaded === null) return;
       if ("tooLargeBytes" in loaded) {
         setPhase("too-large");
-        setDetail(
-          `这个文件 ${formatBytes(loaded.tooLargeBytes)}，超过预览上限 ${formatBytes(MAX_PREVIEW_BYTES)}。`,
-        );
+        setDetail(`这个文件 ${formatSize(loaded.tooLargeBytes)}，超过预览上限 ${formatSize(MAX_PREVIEW_BYTES)}。`);
         return;
       }
       setFileName(nameOf(path));
@@ -718,7 +717,7 @@ function ViewerBody({
     const observer = new MutationObserver(report);
     observer.observe(root, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [phase, file, onViewerFallback]);
+  }, [phase, onViewerFallback]);
 
   if (phase !== "ready" || !file) {
     const copy =
@@ -741,7 +740,13 @@ function ViewerBody({
           </Text>
         )}
         {SYSTEM_OPEN_STATES.has(phase) ? (
-          <Button size="compact-xs" variant="light" color="gray" onClick={onOpenWithShell} data-testid="preview-open-system">
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="gray"
+            onClick={onOpenWithShell}
+            data-testid="preview-open-system"
+          >
             用 Windows 打开
           </Button>
         ) : null}
@@ -794,12 +799,7 @@ const SYSTEM_OPEN_STATES: ReadonlySet<Phase> = new Set<Phase>([
   "corrupt",
   "password-required",
 ]);
-const RETRYABLE: ReadonlySet<Phase> = new Set<Phase>([
-  "not-found",
-  "permission-denied",
-  "corrupt",
-  "error",
-]);
+const RETRYABLE: ReadonlySet<Phase> = new Set<Phase>(["not-found", "permission-denied", "corrupt", "error"]);
 
 /** Text is shown through the viewer, but a 60 MB log is not a document to scroll:
  *  the preference truncates it before the viewer ever parses it. */
@@ -823,15 +823,6 @@ const PHASE_TEXT: Record<Phase, string> = {
   cancelled: "已取消这次内容读取。",
   error: "读取失败。",
 };
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const kb = n / 1024;
-  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
-  const mb = kb / 1024;
-  if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  return `${(mb / 1024).toFixed(1)} GB`;
-}
 
 const thumbBoxStyle: CSSProperties = { height: "100%", justifyContent: "center" };
 const thumbImageStyle: CSSProperties = {

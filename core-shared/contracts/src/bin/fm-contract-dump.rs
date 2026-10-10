@@ -14,18 +14,19 @@
 //! only if the reviewer accepts it being unchecked — which `contract:check` makes
 //! visible rather than silently tolerating.
 
+use cordis_core::Event;
 use fm_contracts::capability::names;
 use fm_contracts::{
-    FileChanged, FileChangedArgs, FileConflictPolicy, FileFailureReason, FileItemOutcome,
-    FileKind, FileKindOut, FileOperationKind, FileOperationIn, FileOperationItem, FileOperationOut, FileOperationProgress,
-    FileOperationResult, FileOperationState, HistoryUpdated, HistoryUpdatedArgs, ListEntry,
-    PickFilter, PickIn, PickOut, ReadResourceIn, ReadResourceOut, ReadTextOut, ResourceIn,
-    ResourceOut, ScanAck, ScanDone, ScanDoneEvent, ScanIn, ScanNode, ScanProgress, ScanProgressEvent,
-    ScanSkipReason, ScanSkipped, ScanState, DiskListIn, DiskListOut, DiskVolume,
-    ShellThumbnailOut, StatOut, TextReadState,
-    ThumbnailPolicy, ThumbnailState,
+    DiskListIn, DiskListOut, DiskVolume, FileChanged, FileChangedArgs, FileConflictPolicy,
+    FileFailureReason, FileItemOutcome, FileKind, FileKindOut, FileOperationIn, FileOperationItem,
+    FileOperationKind, FileOperationOut, FileOperationProgress, FileOperationResult,
+    FileOperationState, HistoryUpdated, HistoryUpdatedArgs, ListEntry, PickFilter, PickIn, PickOut,
+    ReadResourceIn, ReadResourceOut, ReadTextOut, ResourceIn, ResourceOut, ScanAck, ScanDone,
+    ScanDoneEvent, ScanIn, ScanNode, ScanProgress, ScanProgressEvent, ScanSkipReason, ScanSkipped,
+    ScanState, SearchHit, SearchIndexAck, SearchIndexDone, SearchIndexIn, SearchIndexProgress,
+    SearchIndexState, SearchQueryIn, SearchQueryOut, SearchScope, SearchStatusOut,
+    ShellThumbnailOut, StatOut, TextReadState, ThumbnailPolicy, ThumbnailState,
 };
-use cordis_core::Event;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -110,6 +111,28 @@ fn main() {
                     entries: 0,
                 },
             ),
+            fm_contracts::SearchIndexProgressEvent::NAME: event(
+                "SearchIndexProgressPayload",
+                &SearchIndexProgress {
+                    job_id: String::new(),
+                    state: SearchIndexState::Indexing,
+                    entries: 0,
+                    current_path: String::new(),
+                    elapsed_ms: 0,
+                },
+            ),
+            fm_contracts::SearchIndexDoneEvent::NAME: event(
+                "SearchIndexDonePayload",
+                &SearchIndexDone {
+                    job_id: String::new(),
+                    state: SearchIndexState::Ready,
+                    entries: 0,
+                    roots: Vec::new(),
+                    elapsed_ms: 0,
+                    cancelled: false,
+                    detail: None,
+                },
+            ),
         },
         "capabilities": [
             names::FS_HOME,
@@ -133,6 +156,10 @@ fn main() {
             names::SYS_DISK_LIST,
             names::SYS_SCAN_START,
             names::SYS_SCAN_CANCEL,
+            names::SEARCH_QUERY,
+            names::SEARCH_STATUS,
+            names::SEARCH_INDEX_START,
+            names::SEARCH_INDEX_CANCEL,
         ],
         "dtos": {
             "ListEntry": fields(&ListEntry {
@@ -298,8 +325,77 @@ fn main() {
                 elapsed_ms: 0,
                 entries: 0,
             }),
+            "SearchQueryIn": fields(&SearchQueryIn {
+                text: String::new(),
+                within: None,
+                scope: SearchScope::All,
+                limit: None,
+                offset: 0,
+            }),
+            "SearchHit": fields(&SearchHit {
+                path: String::new(),
+                name: String::new(),
+                parent: String::new(),
+                is_dir: false,
+                size: None,
+                modified_ms: None,
+            }),
+            "SearchQueryOut": fields(&SearchQueryOut {
+                text: String::new(),
+                scope: SearchScope::All,
+                took_ms: 0,
+                total: 0,
+                offset: 0,
+                has_more: false,
+                hits: Vec::new(),
+                state: SearchIndexState::Empty,
+            }),
+            "SearchStatusOut": fields(&SearchStatusOut {
+                state: SearchIndexState::Empty,
+                entries: 0,
+                roots: Vec::new(),
+                last_job_ms: 0,
+                detail: None,
+            }),
+            "SearchIndexIn": fields(&SearchIndexIn {
+                roots: Vec::new(),
+                rebuild: false,
+            }),
+            "SearchIndexAck": fields(&SearchIndexAck {
+                job_id: String::new(),
+                roots: Vec::new(),
+                state: SearchIndexState::Indexing,
+            }),
+            "SearchIndexProgressPayload": fields(&SearchIndexProgress {
+                job_id: String::new(),
+                state: SearchIndexState::Indexing,
+                entries: 0,
+                current_path: String::new(),
+                elapsed_ms: 0,
+            }),
+            "SearchIndexDonePayload": fields(&SearchIndexDone {
+                job_id: String::new(),
+                state: SearchIndexState::Ready,
+                entries: 0,
+                roots: Vec::new(),
+                elapsed_ms: 0,
+                cancelled: false,
+                detail: None,
+            }),
         },
         "enums": {
+            "SearchScope": variants(&[
+                SearchScope::All,
+                SearchScope::File,
+                SearchScope::Dir,
+            ]),
+            "SearchIndexState": variants(&[
+                SearchIndexState::Empty,
+                SearchIndexState::Indexing,
+                SearchIndexState::Ready,
+                SearchIndexState::Partial,
+                SearchIndexState::Failed,
+            ]),
             "TextReadState": variants(&[
                 TextReadState::Ok,
                 TextReadState::TooLarge,
@@ -396,4 +492,3 @@ fn main() {
     });
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
 }
-

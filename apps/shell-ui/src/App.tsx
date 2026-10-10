@@ -4,7 +4,8 @@
  * Six regions, all base-owned because they are stable and carry zero business
  * logic: A `activity-rail-zone` / B `nav-zone` / C `main-view-zone` /
  * D `file-sidebar-zone` / toolbar `topbar-zone` / `statusbar-zone`
- * (+ `bottom-drawer`, a dev-only region). The shell only lays these out and mounts
+ * (+ `bottom-drawer`, a dev-only region, and `command-palette`, an overlay
+ * region). The shell only lays these out and mounts
  * whatever plugins contributed; the address bar, directory listings and item
  * counts that used to sit here moved into `plugin-file-browser` (docs/01 §6 red
  * line 2 — the base holds meta state, not business state).
@@ -20,16 +21,13 @@
  * Appearance uses Mantine; theme switching lives in the settings plugin. Collapse flags and
  * panel widths are remembered in localStorage.
  */
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import {
-  ActionIcon,
-  Divider,
-  Group,
-  Text,
-  Title,
-} from "@mantine/core";
+
+import { ActionIcon, Divider, Group, Text, Title } from "@mantine/core";
+import { BaseSlots } from "@my-file-manager/plugin-sdk";
 import {
   AppWindowMac,
+  ChevronDown,
+  ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -37,9 +35,9 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { BaseSlots } from "@my-file-manager/plugin-sdk";
-import { useMeta, activateTab } from "./state";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { PluginSlot } from "./PluginSlot";
+import { activateTab, useMeta } from "./state";
 
 interface ShellLayout {
   bWidth: number;
@@ -65,7 +63,9 @@ function loadLayout(): ShellLayout {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) return { ...DEFAULT_LAYOUT, ...(JSON.parse(raw) as Partial<ShellLayout>) };
     const legacy = localStorage.getItem("fm.shell.layout.v1");
-    return legacy ? { ...DEFAULT_LAYOUT, ...(JSON.parse(legacy) as Partial<ShellLayout>), drawerOpen: false } : DEFAULT_LAYOUT;
+    return legacy
+      ? { ...DEFAULT_LAYOUT, ...(JSON.parse(legacy) as Partial<ShellLayout>), drawerOpen: false }
+      : DEFAULT_LAYOUT;
   } catch {
     return DEFAULT_LAYOUT;
   }
@@ -91,36 +91,53 @@ export function App() {
   const { layout, patch } = useShellLayout();
 
   const leftWidth = 56 + (layout.bCollapsed ? 0 : clamp(layout.bWidth, 140, 560) + 4);
-  const togglePanel = (which: "b" | "d") => patch(which === "b"
-    ? { bCollapsed: !layout.bCollapsed } : { dCollapsed: !layout.dCollapsed });
+  const togglePanel = (which: "b" | "d") =>
+    patch(which === "b" ? { bCollapsed: !layout.bCollapsed } : { dCollapsed: !layout.dCollapsed });
 
   return (
     <div className="fm-shell" style={rootStyle}>
-      <div className="fm-workspace" style={{ display: "grid", gridTemplateColumns: `${leftWidth}px minmax(0, 1fr) ${layout.dCollapsed ? 0 : clamp(layout.dWidth, 180, 640)}px`, flex: 1, minHeight: 0 }}>
+      <div
+        className="fm-workspace"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `${leftWidth}px minmax(0, 1fr) ${layout.dCollapsed ? 0 : clamp(layout.dWidth, 180, 640)}px`,
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
         <div className="fm-left-workspace">
           <header className="fm-brand" data-collapsed={layout.bCollapsed}>
-            <span className="fm-brand-icon"><AppWindowMac size={24} /></span>
-            <Title className="fm-brand-title" order={6}>我的文件管理器</Title>
+            <span className="fm-brand-icon">
+              <AppWindowMac size={24} />
+            </span>
+            <Title className="fm-brand-title" order={6}>
+              我的文件管理器
+            </Title>
           </header>
           <div style={bodyStyle}>
             <nav className="fm-rail" aria-label="视图导航" style={railStyle}>
               <PluginSlot slotId={BaseSlots.activityRail} />
             </nav>
-            {!layout.bCollapsed && <>
-              <aside className="fm-sidebar" style={{ ...asideStyle, width: clamp(layout.bWidth, 140, 560) }}>
-                <PluginSlot slotId={BaseSlots.nav} />
-              </aside>
-              <PanelResizer side="b" width={layout.bWidth} onWidth={(w) => patch({ bWidth: w })} />
-            </>}
+            {!layout.bCollapsed && (
+              <>
+                <aside className="fm-sidebar" style={{ ...asideStyle, width: clamp(layout.bWidth, 140, 560) }}>
+                  <PluginSlot slotId={BaseSlots.nav} />
+                </aside>
+                <PanelResizer side="b" width={layout.bWidth} onWidth={(w) => patch({ bWidth: w })} />
+              </>
+            )}
           </div>
         </div>
 
         <div className="fm-center-workspace">
           <header className="fm-identity" style={identityStyle}>
             <PanelToggle side="b" collapsed={layout.bCollapsed} onToggle={() => togglePanel("b")} />
-            <SessionTabs tabs={tabs} activeTabId={activeTabId}
+            <SessionTabs
+              tabs={tabs}
+              activeTabId={activeTabId}
               onCreate={() => useMeta.getState().createTab()}
-              onClose={(id) => useMeta.getState().closeTab(id)} />
+              onClose={(id) => useMeta.getState().closeTab(id)}
+            />
             <PanelToggle side="d" collapsed={layout.dCollapsed} onToggle={() => togglePanel("d")} />
           </header>
           <div className="fm-toolbar" style={toolbarStyle}>
@@ -131,21 +148,32 @@ export function App() {
           </main>
         </div>
 
-        {!layout.dCollapsed && <aside className="fm-sidebar fm-details" style={{ ...asideStyle, position: "relative", borderRight: "none", minWidth: 0, overflow: "hidden" }}>
-          <PanelResizer side="d" width={layout.dWidth} onWidth={(w) => patch({ dWidth: w })} />
-          <PluginSlot slotId={BaseSlots.fileSidebar} />
-        </aside>}
+        {!layout.dCollapsed && (
+          <aside
+            className="fm-sidebar fm-details"
+            style={{ ...asideStyle, position: "relative", borderRight: "none", minWidth: 0, overflow: "hidden" }}
+          >
+            <PanelResizer side="d" width={layout.dWidth} onWidth={(w) => patch({ dWidth: w })} />
+            <PluginSlot slotId={BaseSlots.fileSidebar} />
+          </aside>
+        )}
       </div>
 
+      <PluginSlot slotId={BaseSlots.commandPalette} />
       <BottomDrawer open={layout.drawerOpen} onToggle={() => patch({ drawerOpen: !layout.drawerOpen })} />
       <footer className="fm-status" style={footerStyle}>
         <Text size="xs" c="dimmed" truncate style={{ maxWidth: "45%" }}>
-          会话 {activeTabId.replace(/^tab-/, "")} · {focusRef ? `${kindLabel(focusRef.kind)} ${focusRef.id}` : "未选中项目"}
+          会话 {activeTabId.replace(/^tab-/, "")} ·{" "}
+          {focusRef ? `${kindLabel(focusRef.kind)} ${focusRef.id}` : "未选中项目"}
         </Text>
         <Divider orientation="vertical" />
         <PluginSlot slotId={BaseSlots.statusbar} />
-        <button className="fm-debug-toggle" type="button" aria-expanded={layout.drawerOpen}
-          onClick={() => patch({ drawerOpen: !layout.drawerOpen })}>
+        <button
+          className="fm-debug-toggle"
+          type="button"
+          aria-expanded={layout.drawerOpen}
+          onClick={() => patch({ drawerOpen: !layout.drawerOpen })}
+        >
           {layout.drawerOpen ? "收起调试台" : "调试台"}
         </button>
       </footer>
@@ -215,26 +243,36 @@ function SessionTabs({
 /** Shell geometry controls; the navigation toolbar itself is plugin-owned. */
 function PanelToggle({ side, collapsed, onToggle }: { side: "b" | "d"; collapsed: boolean; onToggle: () => void }) {
   const label = side === "b" ? "侧栏" : "详情";
-  return <ActionIcon variant="subtle" color="gray" size="sm"
-    title={`${collapsed ? "展开" : "折叠"}${label}`} aria-label={`${collapsed ? "展开" : "折叠"}${label}`} onClick={onToggle}>
-    {side === "b" ? (collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />)
-      : (collapsed ? <PanelRightOpen size={17} /> : <PanelRightClose size={17} />)}
-  </ActionIcon>;
+  return (
+    <ActionIcon
+      variant="subtle"
+      color="gray"
+      size="sm"
+      title={`${collapsed ? "展开" : "折叠"}${label}`}
+      aria-label={`${collapsed ? "展开" : "折叠"}${label}`}
+      onClick={onToggle}
+    >
+      {side === "b" ? (
+        collapsed ? (
+          <PanelLeftOpen size={17} />
+        ) : (
+          <PanelLeftClose size={17} />
+        )
+      ) : collapsed ? (
+        <PanelRightOpen size={17} />
+      ) : (
+        <PanelRightClose size={17} />
+      )}
+    </ActionIcon>
+  );
 }
 
 /** Drag handle that resizes B (left) or D (right); the width lives in ShellLayout. */
-function PanelResizer({
-  side,
-  width,
-  onWidth,
-}: {
-  side: "b" | "d";
-  width: number;
-  onWidth: (w: number) => void;
-}) {
+function PanelResizer({ side, width, onWidth }: { side: "b" | "d"; width: number; onWidth: (w: number) => void }) {
   const start = useRef<{ x: number; w: number } | null>(null);
   const max = side === "b" ? 560 : 640;
   return (
+    // biome-ignore lint/a11y/useSemanticElements: 指针拖拽的分隔条是交互式 window splitter；<hr> 无可交互语义且会带入浏览器默认样式
     <div
       className="fm-resizer"
       role="separator"
@@ -284,7 +322,7 @@ function BottomDrawer({ open, onToggle }: { open: boolean; onToggle: () => void 
         aria-expanded={open}
         style={{ ...buttonResetStyle, ...drawerToggleStyle }}
       >
-        <span>{open ? "▾" : "▸"}</span>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span>调试抽屉</span>
       </button>
       {open && (

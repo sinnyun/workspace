@@ -9,14 +9,15 @@
  * The panel lives in a `Portal` over the whole window. It is mounted from the
  * always-present status bar slot, so it needs no base-reserved overlay slot.
  */
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+
 import { Group, Loader, Paper, Portal, Stack, Text } from "@mantine/core";
 import type {
   ContextMenuItemDescriptor,
   ContextMenuProvider,
+  PluginHost,
   SlotProps,
 } from "@my-file-manager/plugin-sdk";
-import type { PluginHost } from "@my-file-manager/plugin-sdk";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 
 /** Opening/closing is a 160–220ms menu transition (docs/09 §3.2); the shell's
  *  global reduced-motion rule collapses it to near zero. */
@@ -54,13 +55,11 @@ function buildRows(
       group: descriptor.group ?? "",
     });
   }
-  visible.sort(
-    (a, b) => a.order - b.order || a.label.localeCompare(b.label, "zh-Hans-CN"),
-  );
+  visible.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label, "zh-Hans-CN"));
   const groups: Row[][] = [];
   for (const row of visible) {
     const last = groups[groups.length - 1];
-    if (last && last[0] && last[0].group === row.group) last.push(row);
+    if (last?.[0] && last[0].group === row.group) last.push(row);
     else groups.push([row]);
   }
   return groups;
@@ -72,9 +71,7 @@ export function activate(_host: PluginHost): void {
 
 export function MenuLayer({ host }: SlotProps) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const [provider] = useState<ContextMenuProvider | null>(
-    () => host.contextMenu?.provide() ?? null,
-  );
+  const [provider] = useState<ContextMenuProvider | null>(() => host.contextMenu?.provide() ?? null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: EDGE, y: EDGE });
   const [active, setActive] = useState(0);
@@ -156,6 +153,7 @@ export function MenuLayer({ host }: SlotProps) {
     };
   }, [open, seq, provider]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 行数变化会改变面板高度，需重新夹取坐标
   useLayoutEffect(() => {
     if (!request) return;
     const el = panelRef.current;
@@ -221,12 +219,7 @@ export function MenuLayer({ host }: SlotProps) {
           }
         }}
       >
-        <Paper
-          withBorder
-          shadow="sm"
-          radius="xs"
-          style={{ background: "var(--mantine-color-body)", padding: 4 }}
-        >
+        <Paper withBorder shadow="sm" radius="xs" style={{ background: "var(--mantine-color-body)", padding: 4 }}>
           <Stack gap={0}>
             {groups.map((group, gi) => (
               <div key={group[0]?.group || `g${gi}`}>
@@ -266,10 +259,7 @@ export function MenuLayer({ host }: SlotProps) {
                         fontSize: 13,
                         textAlign: "left",
                         color: row.enabled ? "inherit" : "var(--mantine-color-dimmed)",
-                        background:
-                          cursor === active && row.enabled
-                            ? "var(--mantine-color-gray-1)"
-                            : "transparent",
+                        background: cursor === active && row.enabled ? "var(--mantine-color-gray-1)" : "transparent",
                         cursor: row.enabled ? "pointer" : "not-allowed",
                       }}
                     >

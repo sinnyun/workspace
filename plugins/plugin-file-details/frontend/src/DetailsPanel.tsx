@@ -9,33 +9,12 @@
  * answer for a previously focused file can never paint over the current one
  * (docs/09 §9.2). All subscriptions die with the component.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ActionIcon,
-  Badge,
-  Code,
-  Group,
-  Stack,
-  Table,
-  Text,
-  Title,
-  Tooltip,
-} from "@mantine/core";
-import { Copy } from "lucide-react";
-import type { SlotProps, StatOut } from "@my-file-manager/plugin-sdk";
-import { errorMessage } from "@my-file-manager/plugin-sdk";
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
+import { ActionIcon, Badge, Code, Group, Stack, Table, Text, Title, Tooltip } from "@mantine/core";
+import type { SlotProps, StatOut } from "@my-file-manager/plugin-sdk";
+import { errorMessage, formatDateTime, formatSize } from "@my-file-manager/plugin-sdk";
+import { Copy } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 function extension(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -45,13 +24,6 @@ function extension(name: string): string {
 function baseName(path: string): string {
   const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return idx >= 0 ? path.slice(idx + 1) : path;
-}
-
-/** A readable timestamp, or the placeholder — never `Invalid Date` / `NaN`. */
-function formatTime(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms) || ms <= 0) return "—";
-  const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
 }
 
 /** Capability errors arrive with the Rust `CapabilityError` text; map the kinds
@@ -70,12 +42,10 @@ interface Snapshot {
 }
 
 export function DetailsPanel({ host }: SlotProps) {
-  const [target, setTarget] = useState<{ kind: string; path: string } | null>(
-    () => {
-      const ref = host.getState().focusRef;
-      return ref ? { kind: ref.kind, path: ref.id } : null;
-    },
-  );
+  const [target, setTarget] = useState<{ kind: string; path: string } | null>(() => {
+    const ref = host.getState().focusRef;
+    return ref ? { kind: ref.kind, path: ref.id } : null;
+  });
   const [snap, setSnap] = useState<Snapshot>({ stat: null, error: null });
   const [statLoading, setStatLoading] = useState(false);
   const [hash, setHash] = useState<string | null>(null);
@@ -199,12 +169,7 @@ export function DetailsPanel({ host }: SlotProps) {
                 <Group gap={6} wrap="nowrap">
                   <span>{target.path}</span>
                   <Tooltip label="复制路径">
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      aria-label="复制路径"
-                      onClick={copyPath}
-                    >
+                    <ActionIcon size="xs" variant="subtle" aria-label="复制路径" onClick={copyPath}>
                       <Copy size={14} />
                     </ActionIcon>
                   </Tooltip>
@@ -213,15 +178,7 @@ export function DetailsPanel({ host }: SlotProps) {
             </Table.Tr>
             <Table.Tr>
               <Table.Td style={{ color: "var(--mantine-color-dimmed)" }}>大小</Table.Td>
-              <Table.Td>
-                {statLoading
-                  ? "读取中…"
-                  : stat
-                    ? stat.isDir
-                      ? "—"
-                      : formatSize(stat.size)
-                    : "—"}
-              </Table.Td>
+              <Table.Td>{statLoading ? "读取中…" : stat ? (stat.isDir ? "—" : formatSize(stat.size)) : "—"}</Table.Td>
             </Table.Tr>
             <Table.Tr>
               <Table.Td style={{ color: "var(--mantine-color-dimmed)" }}>类型</Table.Td>
@@ -229,7 +186,7 @@ export function DetailsPanel({ host }: SlotProps) {
             </Table.Tr>
             <Table.Tr>
               <Table.Td style={{ color: "var(--mantine-color-dimmed)" }}>修改时间</Table.Td>
-              <Table.Td>{statLoading ? "读取中…" : formatTime(stat?.modifiedMs ?? null)}</Table.Td>
+              <Table.Td>{statLoading ? "读取中…" : formatDateTime(stat?.modifiedMs ?? null)}</Table.Td>
             </Table.Tr>
             <Table.Tr>
               <Table.Td style={{ color: "var(--mantine-color-dimmed)" }}>BLAKE3</Table.Td>

@@ -15,10 +15,20 @@
  * vocabulary, so this plugin declares the set it understands (P7-9): the shipped
  * producers (`plugin-view-file-tree`, `plugin-view-favorites`, `plugin-mock-data`)
  * all emit `"folder"` / `"file"`, so `"folder"` is the directory literal here (the
- * `"directory"` wording in docs/09 §6.3 has no producer). A ref of another kind —
- * `plugin-view-tags` sends `kind:"tag"` — is NOT navigated and never guessed
- * (docs/09 §4: an owner resolves a reference it cannot interpret): the pane shows a
- * visible Chinese notice instead of staying silent.
+ * `"directory"` wording in docs/09 §6.3 has no producer). A `"tag"` ref resolves
+ * through the shared `db.tags` store (P7-32, SDK `listTags`) into a tag view whose
+ * history item is the encoded string `tag://<name>` — the stack stays plain strings,
+ * so back/forward and per-pane memory work on a tag view exactly like on a directory.
+ * Any other kind is NOT navigated and never guessed (docs/09 §4: an owner resolves a
+ * reference it cannot interpret): the pane shows a visible Chinese notice instead of
+ * staying silent.
+ *
+ * Tags (P7-32): a path→tags index (one `db.tags.list` read, refreshed on
+ * `tags:updated`) feeds chips on list rows, grid cards and the table's 标签 column;
+ * clicking a chip opens the same tag view the sidebar ref does. The view renders tag
+ * members as synthetic entries (size/mtime stay blank — filling them would mean one
+ * `fs.stat` per member) and re-queries on `tags:updated`, so writes anywhere in the
+ * tags UI show up here without polling.
  *
  * Async correctness (docs/09 §3.3, §6.2, §9.1 — P7-7/P7-8):
  * - every `fs.list` carries a locally incremented sequence number plus its
@@ -53,12 +63,7 @@
  * `host.contextMenu`) every handler stays completely inert — no preventDefault,
  * no swallowed native menu.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type {
-  CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent as ReactMouseEvent,
-} from "react";
+
 import {
   ActionIcon,
   Alert,
@@ -72,12 +77,42 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { createToolbarStore } from "./toolbar-store";
+import {
+  Capabilities,
+  type ContextMenuContext,
+  Events,
+  errorMessage,
+  formatDate,
+  formatSize,
+  type ListEntry,
+  listTags,
+  type PluginHost,
+  type Ref,
+  type ShellThumbnailOut,
+  type SlotProps,
+  slotPrefix,
+} from "@my-file-manager/plugin-sdk";
+import {
+  type ColumnVisibilityState,
+  columnVisibilityFeature,
+  createColumnHelper,
+  createSortedRowModel,
+  functionalUpdate,
+  rowSortingFeature,
+  type SortingState,
+  sortFn_alphanumeric,
+  tableFeatures,
+  useTable,
+} from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowUpDown,
+  Check,
+  ChevronDown,
   CircleAlert,
   File,
   FileArchive,
@@ -90,19 +125,11 @@ import {
   LayoutGrid,
   List,
   RefreshCw,
+  Table,
 } from "lucide-react";
-import {
-  Capabilities,
-  Events,
-  errorMessage,
-  slotPrefix,
-  type ContextMenuContext,
-  type ListEntry,
-  type PluginHost,
-  type Ref,
-  type ShellThumbnailOut,
-  type SlotProps,
-} from "@my-file-manager/plugin-sdk";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createToolbarStore } from "./toolbar-store";
 
 const PLUGIN_NAME = "plugin-file-browser";
 const PANE_PREFIX = "pane-slot";
@@ -111,7 +138,9 @@ const PANE_PREFIX = "pane-slot";
  *  than leaked through a shared instance (docs/01 §9.1). */
 const LS_KEY = "fm.file-browser.v1";
 const CARD_MIN_WIDTH = 150;
-const CARD_ROW_HEIGHT = 156;
+/** 行高预算：缩略图 82 + 名称 + 标签 chips 一行 + 底部属性行（底部行有 marginTop:auto，
+ *  没有标签的卡片把余量留成空白，同一行的卡片高度仍然整齐）。 */
+const CARD_ROW_HEIGHT = 168;
 /** Longest edge asked of `shell.thumbnail.read`; a card shows ~96px. */
 const THUMB_EDGE = 96;
 /** Extensions worth asking the Windows Shell about. Formats a machine may have no
@@ -140,7 +169,7 @@ const THUMB_SETTLE_MS = 80;
  *  free. Bounded: a lost thumbnail is just an icon, a leaked one is hundreds of MB. */
 const THUMB_CACHE_MAX = 3000;
 
-type ViewMode = "list" | "grid";
+type ViewMode = "list" | "grid" | "table";
 
 interface PaneMemory {
   cwd: string;
@@ -187,9 +216,12 @@ interface Prefs {
   defaultMode: ViewMode;
   /** 网格卡片是否去取缩略图。 */
   thumbnails: boolean;
+  /** 表格模式的可选列（大小/修改时间/类型）。缺省=显示，显式 `false` 才隐藏，
+   *  与 react-table 的可见性口径一致；名称不可隐藏，所以不在这张表里。 */
+  tableColumns: ColumnVisibilityState;
 }
 
-const DEFAULT_PREFS: Prefs = { defaultMode: "grid", thumbnails: true };
+const DEFAULT_PREFS: Prefs = { defaultMode: "grid", thumbnails: true, tableColumns: {} };
 
 function readPrefs(): Prefs {
   try {
@@ -246,9 +278,15 @@ export function activate(host: PluginHost): () => void {
     if (slotPrefix(slotId) === PANE_PREFIX) detach(slotId);
   });
 
+  // chips 的索引是模块级共享状态：加载时建一次，标签存储每次写入（写者成功、
+  // 失败都会发）重建一次（P7-32）。订阅随插件卸载一起回收。
+  rebuildTagIndex(host);
+  const offTagsUpdated = host.on(Events.tagsUpdated, () => rebuildTagIndex(host));
+
   return () => {
     offRegistered();
     offDisposed();
+    offTagsUpdated();
     for (const slotId of [...attached.keys()]) detach(slotId);
   };
 }
@@ -273,8 +311,37 @@ export function SettingsPage() {
           data={[
             { value: "list", label: "列表" },
             { value: "grid", label: "网格" },
+            { value: "table", label: "表格" },
           ]}
         />
+      </div>
+      <div>
+        <Text size="sm" fw={600}>
+          表格列
+        </Text>
+        <Text size="xs" c="dimmed" mb={6}>
+          名称一列始终显示；大小、修改时间、类型可以在表头点一下排序，标签列只做展示。
+        </Text>
+        <Group gap={10} wrap="nowrap">
+          {TABLE_TOGGLE_COLUMNS.map((column) => (
+            <Group key={column.id} gap={6} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+              <Text size="xs">{column.label}</Text>
+              <Switch
+                size="xs"
+                checked={current.tableColumns[column.id] !== false}
+                aria-label={`显示${column.label}列`}
+                onChange={(e) =>
+                  patchPrefs({
+                    tableColumns: {
+                      ...current.tableColumns,
+                      [column.id]: e.currentTarget.checked,
+                    },
+                  })
+                }
+              />
+            </Group>
+          ))}
+        </Group>
       </div>
       <Group gap={10} wrap="nowrap">
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -303,8 +370,8 @@ export function SettingsPage() {
  *  以及本插件自己发布的 focus Ref，所以认识的集合就是 folder / file。 */
 const DIR_KIND = "folder";
 const FILE_KIND = "file";
-/** `plugin-view-tags` 发布的标签引用。tags 查询契约（roadmap P7-13）尚未定义，
- *  所以不导航、不去读别的插件的私有存储，只给可见的中文反馈。 */
+/** `plugin-view-tags` 发布的标签引用（P7-32）：经共享 `db.tags` 存储解析为
+ *  tag:// 视图，不再是不认识的 kind。 */
 const TAG_KIND = "tag";
 
 // ─────────────────── 右键 surface 稳定 id（P7-12） ───────────────────
@@ -347,7 +414,22 @@ function classifyDirectoryError(detail: string): DirectoryError {
       detail,
     };
   }
-  if (has("not found", "no such file", "cannot find", "does not exist", "missing", "enoent", "os error 2", "找不到", "不存在", "已删除", "已被删除", "消失")) {
+  if (
+    has(
+      "not found",
+      "no such file",
+      "cannot find",
+      "does not exist",
+      "missing",
+      "enoent",
+      "os error 2",
+      "找不到",
+      "不存在",
+      "已删除",
+      "已被删除",
+      "消失",
+    )
+  ) {
     return {
       kind: "missing",
       title: "文件夹已不存在或已被移动",
@@ -356,7 +438,23 @@ function classifyDirectoryError(detail: string): DirectoryError {
       detail,
     };
   }
-  if (has("invalid", "malformed", "not a directory", "is a directory", "name too long", "emlink", "enosys", "os error 123", "os error 161", "无效", "不合法", "格式", "不是文件夹")) {
+  if (
+    has(
+      "invalid",
+      "malformed",
+      "not a directory",
+      "is a directory",
+      "name too long",
+      "emlink",
+      "enosys",
+      "os error 123",
+      "os error 161",
+      "无效",
+      "不合法",
+      "格式",
+      "不是文件夹",
+    )
+  ) {
     return {
       kind: "invalid",
       title: "路径无效，无法打开",
@@ -374,12 +472,57 @@ function classifyDirectoryError(detail: string): DirectoryError {
   };
 }
 
+/** 标签视图的错误不是目录错误：不说"文件夹"，把"标签没了"和"标签读不出来"分开说。 */
+function classifyTagError(name: string, detail: string): DirectoryError {
+  if (detail.includes("找不到")) {
+    return {
+      kind: "missing",
+      title: `标签「${name}」已不存在`,
+      advice: "它可能已被删除或改名。重试可以重新读取；后退或地址栏也能回到原来的位置。",
+      retryable: true,
+      detail,
+    };
+  }
+  return {
+    kind: "read",
+    title: `读取标签「${name}」失败`,
+    advice: "标签数据暂时读不出来，这不代表标签被删了。重试一次；后退或地址栏可以换个位置。",
+    retryable: true,
+    detail,
+  };
+}
+
 // ─────────────────── 路径与地址栏校验（P7-8） ───────────────────
 
 /** 统一分隔符并去掉尾部斜杠，用于比较与写栈；根路径保持原样。 */
 function normalizePath(input: string): string {
   const trimmed = input.trim().replace(/\\/g, "/");
   return trimmed.length > 1 ? trimmed.replace(/\/+$/, "") : trimmed;
+}
+
+/** 标签视图的栈项编码（P7-32）：历史栈是纯字符串，`tag://<encodeURIComponent(name)>`
+ *  把"这是标签视图，不是目录"带进栈项本身，后退/前进/每栏记忆因此不需要任何新机制。
+ *  encodeURIComponent 不会产出反斜杠或尾部斜杠，normalizePath 对它无害。 */
+const TAG_SCHEME = "tag://";
+
+function encodeTagPath(name: string): string {
+  return `${TAG_SCHEME}${encodeURIComponent(name)}`;
+}
+
+/** 解码视图项；不是标签视图或编码损坏时返回 null（当作普通路径处理）。 */
+function decodeTagPath(path: string): string | null {
+  if (!path.startsWith(TAG_SCHEME)) return null;
+  try {
+    return decodeURIComponent(path.slice(TAG_SCHEME.length));
+  } catch {
+    return null;
+  }
+}
+
+/** 视图路径 → 用户可读的名字：标签视图是"标签「X」"，内部编码不进界面文案。 */
+function viewLabelOf(path: string): string {
+  const tag = decodeTagPath(path);
+  return tag === null ? path : `标签「${tag}」`;
 }
 
 /** 地址栏 Enter 的校验：失败时保留原路径、不写历史，只在输入框下方说明原因。 */
@@ -397,6 +540,68 @@ function isInDirectory(target: string, dir: string): boolean {
   const a = normalizePath(target);
   const b = normalizePath(dir);
   return a === b || parentOf(a) === b;
+}
+
+// ─────────────────── 标签索引与标签视图数据（P7-32 契约消费方） ───────────────────
+
+/** 路径 → 标签名。一次性从 `db.tags.list` 重建，`tags:updated` 时重来一遍；
+ *  短命但有界（标签数量级远小于目录条目），所以全量重建比增量维护简单得多。
+ *  Map 引用在重建时整体替换，useSyncExternalStore 的快照比较因此成立。 */
+let tagIndex = new Map<string, string[]>();
+const tagIndexListeners = new Set<() => void>();
+let tagIndexSeq = 0;
+
+/** 读不到标签（无授权 / 存储不可用）只是没有 chips，不影响目录浏览：保持旧索引。 */
+function rebuildTagIndex(host: PluginHost): void {
+  const seq = ++tagIndexSeq;
+  listTags(host).then(
+    (tags) => {
+      if (seq !== tagIndexSeq) return;
+      const next = new Map<string, string[]>();
+      for (const rec of tags) {
+        for (const m of rec.members) {
+          const key = normalizePath(m.path);
+          const names = next.get(key);
+          if (names) names.push(rec.name);
+          else next.set(key, [rec.name]);
+        }
+      }
+      tagIndex = next;
+      for (const cb of tagIndexListeners) cb();
+    },
+    () => {},
+  );
+}
+
+function useTagIndex(): Map<string, string[]> {
+  return useSyncExternalStore(
+    (cb) => {
+      tagIndexListeners.add(cb);
+      return () => {
+        tagIndexListeners.delete(cb);
+      };
+    },
+    () => tagIndex,
+  );
+}
+
+/** 表格单元格画在模块级的列表定义里，拿不到组件 props，所以经这个只读入口取
+ *  当前索引；订阅由 TableView 的 useTagIndex 负责，索引一变整表重渲。 */
+function tagsForEntry(path: string): string[] {
+  return tagIndex.get(normalizePath(path)) ?? [];
+}
+
+/** 标签视图的数据源：把成员合成为合成条目。大小/修改时间留空不是偷懒 ——
+ *  成员记录里本来就没有这些字段，补齐它们要每个成员一次 `fs.stat`，
+ *  那正是"列目录不逐项 stat"要避免的成本。 */
+async function loadTagMembers(host: PluginHost, name: string): Promise<ListEntry[]> {
+  const records = await listTags(host);
+  const rec = records.find((r) => r.name === name);
+  if (!rec) throw new Error(`标签存储里找不到「${name}」`);
+  return rec.members.map((m) => {
+    const path = normalizePath(m.path);
+    return { name: baseNameOf(path), path, isDir: m.kind === DIR_KIND, size: null, modifiedMs: null };
+  });
 }
 
 // ─────────────────── 一栏的加载状态机与导航栈（P7-7 / P7-8） ───────────────────
@@ -455,7 +660,11 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   const [manualMode, setManualMode] = useState<ViewMode | null>(memory.mode ?? null);
   const mode = manualMode ?? prefs.defaultMode;
   /** 正在进行的导航；null 表示当前栈顶就是已落定的目录。 */
-  const [request, setRequest] = useState<Request | null>(null);
+  /** 正在进行的导航；null 表示当前栈顶就是已落定的目录。恢复出来的栏位一挂载就
+   *  带着目标路径发起读取（`step` 不推进历史栈），否则它会停在空态不动。 */
+  const [request, setRequest] = useState<Request | null>(() =>
+    memory.cwd ? { path: memory.cwd, mode: "step" } : null,
+  );
   const [status, setStatus] = useState<LoadStatus>("idle");
   const [entries, setEntries] = useState<ListEntry[]>([]);
   const [counts, setCounts] = useState<{ dirs: number; files: number }>({ dirs: 0, files: 0 });
@@ -473,6 +682,10 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
 
   /** 页面呈现的目录：请求进行中即目标路径，地址栏与列表头部永远说同一件事。 */
   const displayPath = request?.path ?? cwd;
+  /** 非 null = 本栏当前是标签视图；值就是标签名。 */
+  const viewTag = decodeTagPath(displayPath);
+  /** 界面文案里的视图名（标签视图不是路径）。 */
+  const displayLabel = viewLabelOf(displayPath);
 
   // —— 请求序号（P7-7）：能力层没有中断通道，所以靠"最新身份"丢弃迟到结果 ——
   const seqRef = useRef(0);
@@ -498,10 +711,7 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   );
 
   /** 已经落定在栈顶的目录（刷新与"重复选择"的比较基准）。 */
-  const committedPath = useCallback(
-    (): string => histRef.current.stack[histRef.current.pos] ?? "",
-    [],
-  );
+  const committedPath = useCallback((): string => histRef.current.stack[histRef.current.pos] ?? "", []);
 
   /** 只有"最新一号 + 同一路径 + 同一会话 + 同一栏 + 组件还在"的响应才允许落地。 */
   const accept = useCallback(
@@ -521,11 +731,14 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     [host],
   );
 
-  /** 落定：按请求携带的方式推进栈，并作废已离开本目录的焦点/选择。 */
+  /** 落定：按请求携带的方式推进栈，并在离开目录视图时作废不再可见的焦点/选择。
+   *  标签视图是跨目录的视角，不作废全局焦点与选择 —— "展开标签后把当前选中项
+   *  加进来"正是靠焦点跨过这一步存活；成员自身的失效由各详情插件各自处理。 */
   const settle = useCallback(
     (token: RequestToken): void => {
       setHist((h) => commitHistory(h, token.path, token.mode));
       setRequest(null);
+      if (decodeTagPath(token.path) !== null) return;
       const focus = host.getState().focusRef;
       if (focus && (focus.kind === DIR_KIND || focus.kind === FILE_KIND) && !isInDirectory(focus.id, token.path)) {
         // 只有"这一栏正握着本会话的选择权"时才作废全局焦点：另一栏在后台换目录，
@@ -602,7 +815,7 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   // (`fs.list` returns natural order), and the virtualizer is only stable if the
   // row stream does not shuffle per render.
   useEffect(() => {
-    if (!request || !request.path) return;
+    if (!request?.path) return;
     const token: RequestToken = {
       seq: ++seqRef.current,
       path: request.path,
@@ -617,7 +830,11 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     setEntries([]);
     setCounts({ dirs: 0, files: 0 });
     const started = performance.now();
-    host.invoke<ListEntry[]>("fs.list", { path: token.path }).then(
+    // 标签视图与目录共用一条请求/落定管线，只是数据源不同：成员来自 db.tags。
+    const tag = decodeTagPath(token.path);
+    const listing =
+      tag === null ? host.invoke<ListEntry[]>("fs.list", { path: token.path }) : loadTagMembers(host, tag);
+    listing.then(
       (list) => {
         if (!accept(token)) return;
         settle(token);
@@ -631,7 +848,7 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
       (err) => {
         if (!accept(token)) return;
         settle(token);
-        setError(classifyDirectoryError(errorMessage(err)));
+        setError(tag === null ? classifyDirectoryError(errorMessage(err)) : classifyTagError(tag, errorMessage(err)));
         setStatus("error");
       },
     );
@@ -680,6 +897,16 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     };
   }, [host]);
 
+  // 标签视图开着时，标签数据一写入（成员增删、改名）就重查成员（P7-32）：写者
+  // 已经发 tags:updated，读者只重新读取，不在事件里搬数据。目录视图不受影响。
+  useEffect(
+    () =>
+      host.on(Events.tagsUpdated, () => {
+        if (decodeTagPath(activePath()) !== null) refreshRef.current();
+      }),
+    [host, activePath],
+  );
+
   // The address bar mirrors whichever directory this pane now shows.
   useEffect(() => {
     if (cwd) remember(memKey, { cwd });
@@ -721,18 +948,16 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
           navigate(parentOf(ref.id));
           return;
         }
+        if (ref.kind === TAG_KIND) {
+          // 标签引用（P7-32）：视图经共享 db.tags 存储解析，栈项是编码后的视图标识。
+          navigate(encodeTagPath(ref.id));
+          return;
+        }
         // 不认识的 kind：不猜测引用内容，也不跨插件读私有存储 —— 给可见反馈。
-        setNotice(
-          ref.kind === TAG_KIND
-            ? {
-                text: "标签筛选暂未支持：请在文件树或收藏中选择文件夹。",
-                hover: `收到来自 ${ref.sourcePlugin} 的标签引用（kind: ${ref.kind}），标签查询契约定义后才会处理`,
-              }
-            : {
-                text: "暂不支持这种侧栏选择：请改用文件夹或文件。",
-                hover: `收到来自 ${ref.sourcePlugin} 的未知引用类型（kind: ${ref.kind}），本插件只处理文件夹与文件`,
-              },
-        );
+        setNotice({
+          text: "暂不支持这种侧栏选择：请改用文件夹、文件或标签。",
+          hover: `收到来自 ${ref.sourcePlugin} 的未知引用类型（kind: ${ref.kind}），本插件只处理文件夹、文件与标签`,
+        });
       }),
     [host, navigate, session, slotId],
   );
@@ -817,11 +1042,7 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     } satisfies ContextMenuContext);
   };
 
-  const itemContextMenu = (
-    surfaceId: string,
-    e: ReactMouseEvent<HTMLElement>,
-    ent: ListEntry,
-  ): void => {
+  const itemContextMenu = (surfaceId: string, e: ReactMouseEvent<HTMLElement>, ent: ListEntry): void => {
     if (!host.contextMenu) return;
     e.preventDefault();
     // 行/卡片的菜单不能被外层"空白区"handler 二次接管。
@@ -830,21 +1051,12 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
   };
 
   /** 键盘等价：焦点行上 ContextMenu 键或 Shift+F10，锚在行包围盒中心。 */
-  const itemContextKey = (
-    surfaceId: string,
-    e: ReactKeyboardEvent<HTMLElement>,
-    ent: ListEntry,
-  ): void => {
+  const itemContextKey = (surfaceId: string, e: ReactKeyboardEvent<HTMLElement>, ent: ListEntry): void => {
     if (!host.contextMenu) return;
     if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
-    openMenu(
-      surfaceId,
-      ent,
-      { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
-      "keyboard",
-    );
+    openMenu(surfaceId, ent, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, "keyboard");
   };
 
   const emptyContextMenu = (e: ReactMouseEvent<HTMLElement>): void => {
@@ -861,19 +1073,61 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     if (ent.isDir) navigate(ent.path);
   };
 
-  // 列表/网格只换样式：路径、历史、数据、选择一律不动。
-  const switchMode = useCallback((next: ViewMode): void => {
-    setManualMode(next);
-    remember(memKey, { mode: next });
-  }, [memKey]);
+  /** chips 点击与侧栏标签引用走同一条导航路径（P7-32）。 */
+  const openTagView = useCallback((name: string): void => navigate(encodeTagPath(name)), [navigate]);
 
-  const controller = useMemo<NavigationController>(() => ({
-    id: memKey, cwd: displayPath, mode, status,
-    canBack: hist.pos > 0, canForward: hist.pos < hist.stack.length - 1,
-    canUp: !!displayPath && displayPath !== parentOf(displayPath),
-    back: goBack, forward: goForward, up: goUp, refresh, navigate,
-    setMode: switchMode, claim: claimPane, editAddress, addressToken, selectAll,
-  }), [memKey, displayPath, mode, status, hist.pos, hist.stack.length, goBack, goForward, goUp, refresh, navigate, switchMode, claimPane, editAddress, addressToken, selectAll]);
+  // 列表/网格只换样式：路径、历史、数据、选择一律不动。
+  const switchMode = useCallback(
+    (next: ViewMode): void => {
+      setManualMode(next);
+      remember(memKey, { mode: next });
+    },
+    [memKey],
+  );
+
+  const controller = useMemo<NavigationController>(
+    () => ({
+      id: memKey,
+      cwd: displayPath,
+      viewLabel: displayLabel,
+      mode,
+      status,
+      canBack: hist.pos > 0,
+      canForward: hist.pos < hist.stack.length - 1,
+      // 标签视图没有上级目录：parentOf 对 tag:// 没有意义，按钮一律禁用。
+      canUp: viewTag === null && !!displayPath && displayPath !== parentOf(displayPath),
+      back: goBack,
+      forward: goForward,
+      up: goUp,
+      refresh,
+      navigate,
+      setMode: switchMode,
+      claim: claimPane,
+      editAddress,
+      addressToken,
+      selectAll,
+    }),
+    [
+      memKey,
+      displayPath,
+      displayLabel,
+      viewTag,
+      mode,
+      status,
+      hist.pos,
+      hist.stack.length,
+      goBack,
+      goForward,
+      goUp,
+      refresh,
+      navigate,
+      switchMode,
+      claimPane,
+      editAddress,
+      addressToken,
+      selectAll,
+    ],
+  );
 
   useEffect(() => {
     const el = browserRef.current;
@@ -882,10 +1136,18 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => { toolbarStore.set(session, slotId, controller, visible); }, [session, slotId, controller, visible]);
-  useEffect(() => () => { toolbarStore.remove(session, slotId); }, [session, slotId]);
+  useEffect(() => {
+    toolbarStore.set(session, slotId, controller, visible);
+  }, [session, slotId, controller, visible]);
+  useEffect(
+    () => () => {
+      toolbarStore.remove(session, slotId);
+    },
+    [session, slotId],
+  );
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: 整栏点击/聚焦把键盘焦点交回本栏工具条；命中目标可能是栏内任意子元素
     <div ref={browserRef} className="fm-browser" style={paneStyle} onMouseDown={claimPane} onFocusCapture={claimPane}>
       <NavigationBar controller={controller} />
 
@@ -907,26 +1169,30 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
       )}
 
       <div className="fm-directory" style={dirHeaderStyle}>
-        <Text className="fm-directory-name" size="xs" fw={600} truncate title={displayPath} style={{ minWidth: 0 }}>
-          {displayPath || "—"}
+        <Text className="fm-directory-name" size="xs" fw={600} truncate title={displayLabel} style={{ minWidth: 0 }}>
+          {displayLabel || "—"}
         </Text>
-        <Text className="fm-directory-count" title={`读取耗时 ${fetchMs.toFixed(0)} ms`} size="xs" c="dimmed" style={{ marginLeft: "auto", flexShrink: 0 }}>
+        <Text
+          className="fm-directory-count"
+          title={`读取耗时 ${fetchMs.toFixed(0)} ms`}
+          size="xs"
+          c="dimmed"
+          style={{ marginLeft: "auto", flexShrink: 0 }}
+        >
           {status === "loading"
             ? "载入中…"
             : status === "error"
               ? "—"
               : status === "empty"
-                ? "空文件夹"
+                ? viewTag !== null
+                  ? "无成员"
+                  : "空文件夹"
                 : `${counts.dirs} 个文件夹 · ${counts.files} 个文件`}
         </Text>
       </div>
 
       {status === "error" && error ? (
-        <DirectoryErrorPanel
-          error={error}
-          controller={controller}
-          emptyContextMenu={emptyContextMenu}
-        />
+        <DirectoryErrorPanel error={error} controller={controller} emptyContextMenu={emptyContextMenu} />
       ) : (
         <EntryArea
           status={status}
@@ -937,6 +1203,7 @@ function FileBrowserPane({ host, slotId }: SlotProps) {
           selected={selection}
           onFocus={publishFocus}
           onEnter={enter}
+          onTag={openTagView}
           itemContextMenu={itemContextMenu}
           itemContextKey={itemContextKey}
           emptyContextMenu={emptyContextMenu}
@@ -965,6 +1232,7 @@ function DirectoryErrorPanel({
 }) {
   const Icon = error.kind === "missing" || error.kind === "invalid" ? FolderX : CircleAlert;
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: 错误态整块属于 browser.empty 右键面，与列表空白区同一入口
     <div
       className="fm-empty fm-directory-error"
       style={{ flex: 1 }}
@@ -999,7 +1267,13 @@ function DirectoryErrorPanel({
         >
           返回上级
         </Button>
-        <Button size="compact-xs" variant="light" color="gray" leftSection={<Folder size={13} />} onClick={controller.editAddress}>
+        <Button
+          size="compact-xs"
+          variant="light"
+          color="gray"
+          leftSection={<Folder size={13} />}
+          onClick={controller.editAddress}
+        >
           选择其他目录
         </Button>
       </Group>
@@ -1011,6 +1285,8 @@ interface NavigationController {
   id: string;
   /** 当前显示的目录；请求进行中就是目标路径，所以地址栏与头部永远一致。 */
   cwd: string;
+  /** 地址栏显示的文本（= cwd 的用户可读形式；标签视图显示"标签「X」"）。 */
+  viewLabel: string;
   mode: ViewMode;
   /** 本栏的加载状态，用于刷新按钮的进行中反馈。 */
   status: LoadStatus;
@@ -1039,7 +1315,9 @@ export function FileBrowserToolbar({ host }: SlotProps) {
   const [session, setSession] = useState(host.getState().activeTabId);
   useEffect(() => host.onStateChange((state) => setSession(state.activeTabId)), [host]);
   const controller = useSyncExternalStore(toolbarStore.subscribe, () => toolbarStore.get(session));
-  useEffect(() => { controller?.claim(); }, [controller?.id]);
+  useEffect(() => {
+    controller?.claim();
+  }, [controller?.claim]);
 
   /** 右键菜单项的 execute 在渲染之外触发，永远经 ref 读"当前活动栏"的控制器，
    *  不依赖任何闭包里的旧状态（P7-12）。顶栏只挂载一份，所以菜单项 id 在这里
@@ -1073,21 +1351,27 @@ export function FileBrowserToolbar({ host }: SlotProps) {
     };
   }, [host]);
 
-  return controller ? <NavigationBar key={controller.id} controller={controller} global />
-    : <Text size="xs" c="dimmed">文件导航</Text>;
+  return controller ? (
+    <NavigationBar key={controller.id} controller={controller} global />
+  ) : (
+    <Text size="xs" c="dimmed">
+      文件导航
+    </Text>
+  );
 }
 
 function NavigationBar({ controller, global = false }: { controller: NavigationController; global?: boolean }) {
-  /** 输入框是草稿；只有 Enter 校验通过才交给 `controller.navigate` 写栈（09 §9.1）。 */
-  const [address, setAddress] = useState(controller.cwd);
+  /** 输入框是草稿；只有 Enter 校验通过才交给 `controller.navigate` 写栈（09 §9.1）。
+   *  标签视图里显示的是"标签「X」"而不是内部编码；用户可以直接改写成一真实路径离开。 */
+  const [address, setAddress] = useState(controller.viewLabel);
   const [invalid, setInvalid] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // 目录一变（导航、后退、刷新、侧栏驱动）就回到真实路径，丢弃未提交的草稿。
   useEffect(() => {
-    setAddress(controller.cwd);
+    setAddress(controller.viewLabel);
     setInvalid(null);
-  }, [controller.cwd]);
+  }, [controller.viewLabel]);
 
   // 错误面板的"选择其他目录"：把光标交回地址栏。
   useEffect(() => {
@@ -1108,121 +1392,148 @@ function NavigationBar({ controller, global = false }: { controller: NavigationC
   };
 
   return (
-    <div className={global ? "fm-address fm-global-address" : "fm-address"}
-      onMouseDown={controller.claim} onFocusCapture={controller.claim}
-      style={{ ...addressBarStyle, ...(global ? { padding: 0, flex: 1 } : {}) }}>
-        <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="后退"
-            aria-label="后退"
-            disabled={!controller.canBack}
-            onClick={controller.back}
-          >
-            <ArrowLeft size={15} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="前进"
-            aria-label="前进"
-            disabled={!controller.canForward}
-            onClick={controller.forward}
-          >
-            <ArrowRight size={15} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="上级目录"
-            aria-label="上级目录"
-            disabled={!controller.canUp}
-            onClick={controller.up}
-          >
-            <ArrowUp size={15} />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="sm"
-            title="刷新"
-            aria-label="刷新"
-            loading={controller.status === "loading"}
-            onClick={controller.refresh}
-          >
-            <RefreshCw size={14} />
-          </ActionIcon>
-        </Group>
+    // biome-ignore lint/a11y/noStaticElementInteractions: 地址栏是复合控件（按钮＋输入框），点击任意处即认领当前栏
+    <div
+      className={global ? "fm-address fm-global-address" : "fm-address"}
+      onMouseDown={controller.claim}
+      onFocusCapture={controller.claim}
+      style={{ ...addressBarStyle, ...(global ? { padding: 0, flex: 1 } : {}) }}
+    >
+      <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          title="后退"
+          aria-label="后退"
+          disabled={!controller.canBack}
+          onClick={controller.back}
+        >
+          <ArrowLeft size={15} />
+        </ActionIcon>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          title="前进"
+          aria-label="前进"
+          disabled={!controller.canForward}
+          onClick={controller.forward}
+        >
+          <ArrowRight size={15} />
+        </ActionIcon>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          title="上级目录"
+          aria-label="上级目录"
+          disabled={!controller.canUp}
+          onClick={controller.up}
+        >
+          <ArrowUp size={15} />
+        </ActionIcon>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          title="刷新"
+          aria-label="刷新"
+          loading={controller.status === "loading"}
+          onClick={controller.refresh}
+        >
+          <RefreshCw size={14} />
+        </ActionIcon>
+      </Group>
 
-        <TextInput
-          className="fm-address-input"
-          ref={inputRef}
-          leftSection={<Folder size={14} />}
-          size="xs"
-          variant="default"
-          value={address}
-          error={invalid ?? undefined}
-          onChange={(e) => {
-            setAddress(e.currentTarget.value);
-            if (invalid) setInvalid(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              submit();
-            } else if (e.key === "Escape") {
-              // 放弃草稿，恢复当前路径（不触发导航，也不写历史）。
-              e.stopPropagation();
-              setAddress(controller.cwd);
-              setInvalid(null);
-              e.currentTarget.blur();
-            }
-          }}
-          placeholder="输入目录路径后回车"
-          aria-label="当前目录地址"
-          style={{ flex: 1, minWidth: 0 }}
-        />
+      <TextInput
+        className="fm-address-input"
+        ref={inputRef}
+        leftSection={<Folder size={14} />}
+        size="xs"
+        variant="default"
+        value={address}
+        error={invalid ?? undefined}
+        onChange={(e) => {
+          setAddress(e.currentTarget.value);
+          if (invalid) setInvalid(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            // 放弃草稿，恢复当前路径（不触发导航，也不写历史）。
+            e.stopPropagation();
+            setAddress(controller.viewLabel);
+            setInvalid(null);
+            e.currentTarget.blur();
+          }
+        }}
+        placeholder="输入目录路径后回车"
+        aria-label="当前目录地址"
+        style={{ flex: 1, minWidth: 0 }}
+      />
 
-        <div className="fm-view-mode" style={{ flexShrink: 0 }}>
-          <Menu position="bottom-end" withinPortal>
-            <Menu.Target>
-              <Button className="fm-dropdown-button" variant="default" size="xs" aria-label="视图模式"
-                rightSection={<span aria-hidden="true">⌄</span>}>
-                {controller.mode === "list" ? <ListLabel /> : <GridLabel />}
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>视图模式</Menu.Label>
-              {(["list", "grid"] as const).map((mode) => (
-                <Menu.Item key={mode} onClick={() => controller.setMode(mode)}
-                  leftSection={mode === "list" ? <List size={14} /> : <LayoutGrid size={14} />}
-                  rightSection={controller.mode === mode ? <span aria-label="当前视图">✓</span> : undefined}>
-                  {mode === "list" ? "列表" : "网格"}
+      <div className="fm-view-mode" style={{ flexShrink: 0 }}>
+        <Menu position="bottom-end" withinPortal>
+          <Menu.Target>
+            <Button
+              className="fm-dropdown-button"
+              variant="default"
+              size="xs"
+              aria-label="视图模式"
+              rightSection={<ChevronDown size={14} />}
+            >
+              <ModeLabel mode={controller.mode} />
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>视图模式</Menu.Label>
+            {VIEW_MODES.map((item) => {
+              const Icon = item.Icon;
+              return (
+                <Menu.Item
+                  key={item.value}
+                  onClick={() => controller.setMode(item.value)}
+                  leftSection={<Icon size={14} />}
+                  rightSection={
+                    controller.mode === item.value ? (
+                      <span title="当前视图">
+                        <Check size={14} />
+                      </span>
+                    ) : undefined
+                  }
+                >
+                  {item.label}
                 </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        </div>
+              );
+            })}
+          </Menu.Dropdown>
+        </Menu>
       </div>
+    </div>
   );
 }
 
-const ListLabel = () => (
-  <Group gap={4} wrap="nowrap">
-    <List size={12} />
-    <span className="fm-view-label-text">列表</span>
-  </Group>
-);
-const GridLabel = () => (
-  <Group gap={4} wrap="nowrap">
-    <LayoutGrid size={12} />
-    <span className="fm-view-label-text">网格</span>
-  </Group>
-);
+/** 三种显示方式只有一个来源表：菜单、当前标签和默认值设置页都从这里生成，
+ *  加一列模式不会再出现"菜单里有、标签还写死两种"的漂移。 */
+const VIEW_MODES: ReadonlyArray<{ value: ViewMode; label: string; Icon: typeof List }> = [
+  { value: "list", label: "列表", Icon: List },
+  { value: "grid", label: "网格", Icon: LayoutGrid },
+  { value: "table", label: "表格", Icon: Table },
+];
+
+function ModeLabel({ mode }: { mode: ViewMode }) {
+  const found = VIEW_MODES.find((item) => item.value === mode) ?? VIEW_MODES[0];
+  const Icon = found.Icon;
+  return (
+    <Group gap={4} wrap="nowrap">
+      <Icon size={12} />
+      <span className="fm-view-label-text">{found.label}</span>
+    </Group>
+  );
+}
 
 /** One virtual row: a group header or a run of entries (list = 1, grid = N cards). */
 type Row =
@@ -1236,7 +1547,7 @@ function buildRows(entries: ListEntry[], cwd: string, mode: ViewMode, cols: numb
   const rows: Row[] = [];
   const push = (title: string, items: ListEntry[]): void => {
     if (items.length === 0) return;
-    rows.push({ kind: "header", title, path: cwd });
+    rows.push({ kind: "header", title, path: viewLabelOf(cwd) });
     if (mode === "list") {
       for (const ent of items) rows.push({ kind: "list", ent });
       return;
@@ -1250,21 +1561,7 @@ function buildRows(entries: ListEntry[], cwd: string, mode: ViewMode, cols: numb
   return rows;
 }
 
-/** List and grid share ONE virtualized row stream, so a 50k-entry directory costs the
- *  same in either mode. Grid rows carry real height because a card shows a thumbnail. */
-function EntryArea({
-  status,
-  host,
-  mode,
-  entries,
-  cwd,
-  selected,
-  onFocus,
-  onEnter,
-  itemContextMenu,
-  itemContextKey,
-  emptyContextMenu,
-}: {
+interface EntryAreaProps {
   status: LoadStatus;
   host: PluginHost;
   mode: ViewMode;
@@ -1273,14 +1570,106 @@ function EntryArea({
   selected: ReadonlySet<string>;
   onFocus: (ent: ListEntry) => void;
   onEnter: (ent: ListEntry) => void;
+  /** 标签 chip 点击：打开该标签的视图（P7-32）。 */
+  onTag: (name: string) => void;
   /** 共享右键菜单入口（P7-12）：行/卡片各自 surface，空白区统一 browser.empty。 */
   itemContextMenu: (surfaceId: string, e: ReactMouseEvent<HTMLElement>, ent: ListEntry) => void;
   itemContextKey: (surfaceId: string, e: ReactKeyboardEvent<HTMLElement>, ent: ListEntry) => void;
   emptyContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
-}) {
+}
+
+/** 空态与载入态三种模式共用，所以判断放在分发处；每个渲染组件自己的 hook
+ *  序列因此始终固定（条件调用 useVirtualizer 会让 React 直接报错）。 */
+function EntryArea(props: EntryAreaProps) {
+  const { status, entries, emptyContextMenu, cwd } = props;
+  if (entries.length === 0) {
+    // 空目录与"正在载入"是两种状态；错误态由外层的分类面板负责，不进这里。
+    const busy = status === "loading" || status === "idle";
+    const tag = decodeTagPath(cwd) !== null;
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: 空目录/载入态整块是 browser.empty 右键面
+      <div className="fm-empty" style={{ flex: 1 }} data-surface={SURFACE_EMPTY} onContextMenu={emptyContextMenu}>
+        <span className="fm-empty-icon">
+          <Folder size={28} />
+        </span>
+        <Text size="sm" fw={600}>
+          {busy ? (tag ? "正在读取标签成员…" : "正在加载目录…") : tag ? "这个标签还没有成员" : "此文件夹为空"}
+        </Text>
+        <Text size="xs" c="dimmed">
+          {busy
+            ? "稍候即可查看文件内容"
+            : tag
+              ? "在标签面板里把文件或文件夹加进来后，会显示在这里"
+              : "这里还没有文件或子文件夹"}
+        </Text>
+      </div>
+    );
+  }
+  return props.mode === "table" ? <TableView {...props} /> : <StreamArea {...props} />;
+}
+
+/** 条目关联标签 chips（P7-32）：点击打开该标签的视图，与侧栏标签引用同一路径。
+ *  超过上限的收进 +N 的悬停说明；点击不冒泡到行，避免顺带改变文件焦点/选择。 */
+function TagChips({ names, onOpen, limit }: { names: string[]; onOpen: (name: string) => void; limit: number }) {
+  if (names.length === 0) return null;
+  const shown = names.slice(0, limit);
+  const rest = names.slice(limit);
+  return (
+    <Group gap={4} wrap="nowrap" className="fm-tag-chips" style={{ minWidth: 0 }}>
+      {shown.map((name) => (
+        <Badge
+          key={name}
+          component="button"
+          type="button"
+          className="fm-tag-chip"
+          size="xs"
+          radius="sm"
+          variant="light"
+          color="blue"
+          tt="none"
+          title={`打开标签「${name}」`}
+          style={{ cursor: "pointer", flexShrink: 1, maxWidth: 110 }}
+          onClick={(e: ReactMouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation();
+            onOpen(name);
+          }}
+          onDoubleClick={(e: ReactMouseEvent<HTMLButtonElement>) => e.stopPropagation()}
+          onKeyDown={(e: ReactKeyboardEvent<HTMLButtonElement>) => {
+            // 行也是 role=button：chip 上的 Enter/Space 只属于 chip 自己。
+            if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+          }}
+        >
+          {name}
+        </Badge>
+      ))}
+      {rest.length > 0 && (
+        <Badge size="xs" radius="sm" variant="default" tt="none" title={`其余标签：${rest.join("、")}`}>
+          +{rest.length}
+        </Badge>
+      )}
+    </Group>
+  );
+}
+
+/** List and grid share ONE virtualized row stream, so a 50k-entry directory costs the
+ *  same in either mode. Grid rows carry real height because a card shows a thumbnail. */
+function StreamArea({
+  host,
+  mode,
+  entries,
+  cwd,
+  selected,
+  onFocus,
+  onEnter,
+  onTag,
+  itemContextMenu,
+  itemContextKey,
+  emptyContextMenu,
+}: EntryAreaProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
-  const empty = entries.length === 0;
+  // 订阅标签索引：tags:updated 重建后，屏上的 chips 立刻跟随（查找走 tagsForEntry）。
+  useTagIndex();
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -1288,7 +1677,7 @@ function EntryArea({
     const observer = new ResizeObserver(() => setWidth(el.clientWidth));
     observer.observe(el);
     return () => observer.disconnect();
-  }, [empty]);
+  }, []);
 
   const cols = mode === "grid" ? Math.max(1, Math.floor((width + 8) / (CARD_MIN_WIDTH + 8)) || 1) : 1;
   const rows = useMemo(() => buildRows(entries, cwd, mode, cols), [entries, cwd, mode, cols]);
@@ -1296,35 +1685,13 @@ function EntryArea({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) =>
-      rows[i].kind === "header" ? 32 : rows[i].kind === "cards" ? CARD_ROW_HEIGHT : 36,
+    estimateSize: (i) => (rows[i].kind === "header" ? 32 : rows[i].kind === "cards" ? CARD_ROW_HEIGHT : 36),
     overscan: 10,
   });
 
-  if (entries.length === 0) {
-    // 空目录与"正在载入"是两种状态；错误态由外层的分类面板负责，不进这里。
-    const busy = status === "loading" || status === "idle";
-    return (
-      <div
-        className="fm-empty"
-        style={{ flex: 1 }}
-        data-surface={SURFACE_EMPTY}
-        onContextMenu={emptyContextMenu}
-      >
-        <span className="fm-empty-icon"><Folder size={28} /></span>
-        <Text size="sm" fw={600}>{busy ? "正在加载目录…" : "此文件夹为空"}</Text>
-        <Text size="xs" c="dimmed">{busy ? "稍候即可查看文件内容" : "这里还没有文件或子文件夹"}</Text>
-      </div>
-    );
-  }
-
   return (
-    <div
-      ref={scrollRef}
-      style={scrollStyle}
-      data-surface={SURFACE_EMPTY}
-      onContextMenu={emptyContextMenu}
-    >
+    // biome-ignore lint/a11y/noStaticElementInteractions: 滚动区空白处属于 browser.empty 右键面；条目行各自拦截右键
+    <div ref={scrollRef} style={scrollStyle} data-surface={SURFACE_EMPTY} onContextMenu={emptyContextMenu}>
       <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index];
@@ -1349,6 +1716,7 @@ function EntryArea({
           }
           if (row.kind === "list") {
             return (
+              // biome-ignore lint/a11y/useSemanticElements: 虚拟化行是绝对定位的 CSS Grid 行，<button> 的默认盒模型会破坏几何；键盘语义已按 button 补全
               <div
                 key={item.key}
                 className="fm-entry"
@@ -1358,8 +1726,14 @@ function EntryArea({
                 tabIndex={0}
                 aria-pressed={selected.has(row.ent.path)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { onFocus(row.ent); onEnter(row.ent); }
-                  if (e.key === " ") { e.preventDefault(); onFocus(row.ent); }
+                  if (e.key === "Enter") {
+                    onFocus(row.ent);
+                    onEnter(row.ent);
+                  }
+                  if (e.key === " ") {
+                    e.preventDefault();
+                    onFocus(row.ent);
+                  }
                   itemContextKey(SURFACE_LIST, e, row.ent);
                 }}
                 style={{ ...listRowStyle, ...abs }}
@@ -1372,18 +1746,23 @@ function EntryArea({
                 <Text size="xs" truncate style={{ flex: 1, minWidth: 0 }}>
                   {row.ent.name}
                 </Text>
+                <TagChips names={tagsForEntry(row.ent.path)} onOpen={onTag} limit={2} />
                 <Text className="fm-size-cell" size="xs" c="dimmed" style={cellStyle}>
-                  {row.ent.isDir ? "" : formatSize(row.ent.size ?? 0)}
+                  {row.ent.isDir ? "" : formatSize(row.ent.size)}
                 </Text>
                 <Text className="fm-date-cell" size="xs" c="dimmed" style={cellStyle}>
-                  {formatModified(row.ent.modifiedMs)}
+                  {formatDate(row.ent.modifiedMs)}
                 </Text>
               </div>
             );
           }
           return (
-            <div key={item.key} style={{ ...cardsRowStyle, ...abs, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+            <div
+              key={item.key}
+              style={{ ...cardsRowStyle, ...abs, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+            >
               {row.items.map((ent) => (
+                // biome-ignore lint/a11y/useSemanticElements: 虚拟化卡片是 CSS Grid 单元，<button> 默认盒模型会破坏卡片几何；键盘语义已按 button 补全
                 <div
                   key={ent.path}
                   className="fm-card"
@@ -1393,8 +1772,14 @@ function EntryArea({
                   tabIndex={0}
                   aria-pressed={selected.has(ent.path)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") { onFocus(ent); onEnter(ent); }
-                    if (e.key === " ") { e.preventDefault(); onFocus(ent); }
+                    if (e.key === "Enter") {
+                      onFocus(ent);
+                      onEnter(ent);
+                    }
+                    if (e.key === " ") {
+                      e.preventDefault();
+                      onFocus(ent);
+                    }
                     itemContextKey(SURFACE_GRID, e, ent);
                   }}
                   style={cardStyle}
@@ -1407,12 +1792,13 @@ function EntryArea({
                   <Text size="xs" truncate style={{ width: "100%" }}>
                     {ent.name}
                   </Text>
+                  <TagChips names={tagsForEntry(ent.path)} onOpen={onTag} limit={2} />
                   <Group gap={4} wrap="nowrap" style={{ marginTop: "auto" }}>
                     <Badge size="xs" variant="light" color={ent.isDir ? "blue" : "gray"} tt="uppercase">
                       {ent.isDir ? "文件夹" : extensionOf(ent.name) || "文件"}
                     </Badge>
                     <Text size="xs" c="dimmed">
-                      {ent.isDir ? "" : formatSize(ent.size ?? 0)}
+                      {ent.isDir ? "" : formatSize(ent.size)}
                     </Text>
                   </Group>
                 </div>
@@ -1420,6 +1806,292 @@ function EntryArea({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────── 表格模式（P7-31 / P6-16） ─────────────────────────
+
+const TABLE_ROW_HEIGHT = 36;
+
+/** 可选列与中文标签。设置页的开关、表头、列宽模板都从这张表读，所以加一列
+ *  不会出现"设置里有、表头没有"。名称列不可隐藏，因此不在这里。 */
+const TABLE_TOGGLE_COLUMNS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "size", label: "大小" },
+  { id: "modified", label: "修改时间" },
+  { id: "kind", label: "类型" },
+  { id: "tags", label: "标签" },
+];
+
+const TABLE_WIDTHS: Record<string, string> = {
+  name: "minmax(0, 1fr)",
+  size: "92px",
+  modified: "104px",
+  kind: "84px",
+  tags: "150px",
+  dir: "0px",
+};
+
+const kindLabel = (ent: ListEntry): string => (ent.isDir ? "文件夹" : extensionOf(ent.name) || "文件");
+
+/** 模块级列表定义拿不到组件 props，动态入口经 react-table 的 meta 槽位传递：
+ *  tags 单元格据此调用当前栏的标签视图导航。 */
+interface TableBrowserMeta {
+  onTag: (name: string) => void;
+}
+
+/** `features` 与 `columns` 必须是模块级稳定引用：每次渲染新建会让 react-table
+ *  的行模型全量重算（50 万行时就是每帧重排一次）。 */
+const TABLE_FEATURES = tableFeatures({
+  rowSortingFeature,
+  columnVisibilityFeature,
+  sortedRowModel: createSortedRowModel(),
+  sortFns: { alphanumeric: sortFn_alphanumeric },
+  tableMeta: {} as TableBrowserMeta,
+});
+
+const tableColumnHelper = createColumnHelper<typeof TABLE_FEATURES, ListEntry>();
+
+const TABLE_COLUMNS = tableColumnHelper.columns([
+  // 隐藏的排序主键：文件夹在两种方向下都排在文件之前，与列表/网格同一口径。
+  tableColumnHelper.accessor((ent) => (ent.isDir ? 0 : 1), {
+    id: "dir",
+    header: "",
+    enableHiding: false,
+    sortFn: (rowA, rowB, id) => rowA.getValue<number>(id) - rowB.getValue<number>(id),
+  }),
+  tableColumnHelper.accessor("name", {
+    header: "名称",
+    enableHiding: false,
+    sortFn: "alphanumeric",
+    cell: (context) => {
+      const ent = context.row.original;
+      return (
+        <>
+          <IconFor entry={ent} />
+          <Text size="xs" truncate style={{ minWidth: 0 }}>
+            {ent.name}
+          </Text>
+        </>
+      );
+    },
+  }),
+  tableColumnHelper.accessor((ent) => ent.size ?? 0, {
+    id: "size",
+    header: "大小",
+    cell: (context) => {
+      const ent = context.row.original;
+      return (
+        <Text size="xs" c="dimmed" style={sizeCellStyle}>
+          {ent.isDir ? "" : formatSize(ent.size)}
+        </Text>
+      );
+    },
+  }),
+  tableColumnHelper.accessor((ent) => ent.modifiedMs ?? 0, {
+    id: "modified",
+    header: "修改时间",
+    cell: (context) => (
+      <Text size="xs" c="dimmed">
+        {formatDate(context.row.original.modifiedMs)}
+      </Text>
+    ),
+  }),
+  tableColumnHelper.accessor(kindLabel, {
+    id: "kind",
+    header: "类型",
+    cell: (context) => (
+      <Text size="xs" c="dimmed">
+        {context.getValue<string>()}
+      </Text>
+    ),
+  }),
+  // 标签列只做展示：chips 是导航入口，不是排序键（P7-32）。
+  tableColumnHelper.display({
+    id: "tags",
+    header: "标签",
+    enableSorting: false,
+    cell: (context) => (
+      <TagChips
+        names={tagsForEntry(context.row.original.path)}
+        onOpen={(name) => context.table.options.meta?.onTag(name)}
+        limit={2}
+      />
+    ),
+  }),
+]);
+
+/** 表格 = 一条独立的虚拟流 + 一条固定在滚动区之上的表头，所以纵向滚动不会
+ *  把列名滚掉，横向也不滚动（列宽由 grid 模板分配，表头与行共用同一个模板串）。 */
+function TableView({
+  entries,
+  selected,
+  onFocus,
+  onEnter,
+  onTag,
+  itemContextMenu,
+  itemContextKey,
+  emptyContextMenu,
+}: EntryAreaProps) {
+  const prefs = usePrefs();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [userSorting, setUserSorting] = useState<SortingState>([]);
+  // 订阅标签索引：tags:updated 重建后，屏上的 chips 立刻跟随（查找走 tagsForEntry）。
+  useTagIndex();
+  /** 模块级列定义经 meta 取得当前栏的标签导航入口；对象按 onTag 记忆。 */
+  const meta = useMemo<TableBrowserMeta>(() => ({ onTag }), [onTag]);
+
+  // 没人点表头时就是 provider 送来的顺序（D9：浏览器不重排），只补上列表模式
+  // 同款的"文件夹成组在前"，两种视图因此不会给出两套默认顺序。
+  const data = useMemo<ListEntry[]>(
+    () => [...entries.filter((ent) => ent.isDir), ...entries.filter((ent) => !ent.isDir)],
+    [entries],
+  );
+  const sorting = useMemo<SortingState>(
+    () => (userSorting.length === 0 ? [] : [{ id: "dir", desc: false }, ...userSorting]),
+    [userSorting],
+  );
+  const columnVisibility = useMemo<ColumnVisibilityState>(
+    () => ({ ...prefs.tableColumns, dir: false }),
+    [prefs.tableColumns],
+  );
+
+  const table = useTable({
+    features: TABLE_FEATURES,
+    columns: TABLE_COLUMNS,
+    data,
+    meta,
+    getRowId: (row) => row.path,
+    state: { sorting, columnVisibility },
+    /** 数值列默认"第一次点=降序"，这里统一压成升序优先，四种列的行为才一致，
+     *  和资源管理器"点一下先小到大"同一口径。 */
+    sortDescFirst: false,
+    // 主键由界面派生，不进用户排序状态，否则每点一次都会多挂一个 dir 项。
+    onSortingChange: (updater) =>
+      setUserSorting(functionalUpdate(updater, sorting).filter((item) => item.id !== "dir")),
+  });
+
+  const rows = table.getRowModel().rows;
+  const visibleColumns = table.getVisibleLeafColumns();
+  const gridTemplate = visibleColumns.map((column) => TABLE_WIDTHS[column.id] ?? "minmax(0, 1fr)").join(" ");
+
+  /** 表头画在滚动区之外，所以竖直滚动条一出现，表头就比行宽出那么几像素，后面的
+   *  固定列会跟着错位。量出滚动条宽度并从表头右侧扣掉，两侧内容框严格等宽。 */
+  const [scrollbarInset, setScrollbarInset] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 行数变化可能让滚动条出现/消失，重测一次保证表头与行同宽
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => {
+      const inset = el.offsetWidth - el.clientWidth;
+      setScrollbarInset((prev) => (prev === inset ? prev : inset));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    const spacer = el.firstElementChild;
+    if (spacer) observer.observe(spacer);
+    return () => observer.disconnect();
+  }, [rows.length]);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => TABLE_ROW_HEIGHT,
+    overscan: 10,
+  });
+
+  return (
+    <div style={tableAreaStyle}>
+      {/* biome-ignore lint/a11y/useFocusableInteractive: 表头行由 CSS Grid 自绘，表头本身不进 Tab 序列（焦点归虚拟化行） */}
+      {/* biome-ignore lint/a11y/useSemanticElements: role=row/columnheader 只为 ARIA 表格语义；真实 table 元素无法承载虚拟化网格布局 */}
+      <div
+        className="fm-table-head"
+        role="row"
+        style={{ ...tableHeadStyle, paddingRight: 10 + scrollbarInset, gridTemplateColumns: gridTemplate }}
+      >
+        {visibleColumns.map((column) => {
+          const sorted = column.getIsSorted();
+          // v9 的 getToggleSortingHandler 恒返回函数（不可排序时是空操作），
+          // 可排序与否要问 getCanSort——否则展示列的表头看起来能点、还挂着排序箭头。
+          const canSort = column.getCanSort();
+          const toggle = column.getToggleSortingHandler();
+          return (
+            // biome-ignore lint/a11y/useFocusableInteractive: 表头列不进 Tab 序列（焦点归虚拟化行），columnheader 只为 ARIA 语义
+            // biome-ignore lint/a11y/useSemanticElements: 表头列是 CSS Grid 单元，真实 <th> 无法承载虚拟化网格布局
+            <div
+              key={column.id}
+              role="columnheader"
+              aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"}
+              style={{ minWidth: 0 }}
+            >
+              <button
+                type="button"
+                className="fm-table-sort"
+                data-testid={`table-sort-${column.id}`}
+                disabled={!canSort}
+                onClick={toggle}
+                style={sortButtonStyle}
+              >
+                {String(column.columnDef.header)}
+                {sorted === "asc" ? (
+                  <ArrowUp size={12} />
+                ) : sorted === "desc" ? (
+                  <ArrowDown size={12} />
+                ) : (
+                  canSort && <ArrowUpDown size={12} />
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: 滚动区空白处属于 browser.empty 右键面；虚拟化行各自拦截右键 */}
+      <div ref={scrollRef} style={scrollStyle} data-surface={SURFACE_EMPTY} onContextMenu={emptyContextMenu}>
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+          {virtualizer.getVirtualItems().map((item) => {
+            const ent = rows[item.index].original;
+            return (
+              // biome-ignore lint/a11y/useSemanticElements: 虚拟化表格行是绝对定位的 CSS Grid 行，<button> 默认盒模型会破坏几何；键盘语义已按 button 补全
+              <div
+                key={item.key}
+                className="fm-entry fm-table-row"
+                data-selected={selected.has(ent.path)}
+                data-surface={SURFACE_LIST}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selected.has(ent.path)}
+                style={{
+                  ...tableRowStyle,
+                  transform: `translateY(${item.start}px)`,
+                  gridTemplateColumns: gridTemplate,
+                }}
+                onClick={() => onFocus(ent)}
+                onDoubleClick={() => onEnter(ent)}
+                onContextMenu={(e) => itemContextMenu(SURFACE_LIST, e, ent)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    onFocus(ent);
+                    onEnter(ent);
+                  }
+                  if (e.key === " ") {
+                    e.preventDefault();
+                    onFocus(ent);
+                  }
+                  itemContextKey(SURFACE_LIST, e, ent);
+                }}
+                title={ent.isDir ? "双击进入" : undefined}
+              >
+                {rows[item.index].getVisibleCells().map((cell) => (
+                  <div key={cell.id} className="fm-table-cell" style={tableCellStyle}>
+                    <table.FlexRender cell={cell} />
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1546,33 +2218,17 @@ function parentOf(path: string): string {
   return idx > 0 ? path.slice(0, idx) : path;
 }
 
+/** 路径最后一段（`C:/` 这类根路径返回原样），给标签成员合成显示名用。 */
+function baseNameOf(path: string): string {
+  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const tail = idx >= 0 ? path.slice(idx + 1) : path;
+  return tail || path;
+}
+
 const extensionOf = (name: string): string => {
   const idx = name.lastIndexOf(".");
   return idx > 0 ? name.slice(idx + 1).toLowerCase() : "";
 };
-
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
-/** `fs.list` already carries the mtime, so a column of dates costs no extra
- *  round-trips. Directories and providers without mtimes show nothing. */
-function formatModified(ms: number | null): string {
-  if (ms == null) return "";
-  const d = new Date(ms);
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-
 
 const paneStyle: CSSProperties = {
   display: "flex",
@@ -1622,6 +2278,70 @@ const listRowStyle: CSSProperties = {
   padding: "6px 10px",
   height: 36,
   cursor: "pointer",
+};
+
+const tableAreaStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  flex: 1,
+  minHeight: 0,
+};
+
+const tableHeadStyle: CSSProperties = {
+  display: "grid",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 10px",
+  height: 30,
+  flexShrink: 0,
+  // 行是 .fm-entry，基座给它 1px 透明边框（border-box 下吃掉 2px 内容宽）。表头
+  // 画上同样的左右边框，两侧的内容框才等宽，固定列不会整体错开 2px。
+  borderLeft: "1px solid transparent",
+  borderRight: "1px solid transparent",
+  borderBottom: "1px solid var(--mantine-color-default-border)",
+  background: "var(--mantine-color-default-hover)",
+};
+
+const tableRowStyle: CSSProperties = {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  width: "100%",
+  display: "grid",
+  alignItems: "center",
+  gap: 8,
+  padding: "0 10px",
+  height: TABLE_ROW_HEIGHT,
+  cursor: "pointer",
+};
+
+const sortButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  width: "100%",
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 600,
+  textAlign: "left",
+  cursor: "pointer",
+};
+
+const tableCellStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  minWidth: 0,
+};
+
+const sizeCellStyle: CSSProperties = {
+  width: "100%",
+  textAlign: "right",
+  fontVariantNumeric: "tabular-nums",
 };
 
 const cardsRowStyle: CSSProperties = {

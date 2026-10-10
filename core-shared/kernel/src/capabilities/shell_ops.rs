@@ -176,11 +176,13 @@ impl Shared {
     /// entry, because the operation is still running and its own thread has to
     /// report the terminal result.
     fn peek(&self, operation_id: &str) -> Option<LiveOperation> {
-        lock(&self.live).get(operation_id).map(|live| LiveOperation {
-            cancel: Arc::clone(&live.cancel),
-            total: live.total,
-            request_token: live.request_token.clone(),
-        })
+        lock(&self.live)
+            .get(operation_id)
+            .map(|live| LiveOperation {
+                cancel: Arc::clone(&live.cancel),
+                total: live.total,
+                request_token: live.request_token.clone(),
+            })
     }
 
     fn retire(&self, operation_id: &str) {
@@ -245,7 +247,12 @@ impl ShellOps {
 
     /// The ack. `queued` because nothing has happened yet, `indeterminate` because
     /// the Shell gives us no trustworthy percentage — the contract states both.
-    fn acknowledge(&self, plan: &Plan, operation_id: &str, state: FileOperationState) -> FileOperationOut {
+    fn acknowledge(
+        &self,
+        plan: &Plan,
+        operation_id: &str,
+        state: FileOperationState,
+    ) -> FileOperationOut {
         FileOperationOut {
             operation_id: operation_id.to_owned(),
             state,
@@ -282,7 +289,7 @@ impl ShellFileOperationApi for ShellOps {
         {
             let out = self.acknowledge(&plan, &operation_id, FileOperationState::Queued);
             let shared = Arc::clone(&self.shared);
-            return match platform::dispatch(shared, plan, operation_id, cancel, guard) {
+            match platform::dispatch(shared, plan, operation_id, cancel, guard) {
                 Ok(()) => Ok(out),
                 Err(err) => {
                     // No thread means no Shell call and no future event, so the ack
@@ -295,7 +302,7 @@ impl ShellFileOperationApi for ShellOps {
                         "无法启动 Shell 操作线程，请稍后重试".to_owned(),
                     ))
                 }
-            };
+            }
         }
 
         #[cfg(not(windows))]
@@ -523,8 +530,7 @@ pub fn name_is_legal(name: &str) -> bool {
 /// relative names are anchored against the process cwd without touching the
 /// filesystem (`std::path::absolute` resolves neither symlinks nor existence).
 pub fn shell_path(path: &str) -> String {
-    let absolute =
-        std::path::absolute(Path::new(path)).unwrap_or_else(|_| PathBuf::from(path));
+    let absolute = std::path::absolute(Path::new(path)).unwrap_or_else(|_| PathBuf::from(path));
     let raw: Cow<str> = absolute.to_string_lossy();
     if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{unc}");
@@ -563,8 +569,10 @@ pub fn validate(req: &FileOperationIn) -> Result<Plan, CapabilityError> {
     // Create from a blank-area menu has nothing selected: the item it makes is
     // named by `destination` + `newName`, so an empty `sources` is legal there and
     // only more than one is a caller bug (contract: Rename/Create take exactly one).
-    if matches!(req.op, FileOperationKind::Rename | FileOperationKind::Create)
-        && sources.len() > 1
+    if matches!(
+        req.op,
+        FileOperationKind::Rename | FileOperationKind::Create
+    ) && sources.len() > 1
     {
         return Err(invalid("重命名/新建一次只能处理一项".to_owned()));
     }
@@ -617,12 +625,7 @@ pub fn validate(req: &FileOperationIn) -> Result<Plan, CapabilityError> {
     };
 
     let landing_path = match (&destination, &new_name) {
-        (Some(dir), Some(name)) => Some(
-            Path::new(dir)
-                .join(name)
-                .to_string_lossy()
-                .into_owned(),
-        ),
+        (Some(dir), Some(name)) => Some(Path::new(dir).join(name).to_string_lossy().into_owned()),
         // Rename has no destination: it lands next to its source.
         (None, Some(name)) => Path::new(&sources[0])
             .parent()
@@ -734,7 +737,10 @@ pub mod shell_flags {
 /// Never set: `FOF_SILENT`/`FOF_SIMPLEPROGRESS` (the Windows dialog is the
 /// authoritative progress UI) and `FOF_NOERRORUI` (an error under it counts as
 /// *Ignore*, i.e. a failure hidden from the user).
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider sets flags"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider sets flags")
+)]
 pub fn operation_flags(
     op: FileOperationKind,
     to_recycle_bin: bool,
@@ -760,7 +766,10 @@ pub fn operation_flags(
 
 /// The `HRESULT_FROM_WIN32` shape: severity bit 31 set, facility 7
 /// (`FACILITY_WIN32`), the Win32 code in the low 16 bits.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider reads HRESULTs"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider reads HRESULTs")
+)]
 pub fn win32_code_of(hresult: u32) -> Option<u32> {
     let severity = (hresult >> 31) & 1;
     let facility = (hresult >> 16) & 0x1fff;
@@ -769,7 +778,10 @@ pub fn win32_code_of(hresult: u32) -> Option<u32> {
 
 /// Map a Win32 error code to the stable category the UI turns into Chinese text.
 /// Codes are `winerror.h` values, named in the comment so a reader can check one.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider reads HRESULTs"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider reads HRESULTs")
+)]
 pub fn reason_of_win32_code(code: u32) -> FileFailureReason {
     match code {
         // ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND
@@ -795,7 +807,10 @@ pub fn reason_of_win32_code(code: u32) -> FileFailureReason {
 /// goes to a documented category rather than a guess — including `VP_E_USERCANCEL`
 /// (`0x8027002C`, Shell facility), which is a user abort and must not be reported as
 /// `other`.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider reads HRESULTs"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider reads HRESULTs")
+)]
 pub fn reason_of_hresult(hresult: u32) -> FileFailureReason {
     if hresult == 0x8027_002C {
         return FileFailureReason::CancelledByShell;
@@ -836,9 +851,9 @@ pub fn terminal_state(
         .count();
     if aborted {
         FileOperationState::Cancelled
-    } else if items.is_empty() {
-        FileOperationState::Failed
-    } else if engine_failed {
+    } else if items.is_empty() || engine_failed {
+        // Nothing was attemptable, or the engine fell over before finishing:
+        // both are failures, not partial successes.
         FileOperationState::Failed
     } else if completed == items.len() {
         FileOperationState::Completed
@@ -858,7 +873,10 @@ pub fn terminal_state(
 /// rather than drive letters is what makes this right for substituted drives and
 /// reparse-point mounts, which is exactly where a letter comparison is silently
 /// wrong — and why `GetDriveTypeW` (remote/local/cdrom) is not used for this.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider reads volume roots"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider reads volume roots")
+)]
 pub fn volume_key(raw: &str, case_insensitive: bool) -> String {
     let stripped = match raw.strip_prefix(r"\\?\") {
         Some(rest) => rest.to_owned(),
@@ -878,7 +896,10 @@ pub fn volume_key(raw: &str, case_insensitive: bool) -> String {
 /// ([`volume_key`]). A root that could not be read is `None`, which reports "not
 /// cross-volume": the flag only adds a distinction to a Move that already
 /// succeeded, and inventing one would be worse than omitting it.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider reads volume roots"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider reads volume roots")
+)]
 pub fn is_cross_volume(source_root: Option<&str>, destination_root: Option<&str>) -> bool {
     match (source_root, destination_root) {
         (Some(source), Some(destination)) => {
@@ -911,11 +932,7 @@ pub fn build_result(
 
 /// An item the Shell never got to work on: refused before queueing, or covered by a
 /// cancel request while it was still in our queue.
-pub fn refused_item(
-    source: &str,
-    reason: FileFailureReason,
-    message: &str,
-) -> FileOperationItem {
+pub fn refused_item(source: &str, reason: FileFailureReason, message: &str) -> FileOperationItem {
     FileOperationItem {
         source: source.to_owned(),
         destination: None,
@@ -932,7 +949,10 @@ pub fn refused_item(
 }
 
 /// The indeterminate progress tick an operation publishes.
-#[cfg_attr(not(windows), allow(dead_code, reason = "only the Windows provider ticks progress"))]
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows provider ticks progress")
+)]
 pub fn progress_of(
     operation_id: &str,
     state: FileOperationState,
@@ -977,8 +997,8 @@ mod platform {
     use windows::core::{implement, HRESULT, PCWSTR, PWSTR};
     use windows::Win32::Storage::FileSystem::{GetVolumePathNameW, FILE_ATTRIBUTE_DIRECTORY};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
-        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::{
         FileOperation as CLSID_FILE_OPERATION, IFileOperation, IFileOperationProgressSink,
@@ -990,8 +1010,8 @@ mod platform {
         build_result, is_cross_volume, operation_flags, progress_of, reason_of_hresult,
         refused_item, shell_path, CASE_INSENSITIVE_PATHS, QUEUE_BUDGET,
     };
-    use crate::capabilities::shell_thumb::gate::Permit;
     use crate::capabilities::shell_ops::{LiveGuard, Plan, Shared};
+    use crate::capabilities::shell_thumb::gate::Permit;
 
     /// What one Shell batch ended with: the per-item truths, whether the user
     /// aborted, and whether the engine call itself failed.
@@ -1102,8 +1122,7 @@ mod platform {
         let outcome = run(plan, cancel, &reporter);
         // Only a Move can be done by the Shell as copy + delete, and the user is
         // owed that distinction (spec P7-17: 须报告).
-        let cross_volume_move =
-            plan.op == FileOperationKind::Move && any_cross_volume(plan);
+        let cross_volume_move = plan.op == FileOperationKind::Move && any_cross_volume(plan);
         if cancel.load(Ordering::SeqCst) && !outcome.aborted {
             // The honest reading of "best effort": we asked, the Shell carried on,
             // and the user is told what actually happened rather than what we
@@ -1204,7 +1223,12 @@ mod platform {
             // difference between a delete the user can undo and one they cannot, and
             // we will not guess which the Shell applied.
             tracing::warn!(error = %err, flags, "could not set the Shell operation flags");
-            return all_failed(plan, FileFailureReason::Other, "无法设置 Shell 操作标志", true);
+            return all_failed(
+                plan,
+                FileFailureReason::Other,
+                "无法设置 Shell 操作标志",
+                true,
+            );
         }
         // `SetOwnerWindow` is deliberately not called: the Tauri window belongs to
         // another thread, and handing the Shell a cross-thread owner for a modal
@@ -1447,16 +1471,18 @@ mod platform {
                 // item, and the frozen dev provider reports that path as `source`,
                 // so a consumer's "refresh this one directory" logic behaves the
                 // same on both sides.
-                source: source_path.or_else(|| match op {
-                    FileOperationKind::Create => landing.clone().or(Some(wanted.clone())),
-                    _ => None,
-                }).unwrap_or_else(|| {
-                    // Nothing readable from the Shell. A placeholder beats dropping
-                    // the item, because dropping it would make the batch look
-                    // smaller than what the user selected.
-                    tracing::warn!("the Shell reported a successful item with no path");
-                    "<未知条目>".to_owned()
-                }),
+                source: source_path
+                    .or_else(|| match op {
+                        FileOperationKind::Create => landing.clone().or(Some(wanted.clone())),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| {
+                        // Nothing readable from the Shell. A placeholder beats dropping
+                        // the item, because dropping it would make the batch look
+                        // smaller than what the user selected.
+                        tracing::warn!("the Shell reported a successful item with no path");
+                        "<未知条目>".to_owned()
+                    }),
                 destination: if matches!(op, FileOperationKind::Delete) {
                     None
                 } else {
@@ -1500,9 +1526,9 @@ mod platform {
     /// substituted drives and mounted folders are handled (see that helper).
     fn any_cross_volume(plan: &Plan) -> bool {
         let destination = plan.destination.as_deref().and_then(volume_root);
-        plan.sources.iter().any(|source| {
-            is_cross_volume(volume_root(source).as_deref(), destination.as_deref())
-        })
+        plan.sources
+            .iter()
+            .any(|source| is_cross_volume(volume_root(source).as_deref(), destination.as_deref()))
     }
 
     fn volume_root(path: &str) -> Option<String> {
@@ -1796,10 +1822,7 @@ mod tests {
     #[test]
     fn start_rejects_every_request_the_ui_should_never_send() {
         let cases: Vec<(String, FileOperationIn)> = vec![
-            (
-                "no sources".into(),
-                request(FileOperationKind::Delete),
-            ),
+            ("no sources".into(), request(FileOperationKind::Delete)),
             (
                 "blank source".into(),
                 FileOperationIn {
@@ -1925,14 +1948,8 @@ mod tests {
                     ..request(FileOperationKind::Move)
                 },
             ),
-            (
-                "blank destination".into(),
-                copy(&["C:\\a.txt"], "  "),
-            ),
-            (
-                "relative destination".into(),
-                copy(&["C:\\a.txt"], "dst"),
-            ),
+            ("blank destination".into(), copy(&["C:\\a.txt"], "  ")),
+            ("relative destination".into(), copy(&["C:\\a.txt"], "dst")),
             (
                 "create without a destination".into(),
                 FileOperationIn {
@@ -1985,9 +2002,7 @@ mod tests {
         ];
 
         for (label, req) in cases {
-            let err = validate(&req)
-                .expect_err(&label)
-                .to_string();
+            let err = validate(&req).expect_err(&label).to_string();
             assert!(
                 err.starts_with("invalid argument:"),
                 "{label}: the frontend classifies on this prefix, got `{err}`"
@@ -2006,7 +2021,10 @@ mod tests {
         .expect("a legal copy never errors");
         assert_eq!(plan.op, FileOperationKind::Copy);
         assert_eq!(plan.total(), 2);
-        assert_eq!(plan.sources[1], "C:\\Windows\\explorer.exe", "verbatim stripped");
+        assert_eq!(
+            plan.sources[1], "C:\\Windows\\explorer.exe",
+            "verbatim stripped"
+        );
         assert_eq!(plan.destination.as_deref(), Some(r"C:\tmp"));
         // Copy ignores a stray name: it must never become a silent rename.
         assert_eq!(plan.new_name, None);
@@ -2131,8 +2149,7 @@ mod tests {
             assert!(name_is_legal(name), "{name} must be legal");
         }
         for name in [
-            "", ".", "..", "a<b", "a>b", "a:b", "a\"b", "a|b", "a?b", "a*b", "a.", "a ",
-            "a\u{1}b",
+            "", ".", "..", "a<b", "a>b", "a:b", "a\"b", "a|b", "a?b", "a*b", "a.", "a ", "a\u{1}b",
         ] {
             assert!(!name_is_legal(name), "{name} must be illegal");
         }
@@ -2140,8 +2157,14 @@ mod tests {
 
     #[test]
     fn verbatim_paths_are_made_shell_parseable() {
-        assert_eq!(shell_path(r"\\?\C:\Windows\explorer.exe"), r"C:\Windows\explorer.exe");
-        assert_eq!(shell_path(r"\\?\UNC\server\share\a.png"), r"\\server\share\a.png");
+        assert_eq!(
+            shell_path(r"\\?\C:\Windows\explorer.exe"),
+            r"C:\Windows\explorer.exe"
+        );
+        assert_eq!(
+            shell_path(r"\\?\UNC\server\share\a.png"),
+            r"\\server\share\a.png"
+        );
         let absolute = shell_path(r"C:\Windows\explorer.exe");
         assert!(
             absolute.eq_ignore_ascii_case(r"C:\Windows\explorer.exe"),
@@ -2179,9 +2202,21 @@ mod tests {
                 let flags = operation_flags(op, true, conflict);
                 assert_eq!(flags & recycle, 0, "only a delete may ask for the bin");
                 // Never mute the Shell's own UI (spec: 系统对话框是权威界面).
-                assert_eq!(flags & silent, 0, "{op:?}/{conflict:?} hid the progress dialog");
-                assert_eq!(flags & simple, 0, "{op:?}/{conflict:?} replaced the progress dialog");
-                assert_eq!(flags & no_errors, 0, "{op:?}/{conflict:?} hid errors as Ignore");
+                assert_eq!(
+                    flags & silent,
+                    0,
+                    "{op:?}/{conflict:?} hid the progress dialog"
+                );
+                assert_eq!(
+                    flags & simple,
+                    0,
+                    "{op:?}/{conflict:?} replaced the progress dialog"
+                );
+                assert_eq!(
+                    flags & no_errors,
+                    0,
+                    "{op:?}/{conflict:?} hid errors as Ignore"
+                );
                 assert_ne!(flags & undo, 0, "{op:?}/{conflict:?} dropped undo");
             }
         }
@@ -2212,7 +2247,11 @@ mod tests {
         assert_ne!(permanent & nuke, 0, "a permanent delete must warn");
         // The nuke warning is documented as surviving Yes-to-All, so the combination
         // the contract allows (overwrite + permanent delete) still warns.
-        let both = operation_flags(FileOperationKind::Delete, false, FileConflictPolicy::Overwrite);
+        let both = operation_flags(
+            FileOperationKind::Delete,
+            false,
+            FileConflictPolicy::Overwrite,
+        );
         assert_ne!(both & nuke, 0);
         assert_ne!(both & yes_all, 0);
     }
@@ -2222,8 +2261,16 @@ mod tests {
         // `HRESULT_FROM_WIN32` shape.
         assert_eq!(win32_code_of(0x8007_0002), Some(2));
         assert_eq!(win32_code_of(0x8007_04A7), Some(0x4A7)); // 1223
-        assert_eq!(win32_code_of(0x8027_002C), None, "Shell facility is not Win32");
-        assert_eq!(win32_code_of(0x0000_0000), None, "a success code is not an error");
+        assert_eq!(
+            win32_code_of(0x8027_002C),
+            None,
+            "Shell facility is not Win32"
+        );
+        assert_eq!(
+            win32_code_of(0x0000_0000),
+            None,
+            "a success code is not an error"
+        );
 
         for (code, expected) in [
             (2u32, FileFailureReason::NotFound),
@@ -2258,7 +2305,10 @@ mod tests {
     /// moved and telling them the truth.
     #[test]
     fn terminal_state_reads_the_item_list_the_shell_left() {
-        let all_done = vec![item("a", FileItemOutcome::Completed), item("b", FileItemOutcome::Renamed)];
+        let all_done = vec![
+            item("a", FileItemOutcome::Completed),
+            item("b", FileItemOutcome::Renamed),
+        ];
         assert_eq!(
             terminal_state(&all_done, false, false),
             FileOperationState::Completed
@@ -2287,7 +2337,10 @@ mod tests {
             FileOperationState::PartialFailure
         );
 
-        let none_done = vec![item("a", FileItemOutcome::Failed), item("b", FileItemOutcome::Cancelled)];
+        let none_done = vec![
+            item("a", FileItemOutcome::Failed),
+            item("b", FileItemOutcome::Cancelled),
+        ];
         assert_eq!(
             terminal_state(&none_done, false, false),
             FileOperationState::Failed
@@ -2357,7 +2410,10 @@ mod tests {
                 request_token: Some("tok".to_owned()),
             },
         );
-        assert!(ops.cancel("op-1").unwrap(), "a live operation takes the request");
+        assert!(
+            ops.cancel("op-1").unwrap(),
+            "a live operation takes the request"
+        );
         assert!(flag.load(Ordering::SeqCst), "and sets its flag");
 
         // A second cancel is still accepted while it lives (idempotent: the flag is
@@ -2365,11 +2421,17 @@ mod tests {
         assert!(ops.cancel("op-1").unwrap());
         // An id that never entered the table stays `false` even now that the table
         // has entries: presence is the whole answer.
-        assert!(!ops.cancel("op-2").unwrap(), "never-live ids are not cancellable");
+        assert!(
+            !ops.cancel("op-2").unwrap(),
+            "never-live ids are not cancellable"
+        );
 
         // The operation reaching a terminal state is what retires it.
         ops.shared.retire("op-1");
-        assert!(!ops.cancel("op-1").unwrap(), "a finished id is not cancellable");
+        assert!(
+            !ops.cancel("op-1").unwrap(),
+            "a finished id is not cancellable"
+        );
     }
 
     #[test]
@@ -2551,17 +2613,37 @@ mod tests {
         #[test]
         fn the_flag_literals_match_the_sdk() {
             use ::windows::Win32::UI::Shell::{
-                FILEOPERATION_FLAGS, FOF_ALLOWUNDO, FOF_NOCONFIRMMKDIR, FOF_NOCONFIRMATION,
-                FOF_RENAMEONCOLLISION, FOF_WANTNUKEWARNING, FOFX_PRESERVEFILEEXTENSIONS,
-                FOFX_RECYCLEONDELETE,
+                FILEOPERATION_FLAGS, FOFX_PRESERVEFILEEXTENSIONS, FOFX_RECYCLEONDELETE,
+                FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOCONFIRMMKDIR, FOF_RENAMEONCOLLISION,
+                FOF_WANTNUKEWARNING,
             };
             for (name, ours, sdk) in [
-                ("FOF_RENAMEONCOLLISION", shell_flags::FOF_RENAMEONCOLLISION, FOF_RENAMEONCOLLISION),
-                ("FOF_NOCONFIRMATION", shell_flags::FOF_NOCONFIRMATION, FOF_NOCONFIRMATION),
+                (
+                    "FOF_RENAMEONCOLLISION",
+                    shell_flags::FOF_RENAMEONCOLLISION,
+                    FOF_RENAMEONCOLLISION,
+                ),
+                (
+                    "FOF_NOCONFIRMATION",
+                    shell_flags::FOF_NOCONFIRMATION,
+                    FOF_NOCONFIRMATION,
+                ),
                 ("FOF_ALLOWUNDO", shell_flags::FOF_ALLOWUNDO, FOF_ALLOWUNDO),
-                ("FOF_NOCONFIRMMKDIR", shell_flags::FOF_NOCONFIRMMKDIR, FOF_NOCONFIRMMKDIR),
-                ("FOF_WANTNUKEWARNING", shell_flags::FOF_WANTNUKEWARNING, FOF_WANTNUKEWARNING),
-                ("FOFX_RECYCLEONDELETE", shell_flags::FOFX_RECYCLEONDELETE, FOFX_RECYCLEONDELETE),
+                (
+                    "FOF_NOCONFIRMMKDIR",
+                    shell_flags::FOF_NOCONFIRMMKDIR,
+                    FOF_NOCONFIRMMKDIR,
+                ),
+                (
+                    "FOF_WANTNUKEWARNING",
+                    shell_flags::FOF_WANTNUKEWARNING,
+                    FOF_WANTNUKEWARNING,
+                ),
+                (
+                    "FOFX_RECYCLEONDELETE",
+                    shell_flags::FOFX_RECYCLEONDELETE,
+                    FOFX_RECYCLEONDELETE,
+                ),
                 (
                     "FOFX_PRESERVEFILEEXTENSIONS",
                     shell_flags::FOFX_PRESERVEFILEEXTENSIONS,
@@ -2582,8 +2664,8 @@ mod tests {
         fn the_hresult_literals_match_the_sdk() {
             use ::windows::core::HRESULT;
             use ::windows::Win32::Foundation::{
-                ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_CANCELLED,
-                ERROR_DISK_FULL, ERROR_FILE_NOT_FOUND, ERROR_SHARING_VIOLATION,
+                ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_CANCELLED, ERROR_DISK_FULL,
+                ERROR_FILE_NOT_FOUND, ERROR_SHARING_VIOLATION,
             };
             let cases = [
                 (ERROR_FILE_NOT_FOUND, FileFailureReason::NotFound),

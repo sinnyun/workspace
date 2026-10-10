@@ -55,8 +55,7 @@ fn file_history_entry() -> RegistryEntry {
     let spawn: SpawnFn = Arc::new(|ctx: &Context, config: serde_json::Value| {
         let ctx = ctx.clone();
         Box::pin(async move {
-            let cfg: FileHistoryConfig =
-                serde_json::from_value(config).unwrap_or_default();
+            let cfg: FileHistoryConfig = serde_json::from_value(config).unwrap_or_default();
             let plugin = FileHistoryPlugin;
             let input = plugin
                 .prepare(cfg)

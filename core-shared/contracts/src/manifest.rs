@@ -80,6 +80,22 @@ pub struct Permissions {
     /// Optional; absent means the plugin gets no `host.contextMenu` face at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_menu: Option<ContextMenuPermissions>,
+    /// Command grants (docs/04 P7-30). Optional; absent means the plugin gets
+    /// no `host.commands` face at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commands: Option<CommandPermissions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandPermissions {
+    /// May publish commands (their `run` executes as this plugin) and declare
+    /// shortcuts the base dispatches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub register: Option<bool>,
+    /// May claim the command palette itself. The base serves exactly one provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provide: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -137,7 +153,10 @@ impl PluginManifest {
             }
             for slot in fe.slots.iter().flatten() {
                 if slot.id.trim().is_empty() || slot.export.trim().is_empty() {
-                    return Err(format!("slot in plugin `{}` has empty id/export", self.name));
+                    return Err(format!(
+                        "slot in plugin `{}` has empty id/export",
+                        self.name
+                    ));
                 }
                 if slot.label.as_deref().is_some_and(|l| l.trim().is_empty()) {
                     return Err(format!("slot in plugin `{}` has empty label", self.name));
@@ -145,7 +164,10 @@ impl PluginManifest {
             }
             for prefix in fe.provides.iter().flatten() {
                 if prefix.trim().is_empty() {
-                    return Err(format!("provides in plugin `{}` has empty prefix", self.name));
+                    return Err(format!(
+                        "provides in plugin `{}` has empty prefix",
+                        self.name
+                    ));
                 }
             }
         }
@@ -219,7 +241,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            labeled.frontend.as_ref().unwrap().slots.as_ref().unwrap()[0].label.as_deref(),
+            labeled.frontend.as_ref().unwrap().slots.as_ref().unwrap()[0]
+                .label
+                .as_deref(),
             Some("版本")
         );
         assert_eq!(labeled.validate(), Ok(()));
@@ -238,7 +262,10 @@ mod tests {
         .unwrap();
         assert_eq!(m.validate(), Ok(()));
         let json = serde_json::to_value(&m).unwrap();
-        assert_eq!(json["permissions"]["contextMenu"]["open"][0], "browser.list.item");
+        assert_eq!(
+            json["permissions"]["contextMenu"]["open"][0],
+            "browser.list.item"
+        );
         assert_eq!(
             json["permissions"]["contextMenu"]["provide"],
             serde_json::Value::Bool(true)
@@ -265,6 +292,42 @@ mod tests {
         )
         .unwrap();
         assert!(bad.validate().unwrap_err().contains("contextMenu.open"));
+    }
+
+    /// `permissions.commands` is an addition on the same pattern: absent means
+    /// no command face at all, and the flags must survive the bridge verbatim.
+    #[test]
+    fn command_grants_round_trip() {
+        let m: PluginManifest = serde_json::from_str(
+            r#"{"schemaVersion":1,"name":"plugin-command-palette","version":"1.0.0",
+                "frontend":{"entry":"e.js","slots":[{"id":"command-palette","export":"C"}]},
+                "permissions":{"capabilities":[],"events":{"subscribe":[],"emit":[]},
+                               "commands":{"register":true,"provide":true}}}"#,
+        )
+        .unwrap();
+        assert_eq!(m.validate(), Ok(()));
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(
+            json["permissions"]["commands"]["register"],
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(
+            json["permissions"]["commands"]["provide"],
+            serde_json::Value::Bool(true)
+        );
+
+        let plain: PluginManifest = serde_json::from_str(
+            r#"{"schemaVersion":1,"name":"p","version":"1.0.0",
+                "frontend":{"entry":"e.js"},
+                "permissions":{"capabilities":[],"events":{"subscribe":[],"emit":[]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(plain.permissions.commands, None);
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap()["permissions"].get("commands"),
+            None,
+            "an absent grant must not appear in the serialized manifest"
+        );
     }
 
     #[test]

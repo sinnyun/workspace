@@ -1,0 +1,13 @@
+# 提交钩子(roadmap P6-37):把快的前端/格式门禁钉在提交前。
+# 重门禁(clippy、cargo test、全量构建、供应链审计)不在提交路径上——它们在 CI(ci.yml)。
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      run: pnpm exec biome check --staged --no-errors-on-unmatched
+    - name: typecheck
+      glob: "*.{ts,tsx}"
+      run: pnpm -r typecheck
+    - name: rustfmt
+      glob: "*.rs"
+      run: cargo fmt --check

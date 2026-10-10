@@ -9,7 +9,7 @@
 
 use std::convert::Infallible;
 
-use cordis_core::event::{ListenerRegistrationError, observer_sync};
+use cordis_core::event::{observer_sync, ListenerRegistrationError};
 use cordis_core::{BoxError, Context, Event, FiberState, Plugin, PreparedPlugin, Routing};
 
 struct Ping;

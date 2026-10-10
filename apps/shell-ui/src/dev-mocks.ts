@@ -11,19 +11,9 @@
  * browser uses, so the center grid and its virtualization are what actually
  * render it (docs/02 §4).
  */
-import { registerMock } from "./invoke";
-import { bus } from "./eventbus";
-import {
-  decodeResourceChunk,
-  Events,
-  MAX_RESOURCE_CHUNK_BYTES,
-  MAX_TEXT_READ_BYTES,
-  RESOURCE_TTL_MS,
-  SCAN_MAX_ENTRIES,
-  SCAN_PROGRESS_INTERVAL_MS,
-  SCAN_TREE_DEPTH,
-} from "@my-file-manager/plugin-sdk";
+
 import type {
+  DiskListOut,
   FileFailureReason,
   FileItemOutcome,
   FileKind,
@@ -38,7 +28,6 @@ import type {
   PickIn,
   PickOut,
   PluginManifest,
-  DiskListOut,
   ReadResourceOut,
   ReadTextOut,
   ResourceOut,
@@ -48,29 +37,54 @@ import type {
   ScanProgressPayload,
   ScanSkipReason,
   ScanState,
+  SearchHit,
+  SearchIndexAck,
+  SearchIndexDonePayload,
+  SearchIndexProgressPayload,
+  SearchIndexState,
+  SearchQueryOut,
+  SearchScope,
+  SearchStatusOut,
   ShellThumbnailOut,
   StatOut,
   ThumbnailState,
 } from "@my-file-manager/plugin-sdk";
-
-import fileHistoryManifest from "../../../plugins/plugin-file-history/manifest.json";
+import {
+  decodeResourceChunk,
+  Events,
+  MAX_RESOURCE_CHUNK_BYTES,
+  MAX_TEXT_READ_BYTES,
+  RESOURCE_TTL_MS,
+  SCAN_MAX_ENTRIES,
+  SCAN_PROGRESS_INTERVAL_MS,
+  SCAN_TREE_DEPTH,
+  SEARCH_INDEX_MAX_DEPTH,
+  SEARCH_MAX_PAGE,
+  SEARCH_MAX_TEXT_CHARS,
+  SEARCH_PROGRESS_INTERVAL_MS,
+} from "@my-file-manager/plugin-sdk";
+import commandPaletteManifest from "../../../plugins/plugin-command-palette/manifest.json";
+import contextMenuManifest from "../../../plugins/plugin-context-menu/manifest.json";
+import slotHarnessManifest from "../../../plugins/plugin-dev-slot-harness/manifest.json";
 import devtoolsLogManifest from "../../../plugins/plugin-devtools-log/manifest.json";
+import fileBrowserManifest from "../../../plugins/plugin-file-browser/manifest.json";
 import fileDetailsManifest from "../../../plugins/plugin-file-details/manifest.json";
+import fileHistoryManifest from "../../../plugins/plugin-file-history/manifest.json";
+import fileOpsManifest from "../../../plugins/plugin-file-ops/manifest.json";
+import inspectorManifest from "../../../plugins/plugin-inspector/manifest.json";
 import layoutPanesManifest from "../../../plugins/plugin-layout-panes/manifest.json";
 import layoutViewsManifest from "../../../plugins/plugin-layout-views/manifest.json";
-import inspectorManifest from "../../../plugins/plugin-inspector/manifest.json";
-import contextMenuManifest from "../../../plugins/plugin-context-menu/manifest.json";
-import fileBrowserManifest from "../../../plugins/plugin-file-browser/manifest.json";
-import viewFileTreeManifest from "../../../plugins/plugin-view-file-tree/manifest.json";
-import viewFavoritesManifest from "../../../plugins/plugin-view-favorites/manifest.json";
-import viewTagsManifest from "../../../plugins/plugin-view-tags/manifest.json";
-import fileOpsManifest from "../../../plugins/plugin-file-ops/manifest.json";
-import storageAnalysisManifest from "../../../plugins/plugin-storage-analysis/manifest.json";
-import settingsManifest from "../../../plugins/plugin-settings/manifest.json";
-import pluginPreviewManifest from "../../../plugins/plugin-preview/manifest.json";
 import mockDataManifest from "../../../plugins/plugin-mock-data/manifest.json";
-import slotHarnessManifest from "../../../plugins/plugin-dev-slot-harness/manifest.json";
+import pluginPreviewManifest from "../../../plugins/plugin-preview/manifest.json";
+import searchManifest from "../../../plugins/plugin-search/manifest.json";
+import settingsManifest from "../../../plugins/plugin-settings/manifest.json";
+import storageAnalysisManifest from "../../../plugins/plugin-storage-analysis/manifest.json";
+import viewFavoritesManifest from "../../../plugins/plugin-view-favorites/manifest.json";
+import viewFileTreeManifest from "../../../plugins/plugin-view-file-tree/manifest.json";
+import viewTagsManifest from "../../../plugins/plugin-view-tags/manifest.json";
 import { FIXTURE_B64, FIXTURE_SIZES } from "./dev-fixtures";
+import { bus } from "./eventbus";
+import { registerMock } from "./invoke";
 
 const MIB = 1024 * 1024;
 const KIB = 1024;
@@ -97,9 +111,7 @@ const FIXTURE_LISTING: ListEntry[] = [
   ...Object.keys(FIXTURE_B64).map((path, i) =>
     entry(nameOf(path), path, false, FIXTURE_BYTES.get(path)?.length ?? 0, daysAgo(i + 1)),
   ),
-  ...Object.entries(FIXTURE_SIZES).map(([path, size], i) =>
-    entry(nameOf(path), path, false, size, daysAgo(10 + i)),
-  ),
+  ...Object.entries(FIXTURE_SIZES).map(([path, size], i) => entry(nameOf(path), path, false, size, daysAgo(10 + i))),
 ].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
 /** One synthetic dataset volume, listed under `<ROOT>` as a directory. */
@@ -161,13 +173,7 @@ const STAT_ERRORS: Record<string, string> = {
   "/demo/无权限文件.txt": "permission denied: /demo/无权限文件.txt",
 };
 
-function entry(
-  name: string,
-  path: string,
-  isDir: boolean,
-  size: number | null,
-  modifiedMs: number | null,
-): ListEntry {
+function entry(name: string, path: string, isDir: boolean, size: number | null, modifiedMs: number | null): ListEntry {
   return { name, path, isDir, size, modifiedMs };
 }
 
@@ -196,62 +202,503 @@ interface FormatSpec {
 
 const FORMATS: FormatSpec[] = [
   // 图片 — the formats a grid thumbnailer must handle, plus ones it cannot.
-  { stems: ["IMG", "DSC", "照片", "截图"], ext: "jpg", group: "图片", min: 300 * KIB, max: 6 * MIB, weight: 60, content: "binary", thumbnail: true },
-  { stems: ["screenshot", "图表", "banner", "logo", "PNG导出"], ext: "png", group: "图片", min: 150 * KIB, max: 9 * MIB, weight: 45, content: "binary", thumbnail: true },
-  { stems: ["webp", "头图"], ext: "webp", group: "图片", min: 20 * KIB, max: 900 * KIB, weight: 25, content: "binary", thumbnail: true },
-  { stems: ["anim", "动图"], ext: "gif", group: "图片", min: 40 * KIB, max: 4 * MIB, weight: 15, content: "binary", thumbnail: true },
-  { stems: ["bitmap"], ext: "bmp", group: "图片", min: 1 * MIB, max: 24 * MIB, weight: 8, content: "binary", thumbnail: true },
-  { stems: ["扫描底片", "tiff"], ext: "tiff", group: "图片", min: 4 * MIB, max: 60 * MIB, weight: 8, content: "binary", thumbnail: true },
-  { stems: ["icon", "插画"], ext: "svg", group: "图片", min: 1 * KIB, max: 180 * KIB, weight: 12, content: "text", thumbnail: false },
-  { stems: ["HEIC", "iPhone照片"], ext: "heic", group: "图片", min: 800 * KIB, max: 6 * MIB, weight: 10, content: "binary", thumbnail: false },
-  { stems: ["RAW", "CR2底片"], ext: "cr2", group: "图片", min: 18 * MIB, max: 45 * MIB, weight: 6, content: "binary", thumbnail: false },
+  {
+    stems: ["IMG", "DSC", "照片", "截图"],
+    ext: "jpg",
+    group: "图片",
+    min: 300 * KIB,
+    max: 6 * MIB,
+    weight: 60,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["screenshot", "图表", "banner", "logo", "PNG导出"],
+    ext: "png",
+    group: "图片",
+    min: 150 * KIB,
+    max: 9 * MIB,
+    weight: 45,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["webp", "头图"],
+    ext: "webp",
+    group: "图片",
+    min: 20 * KIB,
+    max: 900 * KIB,
+    weight: 25,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["anim", "动图"],
+    ext: "gif",
+    group: "图片",
+    min: 40 * KIB,
+    max: 4 * MIB,
+    weight: 15,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["bitmap"],
+    ext: "bmp",
+    group: "图片",
+    min: 1 * MIB,
+    max: 24 * MIB,
+    weight: 8,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["扫描底片", "tiff"],
+    ext: "tiff",
+    group: "图片",
+    min: 4 * MIB,
+    max: 60 * MIB,
+    weight: 8,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["icon", "插画"],
+    ext: "svg",
+    group: "图片",
+    min: 1 * KIB,
+    max: 180 * KIB,
+    weight: 12,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["HEIC", "iPhone照片"],
+    ext: "heic",
+    group: "图片",
+    min: 800 * KIB,
+    max: 6 * MIB,
+    weight: 10,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["RAW", "CR2底片"],
+    ext: "cr2",
+    group: "图片",
+    min: 18 * MIB,
+    max: 45 * MIB,
+    weight: 6,
+    content: "binary",
+    thumbnail: false,
+  },
   // 视频
-  { stems: ["VID", "录屏", "camera"], ext: "mp4", group: "视频", min: 4 * MIB, max: 1200 * MIB, weight: 40, content: "binary", thumbnail: true },
-  { stems: ["电影", "mkv"], ext: "mkv", group: "视频", min: 20 * MIB, max: 3 * GIB, weight: 20, content: "binary", thumbnail: false },
-  { stems: ["mov", "手机视频"], ext: "mov", group: "视频", min: 8 * MIB, max: 800 * MIB, weight: 15, content: "binary", thumbnail: true },
-  { stems: ["webm", "直播回放"], ext: "webm", group: "视频", min: 2 * MIB, max: 300 * MIB, weight: 8, content: "binary", thumbnail: false },
+  {
+    stems: ["VID", "录屏", "camera"],
+    ext: "mp4",
+    group: "视频",
+    min: 4 * MIB,
+    max: 1200 * MIB,
+    weight: 40,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["电影", "mkv"],
+    ext: "mkv",
+    group: "视频",
+    min: 20 * MIB,
+    max: 3 * GIB,
+    weight: 20,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["mov", "手机视频"],
+    ext: "mov",
+    group: "视频",
+    min: 8 * MIB,
+    max: 800 * MIB,
+    weight: 15,
+    content: "binary",
+    thumbnail: true,
+  },
+  {
+    stems: ["webm", "直播回放"],
+    ext: "webm",
+    group: "视频",
+    min: 2 * MIB,
+    max: 300 * MIB,
+    weight: 8,
+    content: "binary",
+    thumbnail: false,
+  },
   // 音频
-  { stems: ["track", "播客"], ext: "mp3", group: "音频", min: 2 * MIB, max: 12 * MIB, weight: 25, content: "binary", thumbnail: false },
-  { stems: ["flac", "专辑"], ext: "flac", group: "音频", min: 15 * MIB, max: 60 * MIB, weight: 12, content: "binary", thumbnail: false },
-  { stems: ["wav", "录音"], ext: "wav", group: "音频", min: 4 * MIB, max: 90 * MIB, weight: 8, content: "binary", thumbnail: false },
-  { stems: ["m4a", "语音备忘"], ext: "m4a", group: "音频", min: 3 * MIB, max: 20 * MIB, weight: 8, content: "binary", thumbnail: false },
+  {
+    stems: ["track", "播客"],
+    ext: "mp3",
+    group: "音频",
+    min: 2 * MIB,
+    max: 12 * MIB,
+    weight: 25,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["flac", "专辑"],
+    ext: "flac",
+    group: "音频",
+    min: 15 * MIB,
+    max: 60 * MIB,
+    weight: 12,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["wav", "录音"],
+    ext: "wav",
+    group: "音频",
+    min: 4 * MIB,
+    max: 90 * MIB,
+    weight: 8,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["m4a", "语音备忘"],
+    ext: "m4a",
+    group: "音频",
+    min: 3 * MIB,
+    max: 20 * MIB,
+    weight: 8,
+    content: "binary",
+    thumbnail: false,
+  },
   // 文档
-  { stems: ["报告", "合同", "invoice", "论文", "手册"], ext: "pdf", group: "文档", min: 20 * KIB, max: 25 * MIB, weight: 70, content: "binary", thumbnail: false },
-  { stems: ["方案", "模板"], ext: "docx", group: "文档", min: 15 * KIB, max: 8 * MIB, weight: 45, content: "binary", thumbnail: false },
-  { stems: ["数据表", "budget", "对账"], ext: "xlsx", group: "文档", min: 10 * KIB, max: 40 * MIB, weight: 45, content: "binary", thumbnail: false },
-  { stems: ["宣讲", "slides"], ext: "pptx", group: "文档", min: 1 * MIB, max: 120 * MIB, weight: 25, content: "binary", thumbnail: false },
-  { stems: ["notes", "todo", "日志摘要"], ext: "txt", group: "文档", min: 300, max: 2 * MIB, weight: 40, content: "text", thumbnail: false },
-  { stems: ["README", "笔记", "changelog", "设计说明"], ext: "md", group: "文档", min: 400, max: 120 * KIB, weight: 55, content: "text", thumbnail: false },
-  { stems: ["export", "订单", "sales"], ext: "csv", group: "文档", min: 2 * KIB, max: 300 * MIB, weight: 30, content: "text", thumbnail: false },
+  {
+    stems: ["报告", "合同", "invoice", "论文", "手册"],
+    ext: "pdf",
+    group: "文档",
+    min: 20 * KIB,
+    max: 25 * MIB,
+    weight: 70,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["方案", "模板"],
+    ext: "docx",
+    group: "文档",
+    min: 15 * KIB,
+    max: 8 * MIB,
+    weight: 45,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["数据表", "budget", "对账"],
+    ext: "xlsx",
+    group: "文档",
+    min: 10 * KIB,
+    max: 40 * MIB,
+    weight: 45,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["宣讲", "slides"],
+    ext: "pptx",
+    group: "文档",
+    min: 1 * MIB,
+    max: 120 * MIB,
+    weight: 25,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["notes", "todo", "日志摘要"],
+    ext: "txt",
+    group: "文档",
+    min: 300,
+    max: 2 * MIB,
+    weight: 40,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["README", "笔记", "changelog", "设计说明"],
+    ext: "md",
+    group: "文档",
+    min: 400,
+    max: 120 * KIB,
+    weight: 55,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["export", "订单", "sales"],
+    ext: "csv",
+    group: "文档",
+    min: 2 * KIB,
+    max: 300 * MIB,
+    weight: 30,
+    content: "text",
+    thumbnail: false,
+  },
   // 代码 / 配置
-  { stems: ["main", "lib", "capability", "kernel", "thumb"], ext: "rs", group: "代码", min: 200, max: 140 * KIB, weight: 25, content: "text", thumbnail: false },
-  { stems: ["index", "app", "store"], ext: "ts", group: "代码", min: 200, max: 120 * KIB, weight: 25, content: "text", thumbnail: false },
-  { stems: ["Page", "Panel", "Widget"], ext: "tsx", group: "代码", min: 200, max: 90 * KIB, weight: 20, content: "text", thumbnail: false },
-  { stems: ["run", "build"], ext: "js", group: "代码", min: 200, max: 200 * KIB, weight: 20, content: "text", thumbnail: false },
-  { stems: ["train", "pipeline", "utils"], ext: "py", group: "代码", min: 200, max: 120 * KIB, weight: 25, content: "text", thumbnail: false },
-  { stems: ["server", "handler"], ext: "go", group: "代码", min: 200, max: 80 * KIB, weight: 10, content: "text", thumbnail: false },
-  { stems: ["package", "config", "dataset", "manifest"], ext: "json", group: "代码", min: 300, max: 30 * MIB, weight: 40, content: "text", thumbnail: false },
-  { stems: ["Cargo", "app"], ext: "toml", group: "代码", min: 200, max: 20 * KIB, weight: 15, content: "text", thumbnail: false },
-  { stems: ["ci", "compose"], ext: "yaml", group: "代码", min: 200, max: 30 * KIB, weight: 15, content: "text", thumbnail: false },
-  { stems: ["styles", "theme"], ext: "css", group: "代码", min: 200, max: 60 * KIB, weight: 15, content: "text", thumbnail: false },
-  { stems: ["index", "page"], ext: "html", group: "代码", min: 200, max: 90 * KIB, weight: 15, content: "text", thumbnail: false },
+  {
+    stems: ["main", "lib", "capability", "kernel", "thumb"],
+    ext: "rs",
+    group: "代码",
+    min: 200,
+    max: 140 * KIB,
+    weight: 25,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["index", "app", "store"],
+    ext: "ts",
+    group: "代码",
+    min: 200,
+    max: 120 * KIB,
+    weight: 25,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["Page", "Panel", "Widget"],
+    ext: "tsx",
+    group: "代码",
+    min: 200,
+    max: 90 * KIB,
+    weight: 20,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["run", "build"],
+    ext: "js",
+    group: "代码",
+    min: 200,
+    max: 200 * KIB,
+    weight: 20,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["train", "pipeline", "utils"],
+    ext: "py",
+    group: "代码",
+    min: 200,
+    max: 120 * KIB,
+    weight: 25,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["server", "handler"],
+    ext: "go",
+    group: "代码",
+    min: 200,
+    max: 80 * KIB,
+    weight: 10,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["package", "config", "dataset", "manifest"],
+    ext: "json",
+    group: "代码",
+    min: 300,
+    max: 30 * MIB,
+    weight: 40,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["Cargo", "app"],
+    ext: "toml",
+    group: "代码",
+    min: 200,
+    max: 20 * KIB,
+    weight: 15,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["ci", "compose"],
+    ext: "yaml",
+    group: "代码",
+    min: 200,
+    max: 30 * KIB,
+    weight: 15,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["styles", "theme"],
+    ext: "css",
+    group: "代码",
+    min: 200,
+    max: 60 * KIB,
+    weight: 15,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["index", "page"],
+    ext: "html",
+    group: "代码",
+    min: 200,
+    max: 90 * KIB,
+    weight: 15,
+    content: "text",
+    thumbnail: false,
+  },
   // 压缩包
-  { stems: ["backup", "归档", "release"], ext: "zip", group: "压缩包", min: 100 * KIB, max: 700 * MIB, weight: 45, content: "binary", thumbnail: false },
-  { stems: ["archive", "全站备份"], ext: "7z", group: "压缩包", min: 50 * KIB, max: 400 * MIB, weight: 20, content: "binary", thumbnail: false },
-  { stems: ["node-modules", "vendor"], ext: "gz", group: "压缩包", min: 10 * KIB, max: 1500 * MIB, weight: 15, content: "binary", thumbnail: false },
-  { stems: ["rar", "素材包"], ext: "rar", group: "压缩包", min: 100 * KIB, max: 600 * MIB, weight: 10, content: "binary", thumbnail: false },
-  { stems: ["ubuntu", "Win11", "安装盘"], ext: "iso", group: "压缩包", min: 600 * MIB, max: 8 * GIB, weight: 12, content: "binary", thumbnail: false },
+  {
+    stems: ["backup", "归档", "release"],
+    ext: "zip",
+    group: "压缩包",
+    min: 100 * KIB,
+    max: 700 * MIB,
+    weight: 45,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["archive", "全站备份"],
+    ext: "7z",
+    group: "压缩包",
+    min: 50 * KIB,
+    max: 400 * MIB,
+    weight: 20,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["node-modules", "vendor"],
+    ext: "gz",
+    group: "压缩包",
+    min: 10 * KIB,
+    max: 1500 * MIB,
+    weight: 15,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["rar", "素材包"],
+    ext: "rar",
+    group: "压缩包",
+    min: 100 * KIB,
+    max: 600 * MIB,
+    weight: 10,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["ubuntu", "Win11", "安装盘"],
+    ext: "iso",
+    group: "压缩包",
+    min: 600 * MIB,
+    max: 8 * GIB,
+    weight: 12,
+    content: "binary",
+    thumbnail: false,
+  },
   // 数据
-  { stems: ["app", "access", "error"], ext: "log", group: "数据", min: 5 * KIB, max: 500 * MIB, weight: 35, content: "text", thumbnail: false },
-  { stems: ["production", "analytics", "cordis"], ext: "db", group: "数据", min: 1 * MIB, max: 2 * GIB, weight: 25, content: "binary", thumbnail: false },
-  { stems: ["cache", "sessions"], ext: "sqlite", group: "数据", min: 100 * KIB, max: 800 * MIB, weight: 15, content: "binary", thumbnail: false },
-  { stems: ["events", "features"], ext: "parquet", group: "数据", min: 5 * MIB, max: 1 * GIB, weight: 12, content: "binary", thumbnail: false },
-  { stems: ["blob", "dump"], ext: "bin", group: "数据", min: 1 * KIB, max: 200 * MIB, weight: 15, content: "binary", thumbnail: false },
+  {
+    stems: ["app", "access", "error"],
+    ext: "log",
+    group: "数据",
+    min: 5 * KIB,
+    max: 500 * MIB,
+    weight: 35,
+    content: "text",
+    thumbnail: false,
+  },
+  {
+    stems: ["production", "analytics", "cordis"],
+    ext: "db",
+    group: "数据",
+    min: 1 * MIB,
+    max: 2 * GIB,
+    weight: 25,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["cache", "sessions"],
+    ext: "sqlite",
+    group: "数据",
+    min: 100 * KIB,
+    max: 800 * MIB,
+    weight: 15,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["events", "features"],
+    ext: "parquet",
+    group: "数据",
+    min: 5 * MIB,
+    max: 1 * GIB,
+    weight: 12,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["blob", "dump"],
+    ext: "bin",
+    group: "数据",
+    min: 1 * KIB,
+    max: 200 * MIB,
+    weight: 15,
+    content: "binary",
+    thumbnail: false,
+  },
   // 可执行
-  { stems: ["setup", "installer", "安装程序"], ext: "exe", group: "程序", min: 50 * KIB, max: 200 * MIB, weight: 25, content: "binary", thumbnail: false },
-  { stems: ["native", "dll"], ext: "dll", group: "程序", min: 20 * KIB, max: 40 * MIB, weight: 15, content: "binary", thumbnail: false },
-  { stems: ["msi", "套件"], ext: "msi", group: "程序", min: 1 * MIB, max: 300 * MIB, weight: 12, content: "binary", thumbnail: false },
-  { stems: ["app", "apk"], ext: "apk", group: "程序", min: 2 * MIB, max: 150 * MIB, weight: 8, content: "binary", thumbnail: false },
+  {
+    stems: ["setup", "installer", "安装程序"],
+    ext: "exe",
+    group: "程序",
+    min: 50 * KIB,
+    max: 200 * MIB,
+    weight: 25,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["native", "dll"],
+    ext: "dll",
+    group: "程序",
+    min: 20 * KIB,
+    max: 40 * MIB,
+    weight: 15,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["msi", "套件"],
+    ext: "msi",
+    group: "程序",
+    min: 1 * MIB,
+    max: 300 * MIB,
+    weight: 12,
+    content: "binary",
+    thumbnail: false,
+  },
+  {
+    stems: ["app", "apk"],
+    ext: "apk",
+    group: "程序",
+    min: 2 * MIB,
+    max: 150 * MIB,
+    weight: 8,
+    content: "binary",
+    thumbnail: false,
+  },
 ];
 
 /** Directory names, mixed like a real home folder. */
@@ -312,12 +759,12 @@ const isDirectoryIndex = (index: number): boolean => prng(index * 2 + 7) * 1000 
 function sizeFor(index: number): number {
   const f = formatFor(index);
   const t = prng(index * 2 + 3);
-  return Math.round(f.min * Math.pow(f.max / f.min, t));
+  return Math.round(f.min * (f.max / f.min) ** t);
 }
 
 /** mtime over the last ~2 years, skewed towards recent (power 1.7). */
 function modifiedFor(index: number): number {
-  const t = Math.pow(prng(index * 2 + 5), 1.7);
+  const t = prng(index * 2 + 5) ** 1.7;
   return Date.now() - Math.round(t * 730 * 86_400_000);
 }
 
@@ -357,9 +804,7 @@ function stressListing(path: string): ListEntry[] {
   // A named volume (`/stress/数据集-10万`) or an explicit count typed into the
   // address bar (`/stress/20000`).
   const head = segments[0] ?? "";
-  const count = /^\d+$/.test(head)
-    ? Number(head)
-    : VOLUMES.find((v) => v.name === head)?.count;
+  const count = /^\d+$/.test(head) ? Number(head) : VOLUMES.find((v) => v.name === head)?.count;
   if (count === undefined) return [];
   if (segments.length === 1) return generateEntries(path, count, 0);
   const childCount = Math.min(60, Math.max(6, Math.round(count / 10 / segments.length)));
@@ -372,13 +817,7 @@ function generateEntries(dirPath: string, count: number, seed: number): ListEntr
     const index = (i + seed) % 1_000_000;
     const name = nameFor(index);
     const isDir = isDirectoryIndex(index);
-    out[i] = entry(
-      name,
-      `${dirPath}/${name}`,
-      isDir,
-      isDir ? null : sizeFor(index),
-      isDir ? null : modifiedFor(index),
-    );
+    out[i] = entry(name, `${dirPath}/${name}`, isDir, isDir ? null : sizeFor(index), isDir ? null : modifiedFor(index));
   }
   // A real provider hands back a naturally ordered listing (the kernel sorts with
   // natord); names here embed a zero-padded index, so a plain compare matches.
@@ -396,9 +835,7 @@ function hashPath(path: string): number {
 }
 
 function volumeListing(): ListEntry[] {
-  const dirs: ListEntry[] = VOLUMES.map((v) =>
-    entry(v.name, `${STRESS_ROOT}/${v.name}`, true, null, null),
-  );
+  const dirs: ListEntry[] = VOLUMES.map((v) => entry(v.name, `${STRESS_ROOT}/${v.name}`, true, null, null));
   const sample = [
     entry("说明-压力数据.md", `${STRESS_ROOT}/说明-压力数据.md`, false, 4096, daysAgo(1)),
     entry("空目录", `${STRESS_ROOT}/空目录`, true, null, null),
@@ -419,9 +856,11 @@ const isStressPath = (path: string): boolean => path === STRESS_ROOT || path.sta
  * 四张样例图是构建期写死的小 PNG，与任何被"浏览"的文件都无关。
  */
 const PRESET_THUMBS = {
-  photo: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAACLklEQVR42u3S7WsNcBjG8euv8cqf4F+SJDnPz8/PjzMzx8zMzIyZmZklSZIkSUmSJEmSJEnq0nlxyoslT+Occ10vPi9+7373fX/BrQBNF75eC9B04ctmgKYLn68GabrwaSNI04WPV0I0XfiwHqLpwvvLIZouvFsL03Th7aUwTRferEZouvD6YoSmC69WojRdeHkhStOFF+ejNF14vhyj6cKzczGaLjxditN04cnZOE0XHi/Gabrw6EyCpgsPFxI0XXhwOknThfvzSZou3DuVounC3bkUTRfunEzRdOH2bJqmC7dOpGm6cHMmQ9OFG8czNF243svQdGGrl6XpwuaxLE0XNqZzNF1YP5qj6cLaVJ6mC6tH8jRdWJnM03Rh+XCBpgtLEwWaLix2izRdWOgUabow3y7SdGGuVaLpwmyzRNOFmUaZpgu9epmmC9O1Ck0XpqoVmi5MVio0XZgoV2m60ClVabrQKtZoutAo1Gi6UMvXaLpQydVpulDK1mm6kM80aLqQTTdoupBONWm6kEw2aboQTzRpuhCNt2i6sGv3HobjLfsN/d2NOnz/CMba9hPG4fDbBtB3KNq2Hxin428bwMDBSPu/+pOhhu0/IxlA34Fw55/Z6UGH8U9DH8DA/lBnRygseCwCGNgX7P4VXvyIBjCwN9D9JV70mAVgDsAcgDkAcwDmAMwBmAMwB2AOwByAOQBzAOYAzAGYAzAHYA7AHIA5AHMA5gDMAZgDsKHwDfRkLVH7rwVOAAAAAElFTkSuQmCC",
+  photo:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAACLklEQVR42u3S7WsNcBjG8euv8cqf4F+SJDnPz8/PjzMzx8zMzIyZmZklSZIkSUmSJEmSJEnq0nlxyoslT+Occ10vPi9+7373fX/BrQBNF75eC9B04ctmgKYLn68GabrwaSNI04WPV0I0XfiwHqLpwvvLIZouvFsL03Th7aUwTRferEZouvD6YoSmC69WojRdeHkhStOFF+ejNF14vhyj6cKzczGaLjxditN04cnZOE0XHi/Gabrw6EyCpgsPFxI0XXhwOknThfvzSZou3DuVounC3bkUTRfunEzRdOH2bJqmC7dOpGm6cHMmQ9OFG8czNF243svQdGGrl6XpwuaxLE0XNqZzNF1YP5qj6cLaVJ6mC6tH8jRdWJnM03Rh+XCBpgtLEwWaLix2izRdWOgUabow3y7SdGGuVaLpwmyzRNOFmUaZpgu9epmmC9O1Ck0XpqoVmi5MVio0XZgoV2m60ClVabrQKtZoutAo1Gi6UMvXaLpQydVpulDK1mm6kM80aLqQTTdoupBONWm6kEw2aboQTzRpuhCNt2i6sGv3HobjLfsN/d2NOnz/CMba9hPG4fDbBtB3KNq2Hxin428bwMDBSPu/+pOhhu0/IxlA34Fw55/Z6UGH8U9DH8DA/lBnRygseCwCGNgX7P4VXvyIBjCwN9D9JV70mAVgDsAcgDkAcwDmAMwBmAMwB2AOwByAOQBzAOYAzAGYAzAHYA7AHIA5AHMA5gDMAZgDsKHwDfRkLVH7rwVOAAAAAElFTkSuQmCC",
   art: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAAIpklEQVR42u3dZ3dU1xUG4P0zbExzw8bYxAUbFySKKJJAdCGajOgSxQghgYPj3luKE+NKiHuc2MFleh9JM/OzXq/33Htn7hRdEz7utT/oE6PZ556z3z3PWhrWkd7nC+h/toCBySK2jxex60wJe8bK2He8jIOHp3FoeBqH98/g2J4ZnNg1i9Htszg1UMGZzRU801vF+MYqzq+v4sK6GibX1DC1uoaL3TVc6qrh0qoOP101XOyqYarbe/2FtTVM9FQxvqGKc5uqONtfwemBCsa2zeLkzllX98i+GRw6OI3hkWnsP1bG0Mkydp8uYce5ErZeKGLzpQJ6nytgw4t5rHsth9Vv5bDqvSye/EsWK/+ewYqP0njoszT+8M8U7v8yhfu+SeKefydx938TuPN/Cdz+UwKLf41jYTyOBck4bkvFMC8Tw63ZGG7NxXBLvvMP/42v4Wvnp2JYkIhjYSyOxb/EccdPCdz1YwJL/pPAvd8lcd/XSTzwRcqt4eFP01hxJePWxjV2vZvFmjdz6Hk1j40v5tH3XAFbLhWw7UIRO8+VMHi6hL0ny9h/tIzhQ9MYOTiDI3tncHzQ26OxbRWc3lLB2b6K28PzG6puT7m3U2u8vb44x3lIa6GhyEKzXqH+9kKTv1OofvjdXpO4w1/nNQ+biM3Epjq1tYLRHbM4sXsWR4dmXPM9/fQ0Dhyedk25Z6yEXWdL2H6+iIGpIvr/WMCm5/NY/3Iea1/PofvtHJ56P4vH/5bBYx9m8MgnaTz4eRrL/5XCsq9SWPptEku+T+KuHxK443oCt/8cx6Jf4+7w5idjuC3dOPxb5jr80MHz9fw9/j7fh+/H9+X7sw7rsS7rcx1cD9fF9XGdXC/XzfXzOfg8fC4+H5+Tz8vn5vNzH7gf3BfuD/eJ+9UexuqNhZEN0FboiF/ogFfoeGuhvkpzobWNQlGHH6R+KpT680Hq+7wOZiez0dhwbDw2IBuRDckEsEHZqGxYNi6TwsQwOUwQk1RP/ZWMSxoTx+QxgUwiE8lkMqFMKhPrDv8mUs9JwYnBycEJwknCicLJwgnDScOJwzVwAnESBannhOKk4sTi5OIE4yTjRONk2x2E8VjZTT5OQE5CTsR6GAcaYRyfK4xd0WGU3WdKGBr1Ch0c8UZ+UIgjf2x7qFBvqFB45N9AoUbqa5gIp76/4j5S+NHCeqzLLuc6+BG071gZe0bL4Dp3jBexdbKIzc8W0PunAja81Dzyn/hrBo/9I4NHPvZG/vJr3shnCu/5Pom7f/BHvp96HtwNp94//HlZP/X+yF8UjPzrwcj3Gm0ZRz5TfzWNhz9J49ErGTz+QQZP/TmL7neyWPtGDutfyWPTC3n0Xy5gy8Uitk0UsfOZEgZPlbD3hB9GTmKGca8XxpMtYXSTeH0VE/9nGIMzkaDQcLjQYKhQh8+WmynE35nwRz7fi4sPRj5r8eFYm2vgQ3NNXBs3g5vCzeEm9V0uYOMLebd53ERuJjeVm8tN5mZz07n5y+qpT3qpv+6lflEo9e7wfyf1nUY+mycY+fXU+yOfTcfmYxOyGdmUbM6m1L+Ud03MZmZTs7nZ5Gx2Nn2kv/obI3/iZvwVCqMY9PRDr1MYA3+JQU8/9DqFMfCXGPT0Qy888lvDKAY9/dCb7BBG2o41xKCnH3p1f/WG/OWHUQx6+qHnJnEojKNBGIdmIAY9/dBzYdzSCGPYX2LQ0w+9KH+JQU8/9Jy/Bhv+Gg75Swx6+qFX9xfDGPjLD6MY9PRDj3/Yc/460u4vMejph54L41EvjK3+EoOefuh5YSy7L/vwSz/88g+/BMQmFoOefug1+6tQ91fPK6EGMOjphV5UGMWgpx96Uf4Sg55+6DX8lWvzlxj09EOPzbzu9RxWv53Dqveb/SUGPf3QW/NGDl3vZPFk2F8M49WU97cAg55u6HlhzLrnDvy13PeXGPT0Q4++eTTkrwdC/hKDnn7oMYyBv+4P/OWHUQx6+qHnwnitEcawv8Sgpx96zWFs9pcY9PRDb2kHfwVhFIOefuiF/bX451AYkzGIQU8/9O7s4K8gjGLQ0w+9KH+JQU8/9BZG+EsMevqhNz/CX2LQ0w+9+iTOtU9iMejph15UGMWgpx96UWEUg55+6EVNYjHo6YfeXGGcl45BDHr6oRcVRjHo6YdelL/EoKcfelH+EoOefug1JnG8zV9i0NMPvSh/iUFPP/QWhMN4PeEmfRBGMejphx7fy/nrR28S3xv464sUxKCnH3r1MAb++ipV95cY9PRDLwjj0m+a/bWC/zPIoKcfek3+uur5iw258oMMxKCnH3rOX9d8f33s+esJ319i0NMPPeevT5v9FYRRDHr6oef8FYSxxV9i0NMPPc9f2Y7+EoOefuixQdmobFg2Lhu4z4Ux1AAGPb3Qi/KXGPT0Q49rD4cx7C8x6OmHXuCvpjD6/hKDnn7otfprKPDXyDTEoKcfem1hDPx1YAZi0NMPPc9fjfugw/4Sg55+6NXvgw77yw+jGPT0Qy+4D3qkw33QYtDTDz3nrznugxaDnn7oRflLDHr6oRd1H7QY9PRDr/U+6LC/xKCnH3p1f21s95cY9PRDr+6vnnZ/iUFPP/Sa/NUSRjHo6YdeVBjFoKcfelH3QYtBTz/0ovwlBj390IsKoxj09EMvKoxi0NMPvSh/iUFPP/Si/CUGPf3Qa53E4TCKQU8/9Nrug+5phFEMevqh13YfdMhfYtDTD72O90H7/hKDnn7odbwP2p/EYtDTD72o+6DFoKcfeoG/msLo+0sMevqh1+qvkZC/xKCnH3ruPmiO/PB90L6/xKCnH3rh+6Cb/HW2BDHo6Yde3V+8D7rFX2LQ0w89rmffHP4Sg55+6AVhbPLX5YKbYGLQ0w+9Oe+DfjXXaACDnl7oRYVRDHr6odfmrzcb/hKDnn7oRflLDHr6odfxPugPvWsCxaCnH3qd/PWQ76/fANyXElZ5uGb3AAAAAElFTkSuQmCC",
-  frame: "data:image/png;base64,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",
+  frame:
+    "data:image/png;base64,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",
   shot: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAABIklEQVR42u3coQ2AMBRF0Y7GBMzAkAyBZAJSiSIoQkiTMkJloT3iLvBy1Bc/DOOU1W/BCAAYAgABIAAEgAAQAAJAAAgAASAA1DCA/bjyF7qfpAoBAAAAAAAAAAAAAAAAAAD8AMC8xO4DAAAAAAAAAAAAAAAAAAAAAAAAAHAJFAACQAAIAAEgANQagHU7VQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMCXMF/CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAqNkLjolt36KERU8AAAAASUVORK5CYII=",
 } as const;
 
@@ -456,8 +895,11 @@ function shellThumbnail(path: string, edge: number, policy: string): ShellThumbn
   const hasHandler = resolved
     ? resolved.spec.thumbnail
     : ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "mp4", "mov"].includes(ext);
-  if (!hasHandler) return miss("unsupported-type");  if (policy === "cacheOnly" && hashPath(name) % COLD_CACHE_EVERY === 0) return miss("cache-miss");
-  const family = THUMB_FAMILY[resolved ? resolved.spec.group : ext === "mp4" || ext === "mov" ? "视频" : "图片"] ?? ["shot"];
+  if (!hasHandler) return miss("unsupported-type");
+  if (policy === "cacheOnly" && hashPath(name) % COLD_CACHE_EVERY === 0) return miss("cache-miss");
+  const family = THUMB_FAMILY[resolved ? resolved.spec.group : ext === "mp4" || ext === "mov" ? "视频" : "图片"] ?? [
+    "shot",
+  ];
   const preset = family[hashPath(path) % family.length];
   return {
     state: "ready",
@@ -575,9 +1017,7 @@ function openResource(args: Record<string, unknown>): ResourceOut {
   const now = Date.now();
   sweepResources(now);
   if (liveResources.size >= MAX_LIVE_RESOURCES) {
-    throw new Error(
-      `invalid argument: too many open previews: at most ${MAX_LIVE_RESOURCES} resources may be live`,
-    );
+    throw new Error(`invalid argument: too many open previews: at most ${MAX_LIVE_RESOURCES} resources may be live`);
   }
   resourceSeq += 1;
   const handle = `res-${resourceSeq.toString(16)}-${now.toString(16)}`;
@@ -829,8 +1269,7 @@ async function driveDevOperation(id: string, op: FileOperationIn, total: number)
         : "completed";
   // dev 只有一个虚拟盘：跨根目录的 move 视为跨卷，如实报告给界面。
   const crossVolumeMove =
-    op.op === "move" &&
-    sources.some((s) => parentOf(s).split("/")[1] !== (op.destination ?? "").split("/")[1]);
+    op.op === "move" && sources.some((s) => parentOf(s).split("/")[1] !== (op.destination ?? "").split("/")[1]);
   devOps.delete(id);
   bus.emit(Events.shellOperationDone, {
     operationId: id,
@@ -849,24 +1288,77 @@ async function driveDevOperation(id: string, op: FileOperationIn, total: number)
  * 这里只给数据集里出现过的格式，其余返回 null。
  */
 const KIND_BY_EXT: Record<string, FileKind> = {
-  txt: "text", log: "text", ini: "text",
-  rs: "code", ts: "code", tsx: "code", js: "code", jsx: "code", py: "code", go: "code",
-  json: "code", toml: "code", yaml: "code", yml: "code", css: "code", html: "code",
-  md: "markdown", markdown: "markdown",
-  jpg: "image", jpeg: "image", png: "image", gif: "image", bmp: "image", webp: "image",
-  tiff: "image", tif: "image", heic: "image", cr2: "image", nef: "image",
-  svg: "vector", ico: "vector",
-  mp4: "video", mov: "video", webm: "video",
-  mkv: "container", avi: "container",
-  mp3: "audio", flac: "audio", wav: "audio", m4a: "audio", aac: "audio",
+  txt: "text",
+  log: "text",
+  ini: "text",
+  rs: "code",
+  ts: "code",
+  tsx: "code",
+  js: "code",
+  jsx: "code",
+  py: "code",
+  go: "code",
+  json: "code",
+  toml: "code",
+  yaml: "code",
+  yml: "code",
+  css: "code",
+  html: "code",
+  md: "markdown",
+  markdown: "markdown",
+  jpg: "image",
+  jpeg: "image",
+  png: "image",
+  gif: "image",
+  bmp: "image",
+  webp: "image",
+  tiff: "image",
+  tif: "image",
+  heic: "image",
+  cr2: "image",
+  nef: "image",
+  svg: "vector",
+  ico: "vector",
+  mp4: "video",
+  mov: "video",
+  webm: "video",
+  mkv: "container",
+  avi: "container",
+  mp3: "audio",
+  flac: "audio",
+  wav: "audio",
+  m4a: "audio",
+  aac: "audio",
   pdf: "pdf",
-  doc: "document", docx: "document", odt: "document",
-  xls: "sheet", xlsx: "sheet", ods: "sheet", csv: "sheet",
-  ppt: "presentation", pptx: "presentation", odp: "presentation",
-  zip: "archive", "7z": "archive", gz: "archive", rar: "archive", iso: "archive", tar: "archive",
-  ttf: "font", otf: "font", woff: "font", woff2: "font",
-  exe: "executable", dll: "executable", msi: "executable", bat: "executable", cmd: "executable",
-  blend: "model", dwg: "model", step: "model", glb: "model",
+  doc: "document",
+  docx: "document",
+  odt: "document",
+  xls: "sheet",
+  xlsx: "sheet",
+  ods: "sheet",
+  csv: "sheet",
+  ppt: "presentation",
+  pptx: "presentation",
+  odp: "presentation",
+  zip: "archive",
+  "7z": "archive",
+  gz: "archive",
+  rar: "archive",
+  iso: "archive",
+  tar: "archive",
+  ttf: "font",
+  otf: "font",
+  woff: "font",
+  woff2: "font",
+  exe: "executable",
+  dll: "executable",
+  msi: "executable",
+  bat: "executable",
+  cmd: "executable",
+  blend: "model",
+  dwg: "model",
+  step: "model",
+  glb: "model",
 };
 
 function fileKindOf(path: string, isDirHint: boolean | null): FileKindOut {
@@ -882,15 +1374,31 @@ function fileKindOf(path: string, isDirHint: boolean | null): FileKindOut {
 }
 
 const MIME_BY_EXT: Record<string, string> = {
-  txt: "text/plain", md: "text/markdown", json: "application/json", csv: "text/csv",
-  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
-  webp: "image/webp", svg: "image/svg+xml", heic: "image/heic",
-  mp4: "video/mp4", mov: "video/quicktime", mkv: "video/x-matroska",
-  mp3: "audio/mpeg", m4a: "audio/mp4", flac: "audio/flac", wav: "audio/wav",
-  pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  txt: "text/plain",
+  md: "text/markdown",
+  json: "application/json",
+  csv: "text/csv",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  heic: "image/heic",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  mkv: "video/x-matroska",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  flac: "audio/flac",
+  wav: "audio/wav",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  zip: "application/zip", iso: "application/x-iso9660-image", exe: "application/x-msdownload",
+  zip: "application/zip",
+  iso: "application/x-iso9660-image",
+  exe: "application/x-msdownload",
 };
 
 // ──────────────── 空间分析扫描 / 卷信息（P7-23 的浏览器替身） ────────────────
@@ -1111,7 +1619,8 @@ async function driveDevScan(scan: DevScan): Promise<void> {
     }
     let listed = 0;
     while (listed < SCAN_LISTINGS_PER_SLICE && scan.queue.length > 0 && !scan.cancelled) {
-      const node = scan.queue.shift()!;
+      const node = scan.queue.shift();
+      if (!node) break;
       current = node.path;
       try {
         scan.visited += attachListing(scan, node, listingForScan(node.path));
@@ -1142,6 +1651,230 @@ async function driveDevScan(scan: DevScan): Promise<void> {
 /** `Error(String(err))` 会带上 `Error: ` 前缀，分类只看 provider 给的那段文本。 */
 function errorMessageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// ──────────────── 名称检索索引（P7-29 的浏览器替身） ────────────────
+
+/**
+ * `search.*` 的 dev 替身。索引是内存里的一张表，行来自 `fs.list` 用的同一份清单，
+ * 所以"搜到的路径"和"点得开的路径"不会分裂成两个事实。与宿主有两处刻意的不同，
+ * 都只关乎快慢、不关乎答案：
+ *
+ * 1. 浏览器没有 SQLite，检索一律是**子串扫描**（不分三字符上下），排序按名称而不是
+ *    bm25。契约里"顺序即相关性"由宿主负责；dev 保证的是同一批命中与同一套分页语义
+ *    （`offset` + `hasMore`），界面不需要为 dev 写第二条分支。
+ * 2. 条目上限远小于宿主：给浏览器索引五十万个名字会把标签页吃掉几百 MB，还会在切片
+ *    间隙卡顿。到上限即 `partial`，和宿主被上限截断是同一个状态，所以"索引不完整"
+ *    的界面在 dev 里也能定点复现。
+ *
+ * 遍历同样是时间片循环（同步跑会钉死 UI 线程，进度与取消就都失效），终态与进度走
+ * 冻结的 `search:index-progress` / `search:index-done`。
+ */
+const DEV_SEARCH_MAX_ROWS = 120_000;
+const SEARCH_LISTINGS_PER_SLICE = 6;
+const SEARCH_SLICE_MS = 12;
+/** 与宿主 `DEFAULT_PAGE` 同一个默认页长，界面不传 limit 时两边一致。 */
+const DEV_SEARCH_DEFAULT_PAGE = 50;
+
+interface DevSearchRow {
+  path: string;
+  name: string;
+  parent: string;
+  isDir: boolean;
+  size: number | null;
+  modifiedMs: number | null;
+  root: string;
+}
+
+interface DevSearchJob {
+  id: string;
+  roots: string[];
+  queue: Array<{ path: string; root: string; depth: number }>;
+  cancelled: boolean;
+  finished: boolean;
+  startedAt: number;
+  /** 本轮交出去的行数，进度事件报它；`devSearch.rows.size` 是全索引的量。 */
+  walked: number;
+  skipped: number;
+  current: string;
+  hitCeiling: boolean;
+}
+
+/** 索引本体跨任务存活：查询读它，`search.status` 也读它。 */
+const devSearch = {
+  rows: new Map<string, DevSearchRow>(),
+  roots: [] as string[],
+  state: "empty" as SearchIndexState,
+  detail: null as string | null,
+  lastJobMs: 0,
+};
+
+const devSearchJobs = new Map<string, DevSearchJob>();
+let searchSeq = 0;
+
+/** 一个目录的稳定写法：去掉尾部分隔符，`/` 本身除外。同一个目录的两种写法必须
+ *  落到同一个根标签上，否则刷新会删掉别人的行、留下自己的。 */
+function devRootLabel(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/\/+$/, "") || "/";
+}
+
+function underRoot(child: string, parent: string): boolean {
+  if (child === parent) return false;
+  return parent === "/" ? child.startsWith("/") : child.startsWith(`${parent}/`);
+}
+
+/** 只留最外层的根：一行只属于一个根，被两个根覆盖的子树谁都无法单独刷新。 */
+function pruneDevRoots(labels: string[]): string[] {
+  const kept: string[] = [];
+  for (const label of [...new Set(labels)].sort()) {
+    if (!kept.some((outer) => underRoot(label, outer))) kept.push(label);
+  }
+  return kept;
+}
+
+/** 有活就一律 `indexing`：文件里上次记的状态不能盖过正在增长的条目数。 */
+function devSearchState(): SearchIndexState {
+  return devSearchJobs.size > 0 ? "indexing" : devSearch.state;
+}
+
+function dropDevRootRows(root: string): void {
+  for (const [path, row] of devSearch.rows) {
+    if (row.root === root) devSearch.rows.delete(path);
+  }
+}
+
+function devRootRow(root: string): DevSearchRow {
+  return {
+    path: root,
+    name: nameOf(root) || root,
+    parent: parentOf(root),
+    isDir: true,
+    size: null,
+    modifiedMs: null,
+    root,
+  };
+}
+
+/** 把一份清单写成索引行，目录排进下一片。返回 false 表示这一轮到了上限。
+ *  深度上界与宿主同一条规则（`depth + 1 < SEARCH_INDEX_MAX_DEPTH` 才继续下钻），
+ *  否则同一句话在 dev 与宿主里会给出不同的行集。 */
+function indexDevListing(job: DevSearchJob, dir: string, root: string, depth: number, entries: ListEntry[]): boolean {
+  for (const e of entries) {
+    job.walked++;
+    // 目录既没有大小也没有内容时间（和 `fs.list` 一样），命中行因此和列表行读起来
+    // 完全一致。
+    devSearch.rows.set(e.path, {
+      path: e.path,
+      name: e.name,
+      parent: dir,
+      isDir: e.isDir,
+      size: e.isDir ? null : e.size,
+      modifiedMs: e.isDir ? null : e.modifiedMs,
+      root,
+    });
+    if (e.isDir && depth + 1 < SEARCH_INDEX_MAX_DEPTH) job.queue.push({ path: e.path, root, depth: depth + 1 });
+    if (job.walked >= DEV_SEARCH_MAX_ROWS) {
+      job.hitCeiling = true;
+      return false;
+    }
+  }
+  return true;
+}
+
+function emitSearchProgress(job: DevSearchJob): void {
+  bus.emit(Events.searchIndexProgress, {
+    jobId: job.id,
+    state: "indexing",
+    entries: job.walked,
+    currentPath: job.current,
+    elapsedMs: Math.max(0, Date.now() - job.startedAt),
+  } satisfies SearchIndexProgressPayload);
+}
+
+function finishDevSearch(job: DevSearchJob, cancelled: boolean): void {
+  if (job.finished) return;
+  job.finished = true;
+  const partial = cancelled || job.hitCeiling;
+  devSearch.state = partial ? "partial" : "ready";
+  devSearch.detail = cancelled
+    ? "索引任务已取消，结果不完整"
+    : job.hitCeiling
+      ? `达到条目上限 ${DEV_SEARCH_MAX_ROWS}，索引不完整`
+      : null;
+  devSearch.lastJobMs = Math.max(0, Date.now() - job.startedAt);
+  // 刷新只保证自己根的行是真的，根集合因此是并集；重建才是替换。
+  devSearch.roots = job.roots.length ? [...new Set([...devSearch.roots, ...job.roots])].sort() : devSearch.roots;
+  bus.emit(Events.searchIndexDone, {
+    jobId: job.id,
+    state: devSearch.state,
+    entries: devSearch.rows.size,
+    roots: [...devSearch.roots],
+    elapsedMs: devSearch.lastJobMs,
+    cancelled,
+    detail: devSearch.detail,
+  } satisfies SearchIndexDonePayload);
+  devSearchJobs.delete(job.id);
+}
+
+async function driveDevSearch(job: DevSearchJob): Promise<void> {
+  let lastEmit = 0;
+  for (const root of job.roots) {
+    // 根目录自己也是一行：搜"这张盘上有没有叫 X 的文件夹"时，它得能被找到。
+    devSearch.rows.set(root, devRootRow(root));
+    job.walked++;
+    job.queue.push({ path: root, root, depth: 0 });
+  }
+  while (!job.finished) {
+    await delay(SEARCH_SLICE_MS);
+    if (job.cancelled) {
+      finishDevSearch(job, true);
+      return;
+    }
+    let listed = 0;
+    while (listed < SEARCH_LISTINGS_PER_SLICE && job.queue.length > 0 && !job.cancelled) {
+      const node = job.queue.shift();
+      if (!node) break;
+      job.current = node.path;
+      try {
+        if (!indexDevListing(job, node.path, node.root, node.depth, listingForScan(node.path))) {
+          finishDevSearch(job, false);
+          return;
+        }
+      } catch {
+        // 读不了的目录计入 skipped：索引是缓存，缺一段就要能说清缺了，而不是安静地
+        // 让"没有结果"变成谎话。
+        job.skipped++;
+      }
+      listed++;
+    }
+    if (job.cancelled) {
+      finishDevSearch(job, true);
+      return;
+    }
+    if (job.queue.length === 0) {
+      finishDevSearch(job, false);
+      return;
+    }
+    if (Date.now() - lastEmit >= SEARCH_PROGRESS_INTERVAL_MS) {
+      lastEmit = Date.now();
+      emitSearchProgress(job);
+    }
+  }
+}
+
+/** 根必须是目录，且必须真的存在——和宿主一样在**调用**上就拒，不能让界面等一个
+ *  永远不会描述任何东西的 `search:index-done`。 */
+function assertDevSearchRoot(label: string): void {
+  let listed: ListEntry | undefined;
+  try {
+    listed = currentListing(parentOf(label)).find((e) => e.path === label);
+  } catch {
+    listed = undefined;
+  }
+  if (listed && !listed.isDir) throw new Error(`invalid argument: 不是目录：${label}`);
+  if (!isKnownScanRoot(label)) throw new Error(`not found: ${label}`);
 }
 
 // ─────────────────────── registration ───────────────────────
@@ -1397,10 +2130,7 @@ export function registerMocks(): void {
 
   registerMock("file.kind", (args): FileKindOut => {
     const hint = args.isDir;
-    return fileKindOf(
-      String(args.path ?? ""),
-      hint === undefined || hint === null ? null : Boolean(hint),
-    );
+    return fileKindOf(String(args.path ?? ""), hint === undefined || hint === null ? null : Boolean(hint));
   });
 
   // `sys.disk.list` 的 dev 替身：浏览器里没有卷枚举，所以给一个稳定的虚拟卷，
@@ -1459,6 +2189,110 @@ export function registerMocks(): void {
     return true;
   });
 
+  // ── 名称检索（P7-29）：`search.index.start` 只排队，进度与终态走事件；查询读的是
+  // 上面那张内存索引。分页语义与宿主一致（`offset` + `hasMore`，`total` 是索引知道的
+  // 匹配总数，不是本页条数），界面的增量加载在 dev 与宿主里是同一段代码。
+  registerMock(
+    "search.status",
+    (): SearchStatusOut => ({
+      state: devSearchState(),
+      entries: devSearch.rows.size,
+      roots: [...devSearch.roots],
+      lastJobMs: devSearch.lastJobMs,
+      detail: devSearch.detail,
+    }),
+  );
+
+  registerMock("search.query", (args): SearchQueryOut => {
+    const startedAt = Date.now();
+    // 截断而不是拒绝，和宿主同一句理由：检索词是用户正在打的字。
+    const text = String(args.text ?? "")
+      .trim()
+      .slice(0, SEARCH_MAX_TEXT_CHARS);
+    if (!text) throw new Error("invalid argument: search.query 需要检索词");
+    const scope = (args.scope ?? "all") as SearchScope;
+    const within = devRootLabel(String(args.within ?? ""));
+    const limit = Math.min(Math.max(Number(args.limit ?? DEV_SEARCH_DEFAULT_PAGE) || 1, 1), SEARCH_MAX_PAGE);
+    const offset = Math.max(Number(args.offset ?? 0) || 0, 0);
+    const state = devSearchState();
+    const needle = text.toLowerCase();
+    const matched = [...devSearch.rows.values()]
+      .filter((row) => {
+        if (scope === "file" && row.isDir) return false;
+        if (scope === "dir" && !row.isDir) return false;
+        if (within && !(row.parent === within || underRoot(row.parent, within))) return false;
+        return row.name.toLowerCase().includes(needle);
+      })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const hits = matched.slice(offset, offset + limit).map(
+      (row): SearchHit => ({
+        path: row.path,
+        name: row.name,
+        parent: row.parent,
+        isDir: row.isDir,
+        size: row.size,
+        modifiedMs: row.modifiedMs,
+      }),
+    );
+    return {
+      text,
+      scope,
+      tookMs: Math.max(0, Date.now() - startedAt),
+      total: matched.length,
+      offset,
+      hasMore: offset + hits.length < matched.length,
+      hits,
+      state,
+    };
+  });
+
+  registerMock("search.index.start", (args): SearchIndexAck => {
+    const requestedRaw = Array.isArray(args.roots) ? (args.roots as unknown[]).map((root) => String(root)) : [];
+    const labels = pruneDevRoots(
+      (requestedRaw.length ? requestedRaw : devSearch.roots.length ? devSearch.roots : [STRESS_ROOT])
+        .map(devRootLabel)
+        .filter((label) => label !== ""),
+    );
+    if (!labels.length) {
+      throw new Error("invalid argument: search.index.start 需要一个绝对目录");
+    }
+    // 根在调用上就验，顺序也与宿主一致：先逐个拒非目录/不存在，再判空，最后才看上界。
+    for (const label of labels) assertDevSearchRoot(label);
+    if (devSearchJobs.size >= 1) {
+      throw new Error("invalid argument: 已有一个索引任务在运行（上限 1），请先取消它");
+    }
+    const rebuild = args.rebuild === true;
+    if (rebuild) {
+      devSearch.rows.clear();
+      devSearch.roots = [];
+    } else {
+      for (const label of labels) dropDevRootRows(label);
+    }
+    const id = `dev-search-index-${++searchSeq}`;
+    const job: DevSearchJob = {
+      id,
+      roots: labels,
+      queue: [],
+      cancelled: false,
+      finished: false,
+      startedAt: Date.now(),
+      walked: 0,
+      skipped: 0,
+      current: labels[0] ?? "",
+      hitCeiling: false,
+    };
+    devSearchJobs.set(id, job);
+    void driveDevSearch(job);
+    return { jobId: id, roots: labels, state: "indexing" };
+  });
+
+  registerMock("search.index.cancel", (args): boolean => {
+    const job = devSearchJobs.get(String(args.jobId ?? ""));
+    if (!job || job.finished) return false;
+    job.cancelled = true;
+    return true;
+  });
+
   // A tiny in-memory db.history store so the file-history panel has data in dev.
   const history: Record<string, Array<{ hash: string; at: number }>> = {
     "/demo/notes.txt": [
@@ -1482,11 +2316,56 @@ export function registerMocks(): void {
   });
   registerMock("db.history.append", (args) => {
     const path = String(args.path ?? "");
-    (history[path] ??= []).push({
+    let list = history[path];
+    if (!list) {
+      list = [];
+      history[path] = list;
+    }
+    list.push({
       hash: String(args.hash ?? "x"),
       at: Number(args.at ?? Date.now()),
     });
     return { ok: true };
+  });
+
+  // db.tags — the tags store (P7-32), owned by plugin-view-tags. Mirrors the
+  // host's run_db dispatch: one kv row per tag, value `{seq, members}`; keyless
+  // `list` answers rows as `[key, value]` tuples (a keyed list reads the ordered
+  // log, which the tags store never appends to). Dev persistence is a dev-only
+  // localStorage key so a reload keeps tags for chip / tag-view assertions;
+  // inside Tauri the real SQLite store wins.
+  const TAGS_DEV_KEY = "fm.dev-mocks.db.tags.v1";
+  const tagRows = new Map<string, unknown>();
+  try {
+    const raw = localStorage.getItem(TAGS_DEV_KEY);
+    if (raw) {
+      for (const [key, value] of Object.entries(JSON.parse(raw) as Record<string, unknown>)) {
+        tagRows.set(key, value);
+      }
+    }
+  } catch {
+    /* start empty */
+  }
+  const persistTagRows = (): void => {
+    try {
+      localStorage.setItem(TAGS_DEV_KEY, JSON.stringify(Object.fromEntries(tagRows)));
+    } catch {
+      /* session-only store */
+    }
+  };
+  registerMock("db.tags.list", (args) => {
+    if (args.key !== undefined || args.path !== undefined) return [];
+    return [...tagRows.entries()].map(([key, value]) => [key, value]);
+  });
+  registerMock("db.tags.put", (args) => {
+    tagRows.set(String(args.key ?? ""), args.value ?? null);
+    persistTagRows();
+    return true;
+  });
+  registerMock("db.tags.delete", (args) => {
+    tagRows.delete(String(args.key ?? ""));
+    persistTagRows();
+    return true;
   });
 
   // Browser-dev plugin index: serve the built plugin frontends over the vite
@@ -1500,9 +2379,12 @@ export function registerMocks(): void {
   //  3. content/view plugins after their containers.
   //  4. context-menu before the views: it claims the panel provider on mount, so it
   //     must be in the tree when the contributors register their items.
-  //  5. `plugin-settings` second-to-last: its gear pins itself to the bottom of the
+  //  5. `plugin-command-palette` claims the command launcher on mount and draws
+  //     the `command-palette` slot; it sits with the view plugins, before the
+  //     commands (`search.open` / `search.index-current`) can ever be invoked.
+  //  6. `plugin-settings` second-to-last: its gear pins itself to the bottom of the
   //     activity rail, so it must register after every other rail icon.
-  //  6. slot-harness LAST: its deliberate permission violations must land in devtools-log.
+  //  7. slot-harness LAST: its deliberate permission violations must land in devtools-log.
   const devPlugins: PluginManifest[] = [
     devtoolsLogManifest,
     layoutPanesManifest,
@@ -1515,6 +2397,8 @@ export function registerMocks(): void {
     viewTagsManifest,
     fileOpsManifest,
     storageAnalysisManifest,
+    searchManifest,
+    commandPaletteManifest,
     fileDetailsManifest,
     fileHistoryManifest,
     pluginPreviewManifest,
@@ -1526,7 +2410,7 @@ export function registerMocks(): void {
     return {
       ...manifest,
       frontend: {
-        ...manifest.frontend!,
+        ...(manifest.frontend ?? {}),
         entry: `/dev-plugins/${manifest.name}/index.js`,
       },
     };

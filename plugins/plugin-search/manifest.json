@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-search",
+  "version": "0.1.0",
+  "displayName": "搜索",
+  "description": "按名称检索已索引的文件夹与文件；可分页取更多、管理索引目录、打开命中所在目录。",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      {
+        "id": "topbar-zone",
+        "export": "SearchToolbar",
+        "label": "搜索"
+      },
+      {
+        "id": "settings-page:search",
+        "export": "SettingsPage",
+        "label": "搜索"
+      }
+    ],
+    "provides": []
+  },
+  "permissions": {
+    "capabilities": [
+      "search.status",
+      "search.query",
+      "search.index.start",
+      "search.index.cancel",
+      "shell.pickDirectory",
+      "shell.openPath"
+    ],
+    "events": {
+      "subscribe": [
+        "search:index-progress",
+        "search:index-done"
+      ],
+      "emit": [
+        "sidebar:selection:changed"
+      ]
+    },
+    "slots": {
+      "contribute": [
+        "topbar-zone",
+        "settings-page:search"
+      ]
+    },
+    "commands": {
+      "register": true
+    }
+  }
+}

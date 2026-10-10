@@ -264,6 +264,8 @@
 
 ## D16 · 文件版本历史：Lore 核心 + 本应用历史面板
 
+> **当前状态**：Lore 集成**暂缓**（P7-25 决策门结论见 D21）。本节是定案的目标形态，尚未开工；现在运行的历史面板仍是 hash/DB 快照，不宣称可恢复内容版本。
+
 **背景**：现有 `plugin-file-history` 以 watcher、hash 和 SQLite 元信息记录快照，尚未形成可恢复的内容版本。用户希望采用开源 Lore 进行版本管理和切换，并可参考 LoreGUI。
 
 **决定**：以 Epic Games Lore 作为仓库内文件版本、提交和历史操作的事实来源；`plugin-file-history` 保留 `detail-tab:history` 时间线并负责 Lore 查询、创建和恢复。参考 LoreGUI 将 Lore 核心与 GUI 解耦的 `lore-vm` 思路，不嵌入其完整桌面 GUI。文件监听只刷新 Lore 工作区状态；默认由用户明确创建版本，不对每个 watcher 事件静默提交。恢复需确认并产生可追踪的新变化，不回退分支头。
@@ -312,6 +314,68 @@
 
 **代价**：新增格式要改表(改表即改契约枚举的覆盖范围，有单测逐行守住)；MIME 只在确有惯用媒体类型时给出，没有就留 `None`，界面不能把缺省读成"未知格式"。dev 侧镜像表与内核表逐行对齐，两侧不同步会被契约测试拦住。
 
+## D21 · Lore 集成暂缓：批次 8 不排期
+
+**决定**：P7-25 决策门按"能否以受支持的 Rust 依赖形态接进来"评估，结论是**暂缓**——不引入任何 Lore crate，`plugin-file-history` 继续以现有 hash/DB 快照形态运行并保持"不宣称可恢复内容版本"的口径；P7-26（迁移）与 P7-27（历史元数据插件）随之不排期。
+
+**事实依据（2026-10 核对）**：上游是 `EpicGames/lore`，pre-1.0；**它没有向 crates.io 发布 Lore**——名字 `lore` 被一个无关 crate（"Flexible logic programming"，NthTensor 0.1.0）占着，`lore-vm` 直接 404。文档里原先设想的"参考 LoreGUI 的 `lore-vm` 解耦层"指的是 `BiloxiStudios/loregui` 里的**第三方** crate，不是 Epic 的受支持接口面。所以唯一的接入方式是把上游 git revision 固定下来从源码自建，代价是同时背上三项：Windows 工具链构建由本仓库兜底、仓库磁盘格式随 pre-1.0 上游漂移、`loreserver` 的生命周期与数据目录直接违反 D4 的"单进程、无 sidecar"。
+
+**理由**：这三项都不是一次性成本，而是长期维护面；换来的是"恢复到任意历史内容"，而当前主流程（浏览/预览/文件操作/空间分析）尚未因此受阻。按"优先用开源库的既有能力"的原则，前提是这个库能以受支持的依赖形态被使用；不满足时不硬接，也不假装接了。
+
+**复核触发**（任一成立即重开 P7-25）：① Epic 发布 crates.io crate 或给出稳定 Rust API；② Windows 构建与许可证由上游官方明确支持；③ 产品确定需要"恢复到任意历史内容"，并接受一个宿主管理的本地服务进程（届时须重评 D4）。
+
+## D22 · 时间与体积格式化归 SDK，是应用唯一的显示格式化面
+
+**决定**：`core-shared/plugin-sdk` 导出四个格式化函数并承担全应用的显示格式：`formatSize`（`pretty-bytes`，`binary: true` → `B/KiB/MiB/GiB/TiB`）、`formatDate`（`YYYY-MM-DD`）、`formatDateTime`（`YYYY-MM-DD HH:mm`）、`formatClock`（`HH:mm:ss`）；三者对无效输入统一给占位符（`—` 或调用方传入的空串），不出现 `Invalid Date`。插件内不得自带第二套实现——`plugin-file-browser`/`plugin-file-details`/`plugin-preview`/`plugin-storage-analysis`/`plugin-file-history`/`plugin-devtools-log` 的本地 `formatSize`/`formatBytes`/`Intl.DateTimeFormat` 已删除。图标同理统一 `lucide-react` 组件（每插件自带，不进 import map），界面文本不留符号字形。
+
+**理由**：SDK 是插件唯一允许依赖的包，且已经通过 import map 以单例下发，所以 `dayjs`/`pretty-bytes` 只需在 `shared/plugin-sdk.js` 里内联一次；放各插件会重复打包，放基座则让"只持元状态"的基座承担了显示规则。同一个字节数要在列表、D 信息页、预览区、空间分析四屏写成同一个样子，四份实现就是四次漂移的机会。
+
+**单位选二进制是刻意的**：Windows 资源管理器按 1024 报体积，列表里的数字必须能和它对上；`binary: false` 的十进制 `KB/MB` 在同一个文件上会显示成另一套数，等于让用户对不上账。
+
+**代价**：改动单位口径会改掉所有用户可见字符串（`2.0 KB → 2 KiB`、`81.0 MB → 81 MiB`），取证脚本必须同批改断言，否则"全绿"是假的。因此 `.scratch/pw/run-f.mjs` 不再自己写一份 `fmtBytes`，而是直接 `import` SDK 的实现——期望串与渲染串同源，不可能再漂移；`run.mjs` 末尾另加两条全局断言：界面文本零 emoji/符号字形、不出现 `KB/MB/GB/TB` 残留。i18n（P6-26）不在本决策范围内：界面按单一语言中文建设。
+
+## D23 · 表格模式归 file-browser 拥有，排序口径由结构强制
+
+**决定**：表格是 `plugin-file-browser` 的**第三种显示方式**，不是新插件、也不是把行模型交给库：数据流、虚拟化、选择与焦点、右键 surface（与列表行同为 `browser.list.item`）、请求序号防过期覆盖全部沿用现有那条流。`@tanstack/react-table` **v9** 只提供排序状态机与列可见性，并且随该插件自己的 dist 打包，**不进** import map 共享单例。排序口径三条都写死在实现里：① 没人点表头时行序**严格等于** `fs.list` 返回的顺序（承 D9，浏览器不重排）；② "文件夹成组在前"由一个隐藏的排序主键 `dir`（不可隐藏、宽度 `0px`、无单元格内容）强制，所以升序降序都不会把目录混进文件里；③ 数值与日期列**第一次点击是升序**（表级 `sortDescFirst: false`，覆盖 v9 从数据值推断出的"数值先降序"）。列可见性存进插件自有偏好 `fm.file-browser.prefs.v1.tableColumns`，名称一列 `enableHiding: false` 因此界面上根本没有关掉它的入口；排序状态**不落任何存储**。几何上表头定高、固定在滚动区之外，行定高，`estimateSize` 因此是精确值。
+
+**理由**：三种显示方式必须给同一目录同一个默认顺序和同一套选中口径，否则用户切模式就是在换语义；行模型若拆进独立插件，就得跨插件传目录状态，破"插件不读彼此私有存储"和 D9 的分工。库自带而非共享，是因为共享单例只留给 React/Mantine/SDK 这一层应用级单例，表格库只有一个消费者。首击升序是能让用户和 Windows 资源管理器对账的肌肉记忆。隐藏主键代替"每处渲染前再 `filter` 一遍目录"是同 D10 的做法：不变量由结构（排序键）保证，不靠每个渲染分支自觉。
+
+**代价**：v9 与网络上大量 v8 例子 API 不通用（`tableFeatures(...)` + `features`、列选项 `sortFn` 而非 `sortingFn`、渲染走 `<table.FlexRender cell={…}/>`），实现时必须读包内自带的 `skills/` 文档而不是凭记忆。表头与虚拟行的网格必须**镜像几何**（同样的左右 1px 透明边框 + 实测滚动条内宽），否则两套 `grid-template-columns` 会差 2~17px，所以验收断言的是计算样式串严格相等而非像素宽度。隐藏主键要前置在每个用户排序状态之前，`onSortingChange` 必须把它从用户状态里滤掉，否则点一次表头就多挂一个 `dir` 项。区间多选（Shift 点选）三种显示方式都还没有，属本决策未覆盖的缺口。
+
+## D24 · 搜索索引引擎选 SQLite FTS5（trigram），不引入 tantivy
+
+**决定**：P7-28 决策门定为 **SQLite FTS5**，而且它不是新依赖——`db` 能力已经在用的 `rusqlite`（`bundled`）本身就带 FTS5。索引库是宿主数据目录下**独立、可整体重建**的 `search-index.db`，形状是一张普通表 `files(rowid, name, parent, is_dir, size, mtime)` 加一张对同一行 `name` 建倒排的**外部内容**表（`content='files'`, `content_rowid='rowid'`, `tokenize='trigram'`），所以正文/名称文本只存一份，索引里只有倒排。本批只索引**文件名与路径**，正文级全文不在本批。中文子串因此靠 trigram；短于 3 个字符的查询退回对 `files` 的 `LIKE '%词%'` 扫描并带 `LIMIT` 兜住。
+
+**spike 事实**（`core-shared/kernel/tests/search_spike.rs`，6 项全过，debug 构建实测）：①bundled SQLite 是 **3.46.0**，libsqlite3-sys 的编译脚本带 `-DSQLITE_ENABLE_FTS5`，`trigram` 分词器可直接用；②`unicode61` 把一整段中文当作**一个** token，`"报告"` 和 `"季度报"` 都命中 0 行——中文文件名子串搜索**必须**用 trigram，这不是偏好；③trigram 要求查询 ≥3 字符：`"报告"`（2 字）MATCH 返回 0 行，而 `LIKE '%报告%'` 返回 2 行，所以短查询要有退回路径；④`LIKE` 写在 FTS 表上会走索引（`SCAN files_idx VIRTUAL TABLE INDEX 0:L0`），写在数据表上是全表 `SCAN files`，所以查询形状要紧；⑤10 万条名称建索引 1170 ms，ASCII 子串查询均值 33 ms、中文子串 26 ms、2 字退回扫描 13 ms；⑥外部内容表的删除必须把**旧值**回喂索引（`INSERT INTO files_idx(files_idx, rowid, name) VALUES('delete', …)`），否则索引与数据失配。
+
+**理由**：文件名搜索要的只是"命中 + 目录优先 + 相关性"，BM25 已经够；而 tantivy 换来的是 Lucene 级的正文全文、分面与模糊匹配，本批一项都不消费，代价却是第二个自带磁盘格式、第二套生命周期、以及"能力层已经是 SQLite"之上再叠一层抽象。按"优先用开源库既有能力"的既定原则，能用依赖树里现成引擎解决的范围，就不引第二个引擎；单进程、单写连接、WAL、可整体重建这些性质也和现有 `db` 能力同构，取消与重建就是一句 SQL。
+
+**代价与边界**：trigram 索引比 unicode61 更大更慢（10 万条约 1.2 s，仍在可接受区间）；<3 字符的查询退化为全表 LIKE，靠有界扫描 + `LIMIT` 兜住；FTS5 的 `snippet()` 对不在索引里的正文无用，所以正文高亮要等正文索引；索引是**缓存而非事实源**，任何时刻可删可重建，界面状态不得依赖它存在。
+
+**复核触发**（任一成立即重开 P7-28）：①要做正文级全文或结果片段高亮；②名称规模让建索引进入分钟级；③需要模糊/拼音匹配（trigram 与 LIKE 都给不了）。届时比较 tantivy 与"FTS5 + 正文表"两条路，并重新评估 D5 的"能力层即隔离层"边界。
+
+## D25 · 命令注册与快捷键调度归基座服务，面板归 plugin-command-palette
+
+**决定**：`PluginHost` 增加 `commands` 面，由 manifest `permissions.commands` 分别授权两半——业务插件只有 `register`、面板插件加 `provide`，整个段缺席=没有命令面。命令的**唯一登记簿**是基座 `commandService`（`apps/shell-ui/src/commands.ts`）：命令 id 全局唯一；快捷键与命令一一对应、先注册者占有，后到的重复或非法快捷键**整体拒绝**该命令并告警；全局只装**一个** window keydown 监听（惰性、capture）；可输入控件里只派发带 Ctrl/Alt/Meta 的和弦（打字 `p` 不会触发布字母的键位，Ctrl+Shift+P 在地址栏里照样可用）；执行有忙碌守卫（同刻只跑一条）与失败捕获（`lastError()` 供面板就地显示）；卸载/停用插件即移除其命令、快捷键与（若持有）面板提供者身份，并清掉 mid-run 的忙碌标记，不让它卡住后续命令。**面板是普通插件** `plugin-command-palette`：占 `command-palette` 槽（基座只渲染 `<PluginSlot>` 出口、不含任何面板逻辑），经 `provide()` 领取唯一 launcher；`Ctrl+Shift+P` 本身作为一条命令注册（`palette.open`），"面板怎么开"和"插件怎么发命令"走同一条路径。命令只在前端总线内执行，不新增 Rust 契约，也就没有 `command:invoke` 事件。
+
+**理由**：与 D19 同一分工——基座管管道（注册、唯一性、调度、清理），插件管画面板。命令 id 与快捷键的唯一性只有单一 owner 能**结构性**保证，否则两个插件可以各自"正常"却互相覆盖；非法快捷键宁可整体拒命令，也不留一条永远不响的死键；卸载即移除要求登记簿不属于面板插件，否则面板一停命令全灭。与 D12 同样的原则：能力由基座判定，插件不能自我豁免（`plugin-dev-slot-harness` 的故意越权正是这条的运行时证据）。
+
+**代价与边界**：`provide()` 先到先得，面板插件被停用时 `Ctrl+Shift+P` 随其命令一起消失——单一面板提供者形态是刻意的。`@mantine/spotlight` 进 import map 共享集（它是 React/Mantine 之外唯一带 hooks 的库，保证面板与任何后续命令 UI 只有一份 store）；面板里的键盘选择依赖库的 `Spotlight.ActionsList` 设置 listId，几何固定（620×420）靠内联覆盖库自带的 `max-height: calc(100% - 3.125rem)`。命令过滤是 descriptor 字段的简单子串匹配，没有拼音/模糊（与 D24 的复核触发一致：真有需求再评估）。
+
+**复核触发**（任一成立即重开）：①需要后端/跨进程命令，或快捷键用户自定义、按上下文切换映射；②命令总量增长到需要分组/模糊搜索/最近使用排序；③出现第二个面板形态（如独立的快速文件跳转入口）。
+
+## D26 · 标签存储迁入 `db.tags`：唯一写者 + 受权只读契约
+
+**决定**：标签与成员的**唯一事实源**从 `fm.view-tags.v1` localStorage 迁到通用 `db` 能力里的 `tags` store（零新 Rust 契约：`db.<store>.<op>` 走动态路由）。kv 行：key = 标签名，value = `{seq, members:[{path,kind}]}`；`seq` 保存创建顺序（kv 行本身按 key 排序，改名不得重排队位）。权限结构：`plugin-view-tags` 持 `db.tags.*`（**唯一写者**）；`plugin-file-browser` 只持 `db.tags.list`（精确匹配，只读）。读路径只有 SDK 的 `listTags`/`parseTagRows` 一条；写成功后 owner 发 `tags:updated`（前端总线事件、**无载荷**——广播快照会制造第二份会过期的共享状态，消费者自行重查）。此批同时修复宿主 `run_db` 的一个潜伏缺陷：key 解析原先在分支前用 `?` 提前返回，使"无 key 列举 kv 行"的分支不可达；修复由宿主单测锁定，`db.tags.list` 无参调用自此是契约的一部分。
+
+**迁移**：owner 载入时若 store 为空且旧 localStorage key 存在，则一次性导入（逐条 put；任一条失败即回滚已写入并报错，可重试；全部成功后删除旧 key；旧 JSON 损坏则只提示、不导入也不删除）。成员口径：同一标签内**按 path 唯一**，kind 只是可刷新的属性；路径逐字符保留（大小写敏感盘上两种拼写可能是两个文件）；同 path 可存在于多个标签。**不自动清理成员**：文件删除/移动/进回收站都不触发成员移除——回收站恢复不应丢标签；失效引用在点击穿越时如实报错，由用户手动移除。
+
+**理由**：chips 与"按标签浏览"要求跨插件读取，而"插件不读彼此私有存储"是既定红线（docs/09 §7）；把 store 放进通用 db 能力，读写在能力层留下 manifest 可见的授权足迹（`db.tags.*` vs `db.tags.list`），结构上就不存在第二份可写副本。`tags:updated` 不带载荷，是为了不制造"事件里的快照"与"库里的真相"两个版本；消费者重查一次 `db.tags.list` 是廉价的。`seq` 落库而不是靠改名重排，是因为"创建顺序"是一个事实，不该随改名漂移。
+
+**代价与边界**：db 写失败时 UI 必须诚实——提示并重载真相，面板因此有 loading/error/重试三态，取代旧的"storage 不可用仍可操作"；旧 key 只有一次导入窗口（store 为空时），非空 store 不再读它。文件系统级的成员一致性不做（见上），批量清理留待真实需求。`tags:updated` 是前端事件，不进 Rust 契约（contract-check 排除集）。
+
+**复核触发**：①出现第二类写者（如命令面板直接编辑标签）；②成员规模让全量 `db.tags.list` 成为性能问题（届时评估点查或增量事件载荷）；③需要按 path 反查标签的索引（chips 侧当前每次重查自建索引，规模上去再谈）。
+
 ## 决策速查
 
 | 维度 | 决定 |
@@ -327,7 +391,7 @@
 | 界面标题来源 | 贡献者 manifest `slots[].label` → `host.slotLabel`(容器不硬编码他插件名,见 D6) |
 | 亮/暗主题 | Mantine 内置 colorScheme(默认亮色;基座与插件共用单例,不自造主题层,见 D7) |
 | 图片预览 | 统一 `plugin-preview` + Open File Viewer；本地文件经受权预览句柄读取，图片缩略图另经 Windows Shell `shell.thumbnail.read`(见 D8) |
-| 文件版本历史 | Lore 是版本与操作事实来源；`plugin-history-metadata` 保存 revision 绑定的展示快照(见 D16/D17) |
+| 文件版本历史 | 目标形态：Lore 为版本事实来源 + `plugin-history-metadata` 存展示快照(D16/D17)；**集成暂缓**(D21)，当前沿用 hash/DB 快照且不宣称可恢复 |
 | 压缩包浏览/解压 | 独立 `plugin-archive` 已取消；预览器的只读格式支持另行评估(见 D18) |
 | 类型识别/卷信息 | `file.kind` = 内核单一扩展名表(不嗅探)；`sys.disk` = 直接 Win32；不引 `infer`/`mime_guess`/`sysinfo`(见 D20) |
 | 右键菜单 | `plugin-context-menu` 管框架；业务插件注册自有动作并自行执行(见 D19) |
@@ -336,3 +400,9 @@
 | 设置入口形态 | 独立插件 `plugin-settings` 的悬浮 `Popover`(不占六区、不是 B 视图;分页软件设置/插件设置,见 D11) |
 | 插件启停 | owner = 基座 `loader`;不可关闭集合由基座判定,`plugins.*` 是基座前端能力、不进 Rust 契约(见 D12) |
 | 插件设置页生效方式 | 页内容自持 + 同插件内模块级 store 广播,基座不持有设置状态(见 D13) |
+| 图标 | `lucide-react` 组件,每插件自带;界面文本不留 emoji/符号字形(见 D22) |
+| 时间/体积格式 | SDK 的 `formatSize`(pretty-bytes, 二进制单位)/`formatDate`/`formatDateTime`/`formatClock` 是单一事实源,插件与取证脚本都不自写(见 D22) |
+| 表格模式 | 归 `plugin-file-browser`；`@tanstack/react-table` v9 只出排序与列可见性、按插件自带；未排序透传 provider 顺序，隐藏 `dir` 主键保证目录成组，首击升序，排序不落存储、列开关进插件偏好(见 D23) |
+| 搜索索引引擎 | SQLite **FTS5** + `trigram`（`rusqlite` bundled 自带，非新依赖），独立可重建的 `search-index.db`，外部内容表不复制正文；不引 tantivy(见 D24) |
+| 命令面板/快捷键 | 基座 `commandService` 是唯一登记簿（id 全局唯一、快捷键一一对应、单一 window 监听、忙碌与失败捕获、卸载即移除）；面板 = `plugin-command-palette` 领取唯一 launcher；Ctrl+Shift+P 自身也是命令(见 D25) |
+| 标签存储 | 迁入通用 db 能力 `db.tags`（key=标签名, value={seq,members}）；owner 独占 `db.tags.*` 写、file-browser 只读 `db.tags.list`，读走 SDK `listTags`，写后发无载荷 `tags:updated` 重查；旧 localStorage 一次性导入、不自动清成员(见 D26) |

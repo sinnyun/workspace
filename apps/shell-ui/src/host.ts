@@ -7,20 +7,17 @@
  * The host also owns the plugin's slot registrations and subscriptions so a
  * single `dispose()` tears them all down on unload (docs/02 §4.3).
  */
-import type { ComponentType } from "react";
-import type {
-  PluginHost,
-  PluginManifest,
-  SlotOutletProps,
-  SlotProps,
-} from "@my-file-manager/plugin-sdk";
+
+import type { PluginHost, PluginManifest, SlotOutletProps, SlotProps } from "@my-file-manager/plugin-sdk";
 import { matchesPermission, slotPrefix } from "@my-file-manager/plugin-sdk";
-import { bus } from "./eventbus";
-import { metaSnapshot, useMeta } from "./state";
-import { invokeCapability } from "./invoke";
-import { slotRegistry } from "./slots";
-import { makeSlotOutlet } from "./PluginSlot";
+import type { ComponentType } from "react";
+import { createCommandHost } from "./commands";
 import { createContextMenuHost } from "./contextmenu";
+import { bus } from "./eventbus";
+import { invokeCapability } from "./invoke";
+import { makeSlotOutlet } from "./PluginSlot";
+import { slotRegistry } from "./slots";
+import { metaSnapshot, useMeta } from "./state";
 
 export interface LoadedPluginHandle {
   manifest: PluginManifest;
@@ -46,14 +43,9 @@ export function createHost(
   const contributes = manifest.frontend?.slots ?? [];
   /** The label this plugin declared for a slot id, if any — looked up from its own
    *  manifest so the declarative and imperative paths carry the same metadata. */
-  const declaredLabel = (slotId: string): string | undefined =>
-    contributes.find((s) => s.id === slotId)?.label;
+  const declaredLabel = (slotId: string): string | undefined => contributes.find((s) => s.id === slotId)?.label;
 
-  const inject = (
-    slotId: string,
-    component: ComponentType<SlotProps>,
-    source: string,
-  ): (() => void) => {
+  const inject = (slotId: string, component: ComponentType<SlotProps>, source: string): (() => void) => {
     if (!matchesPermission(slotId, contributePatterns)) {
       deny(`${source} into "${slotId}" (add it to permissions.slots.contribute)`);
       return () => {};
@@ -123,9 +115,7 @@ export function createHost(
 
     on<T>(event: string, handler: (payload: T) => void) {
       if (!matchesPermission(event, subEvents)) {
-        console.warn(
-          `[host:${manifest.name}] subscribe to "${event}" denied (not in permissions.events.subscribe)`,
-        );
+        console.warn(`[host:${manifest.name}] subscribe to "${event}" denied (not in permissions.events.subscribe)`);
         return () => {};
       }
       const off = bus.on(event, handler);
@@ -135,9 +125,7 @@ export function createHost(
 
     emit(event: string, payload?: unknown) {
       if (!matchesPermission(event, emitEvents)) {
-        console.warn(
-          `[host:${manifest.name}] emit "${event}" denied (not in permissions.events.emit)`,
-        );
+        console.warn(`[host:${manifest.name}] emit "${event}" denied (not in permissions.events.emit)`);
         return;
       }
       bus.emit(event, payload);
@@ -165,6 +153,9 @@ export function createHost(
   // without one cannot reach the service at all.
   const contextMenu = createContextMenuHost(manifest, teardowns, deny);
   if (contextMenu) host.contextMenu = contextMenu;
+
+  const commands = createCommandHost(manifest, teardowns, deny);
+  if (commands) host.commands = commands;
 
   return { host, teardowns };
 }

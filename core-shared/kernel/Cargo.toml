@@ -4,6 +4,7 @@ description = "Backend core: cordis-rs kernel bootstrap, atomic capability imple
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [lib]
 name = "fm_kernel"

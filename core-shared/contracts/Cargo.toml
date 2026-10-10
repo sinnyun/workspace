@@ -4,6 +4,7 @@ description = "Cross-layer contracts: typed cordis Events + capability DTOs shar
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 cordis-core = { workspace = true }

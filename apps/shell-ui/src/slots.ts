@@ -18,14 +18,9 @@
  * owns its own unsubscribe (a plugin that wants to leave on dispose subscribes to
  * `slot:disposed`). This keeps dev StrictMode mount/unmount cycles lossless.
  */
+
+import { BASE_SLOT_IDS, Events, type PluginHost, type SlotProps, slotPrefix } from "@my-file-manager/plugin-sdk";
 import type { ComponentType } from "react";
-import {
-  BASE_SLOT_IDS,
-  Events,
-  slotPrefix,
-  type PluginHost,
-  type SlotProps,
-} from "@my-file-manager/plugin-sdk";
 import { bus } from "./eventbus";
 
 export interface SlotRegistration {

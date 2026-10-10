@@ -82,8 +82,7 @@ impl Kernel {
         // 0. Log bridge fiber publishes the cordis Runtime exporter that forwards
         //    kernel diagnostics (contained panics, dispatch/lifecycle errors)
         //    into `tracing`. Spawned first so everything below is observable.
-        self.spawn_ready(crate::logger::LogBridgePlugin, ())
-            .await?;
+        self.spawn_ready(crate::logger::LogBridgePlugin, ()).await?;
 
         // 1. Provider fiber publishes capabilities.
         let provider = CapabilityProvider { caps };
@@ -105,7 +104,9 @@ impl Kernel {
                         tracing::error!(plugin = %name, error = %e, "backend plugin ready failed")
                     }
                 },
-                Err(e) => tracing::error!(plugin = %name, error = %e, "backend plugin spawn failed"),
+                Err(e) => {
+                    tracing::error!(plugin = %name, error = %e, "backend plugin spawn failed")
+                }
             }
         }
         Ok(())

@@ -1,8 +1,8 @@
-import { defineConfig, type Plugin } from "vite";
-import react from "@vitejs/plugin-react";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
+import { defineConfig, type Plugin } from "vite";
 
 // The shared singletons prebuilt by scripts/build-shared.mjs into shared-dist/
 // (production) and shared-dist-dev/ (development). The HOST must load these exact
@@ -25,6 +25,7 @@ const SPECIFIERS: Record<string, string> = {
   "@mantine/core": "mantine-core.js",
   "@mantine/hooks": "mantine-hooks.js",
   "@mantine/notifications": "mantine-notifications.js",
+  "@mantine/spotlight": "mantine-spotlight.js",
   "@my-file-manager/plugin-sdk": "plugin-sdk.js",
 };
 
@@ -67,8 +68,7 @@ function sharedVendor(): Plugin {
   return {
     name: "shared-vendor",
     load(id) {
-      const [prefix, dir] =
-        Object.entries(dirs).find(([p]) => id.startsWith(`${p}/`)) ?? [];
+      const [prefix, dir] = Object.entries(dirs).find(([p]) => id.startsWith(`${p}/`)) ?? [];
       if (!prefix || !dir) return null;
       const rel = id.slice(prefix.length + 1).split("?")[0];
       const file = resolve(dir, rel);
@@ -83,7 +83,9 @@ function sharedVendor(): Plugin {
       for (const [prefix, dir] of Object.entries(dirs)) {
         server.middlewares.use(prefix, (req, res, next) => {
           // connect strips the mount prefix, so req.url is the path within dir.
-          const rel = decodeURIComponent(req.url ?? "").split("?")[0].replace(/^\/+/, "");
+          const rel = decodeURIComponent(req.url ?? "")
+            .split("?")[0]
+            .replace(/^\/+/, "");
           if (!rel) return next();
           const file = resolve(dir, rel);
           if (!file.startsWith(dir)) {
@@ -157,12 +159,8 @@ function devPluginServer(): Plugin {
           .filter(Boolean);
         const [name, ...rest] = segs;
         if (!name || rest.length === 0) return next();
-        const base = fileURLToPath(
-          new URL(`../../plugins/${name}/frontend/dist/`, import.meta.url),
-        );
-        const file = fileURLToPath(
-          new URL(`../../plugins/${name}/frontend/dist/${rest.join("/")}`, import.meta.url),
-        );
+        const base = fileURLToPath(new URL(`../../plugins/${name}/frontend/dist/`, import.meta.url));
+        const file = fileURLToPath(new URL(`../../plugins/${name}/frontend/dist/${rest.join("/")}`, import.meta.url));
         if (!file.startsWith(base)) {
           res.statusCode = 403;
           return res.end("forbidden");
@@ -185,13 +183,7 @@ export default defineConfig(({ command }) => {
   const base = command === "serve" ? "/shared-dev" : "/shared";
   const shared = sharedUrls(base);
   return {
-    plugins: [
-      sharedSingletons(shared),
-      sharedVendor(),
-      devImportMap(),
-      devPluginServer(),
-      react(),
-    ],
+    plugins: [sharedSingletons(shared), sharedVendor(), devImportMap(), devPluginServer(), react()],
     clearScreen: false,
     server: {
       port: 1420,

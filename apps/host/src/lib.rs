@@ -36,8 +36,10 @@ type SharedServer = Arc<OnceLock<Arc<PluginServer>>>;
 /// normalizes the authority, so we parse the path segments defensively.
 fn plugin_protocol(
     holder: SharedServer,
-) -> impl Fn(UriSchemeContext<'_, tauri::Wry>, http::Request<Vec<u8>>, UriSchemeResponder) + Send + Sync + 'static
-{
+) -> impl Fn(UriSchemeContext<'_, tauri::Wry>, http::Request<Vec<u8>>, UriSchemeResponder)
+       + Send
+       + Sync
+       + 'static {
     move |_ctx, request, responder| {
         let Some(server) = holder.get() else {
             responder.respond(not_found());
@@ -153,8 +155,8 @@ pub fn run() {
                 .app_data_dir()
                 .map(|d| d.join("fm.sqlite").to_string_lossy().into_owned())
                 .unwrap_or_else(|_| ":memory:".to_owned());
-            let caps = CapabilitySet::new(&db_path)
-                .map_err(|e| format!("capability init failed: {e}"))?;
+            let caps =
+                CapabilitySet::new(&db_path).map_err(|e| format!("capability init failed: {e}"))?;
 
             let kernel = Arc::new(Kernel::new());
 

@@ -20,7 +20,7 @@
  *
  * 数字纪律：进度只有真实条目数与真实字节数，没有自造的百分比；被跳过的目录（没有权限 /
  * 找不到路径 / 路径不合法 / 读取失败 / 超出扫描预算）单独成列、给出中文原因，并且
- * **不计入**总量；大小沿用「文件详情」那套 `formatSize` 写法。
+ * **不计入**总量；大小与时钟格式取 SDK 的 `formatSize` / `formatClock`，界面里不留第二套单位格式。
  *
  * 缓存按路径 + 时间：内存里的聚合结果以根目录路径为 key、带 TTL，命中时面板明说结果
  * 来自缓存并给出扫描时刻；`file:changed` 落在缓存的根目录下就立刻作废该条并说明原因。
@@ -30,8 +30,7 @@
  * 最大的前若干块，其余合并成「其他」并保留能逐项查看的明细入口。块画在 canvas 上、
  * 不进 DOM，所以几十万条目也不会压垮页面。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+
 import {
   ActionIcon,
   Badge,
@@ -47,10 +46,12 @@ import {
 } from "@mantine/core";
 import {
   Capabilities,
-  Events,
-  errorMessage,
   type DiskListOut,
   type DiskVolume,
+  Events,
+  errorMessage,
+  formatClock,
+  formatSize,
   type PickOut,
   type ScanAck,
   type ScanDonePayload,
@@ -60,10 +61,13 @@ import {
   type ScanSkipReason,
   type SlotProps,
 } from "@my-file-manager/plugin-sdk";
-import * as echarts from "echarts/core";
 import { TreemapChart } from "echarts/charts";
 import { TooltipComponent } from "echarts/components";
+import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
+import { ArrowUpLeft, X } from "lucide-react";
+import type { CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 echarts.use([TreemapChart, TooltipComponent, CanvasRenderer]);
 
@@ -123,22 +127,7 @@ interface View {
   fromCacheAt: number | null;
 }
 
-/** 与「文件详情」面板同一个大小写法：界面里不能出现第二套单位格式。 */
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
 const count = (n: number): string => n.toLocaleString("zh-CN");
-
-const clock = (ms: number): string => new Date(ms).toLocaleTimeString("zh-CN", { hour12: false });
 
 /** 能力错误 → 中文原因；provider 的前缀（`permission denied:` 等）不进界面。 */
 function userError(err: unknown): string {
@@ -208,7 +197,7 @@ export function StorageAnalysisToolbar({ host }: SlotProps) {
           treeCache.delete(root);
           const shown = viewRef.current;
           if (shown?.root === root && shown.fromCacheAt !== null) {
-            setNotice(`目录内容已变化，${clock(entry.at)} 的缓存结果作废，请重新扫描。`);
+            setNotice(`目录内容已变化，${formatClock(entry.at)} 的缓存结果作废，请重新扫描。`);
           }
         }
       }),
@@ -430,7 +419,7 @@ export function StorageAnalysisToolbar({ host }: SlotProps) {
               style={{ marginLeft: "auto" }}
               onClick={() => changeOpen(false)}
             >
-              ✕
+              <X size={14} />
             </ActionIcon>
           </Group>
 
@@ -520,7 +509,7 @@ export function StorageAnalysisToolbar({ host }: SlotProps) {
             ) : (
               <Text size="xs" truncate>
                 {view?.fromCacheAt
-                  ? `结果来自 ${clock(view.fromCacheAt)} 的缓存 · ${formatSize(view.bytes)} · ${count(view.entries)} 项`
+                  ? `结果来自 ${formatClock(view.fromCacheAt)} 的缓存 · ${formatSize(view.bytes)} · ${count(view.entries)} 项`
                   : `扫描完成 · ${formatSize(view?.bytes ?? 0)} · ${count(view?.entries ?? 0)} 项 · 用时 ${((view?.elapsedMs ?? 0) / 1000).toFixed(1)} 秒`}
               </Text>
             )}
@@ -556,7 +545,7 @@ export function StorageAnalysisToolbar({ host }: SlotProps) {
                 setMergedOpen(false);
               }}
             >
-              ↩
+              <ArrowUpLeft size={14} />
             </ActionIcon>
             {view ? (
               <Group gap={2} wrap="nowrap" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
@@ -690,7 +679,9 @@ function splitTiles(node: ScanNode | null): { main: ScanNode[]; merged: ScanNode
 
 /** 类型占比：`kinds` 是聚合出来的扩展名总量，取前两类写进概览行。 */
 function topKinds(kinds: Record<string, number> | null | undefined): string {
-  const entries = Object.entries(kinds ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 2);
+  const entries = Object.entries(kinds ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2);
   if (entries.length === 0) return "没有可统计的文件类型";
   return `主要类型 ${entries.map(([ext, bytes]) => `${ext} ${formatSize(bytes)}`).join("、")}`;
 }
@@ -754,7 +745,12 @@ function palette(): string[] {
   return tokens.map(([token, fallback]) => style.getPropertyValue(token).trim() || fallback);
 }
 
-function optionFor(tiles: ScanNode[], mergedBytes: number, mergedCount: number, total: number): echarts.EChartsCoreOption {
+function optionFor(
+  tiles: ScanNode[],
+  mergedBytes: number,
+  mergedCount: number,
+  total: number,
+): echarts.EChartsCoreOption {
   const data: Record<string, unknown>[] = tiles.map((t) => ({
     name: t.name,
     value: t.bytes,
@@ -898,7 +894,11 @@ function DetailList({
   const kids = [...(node.children ?? [])].sort((a, b) => b.bytes - a.bytes);
   // 有合并块时明细只需要列前 12 项（其余走「其他」入口）；没有合并块就必须把这一层
   // 列全，否则界面少画几行又什么都不说，等于把数据藏起来。
-  const rows = mergedOpen ? merged.slice(0, DETAIL_ROWS) : merged.length > 0 ? kids.slice(0, 12) : kids.slice(0, DETAIL_ROWS);
+  const rows = mergedOpen
+    ? merged.slice(0, DETAIL_ROWS)
+    : merged.length > 0
+      ? kids.slice(0, 12)
+      : kids.slice(0, DETAIL_ROWS);
   // 列不完就要说：「其他」展开后只剩 100 行时，剩下那几百项在界面上是看不见的，
   // 不写出来就等于悄悄藏了数据。
   const unlisted =

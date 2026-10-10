@@ -9,12 +9,16 @@
 
 use std::convert::Infallible;
 
-use cordis_core::event::{ListenerRegistrationError, observer};
+use cordis_core::event::{observer, ListenerRegistrationError};
 use cordis_core::{Context, Event, Plugin};
-use fm_contracts::capability::{FileOperationProgress, FileOperationResult, ScanDone, ScanProgress};
+use fm_contracts::capability::{
+    FileOperationProgress, FileOperationResult, ScanDone, ScanProgress, SearchIndexDone,
+    SearchIndexProgress,
+};
 use fm_contracts::events::{
     FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs, ScanDoneEvent,
-    ScanProgressEvent, ShellOperationDone, ShellOperationProgress,
+    ScanProgressEvent, SearchIndexDoneEvent, SearchIndexProgressEvent, ShellOperationDone,
+    ShellOperationProgress,
 };
 use tauri::{AppHandle, Emitter, Runtime};
 
@@ -46,15 +50,14 @@ impl<R: Runtime> Plugin for EventBridge<R> {
 
     async fn apply(&self, ctx: Context, _: &()) -> Result<(), Self::ApplyError> {
         let app_fc = self.app.clone();
-        let _fc = ctx.on::<FileChanged, _>(observer(
-            move |_ctx: Context, args: FileChangedArgs| {
+        let _fc =
+            ctx.on::<FileChanged, _>(observer(move |_ctx: Context, args: FileChangedArgs| {
                 let app = app_fc.clone();
                 async move {
                     let _ = app.emit(FileChanged::NAME, args);
                     Ok::<_, Infallible>(())
                 }
-            },
-        ))?;
+            }))?;
 
         let app_hu = self.app.clone();
         let _hu = ctx.on::<HistoryUpdated, _>(observer(
@@ -102,22 +105,46 @@ impl<R: Runtime> Plugin for EventBridge<R> {
         // nothing else. Forwarded verbatim for the same reason as above — a reshape
         // here would break the space-analysis panel that listens for these names.
         let app_scan_progress = self.app.clone();
-        let _scan_progress = ctx.on::<ScanProgressEvent, _>(observer(
-            move |_ctx: Context, args: ScanProgress| {
+        let _scan_progress =
+            ctx.on::<ScanProgressEvent, _>(observer(move |_ctx: Context, args: ScanProgress| {
                 let app = app_scan_progress.clone();
                 async move {
                     let _ = app.emit(ScanProgressEvent::NAME, args);
                     Ok::<_, Infallible>(())
                 }
-            },
-        ))?;
+            }))?;
 
         let app_scan_done = self.app.clone();
-        let _scan_done = ctx.on::<ScanDoneEvent, _>(observer(
-            move |_ctx: Context, args: ScanDone| {
+        let _scan_done =
+            ctx.on::<ScanDoneEvent, _>(observer(move |_ctx: Context, args: ScanDone| {
                 let app = app_scan_done.clone();
                 async move {
                     let _ = app.emit(ScanDoneEvent::NAME, args);
+                    Ok::<_, Infallible>(())
+                }
+            }))?;
+
+        // The name index is the third job that reports only through events. Its
+        // `cancelled`/`partial` truth is the whole difference between "没有匹配" and
+        // "索引不完整" in the UI, so a dropped forward here would make an empty result
+        // page lie.
+        let app_search_progress = self.app.clone();
+        let _search_progress = ctx.on::<SearchIndexProgressEvent, _>(observer(
+            move |_ctx: Context, args: SearchIndexProgress| {
+                let app = app_search_progress.clone();
+                async move {
+                    let _ = app.emit(SearchIndexProgressEvent::NAME, args);
+                    Ok::<_, Infallible>(())
+                }
+            },
+        ))?;
+
+        let app_search_done = self.app.clone();
+        let _search_done = ctx.on::<SearchIndexDoneEvent, _>(observer(
+            move |_ctx: Context, args: SearchIndexDone| {
+                let app = app_search_done.clone();
+                async move {
+                    let _ = app.emit(SearchIndexDoneEvent::NAME, args);
                     Ok::<_, Infallible>(())
                 }
             },

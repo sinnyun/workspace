@@ -35,19 +35,20 @@
  * through `detail:tab:changed`, so a session switch restores it with the rest of
  * the cascade.
  */
-import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+
 import { Badge, Group, Tabs, Text } from "@mantine/core";
-import { FileText, FolderClosed } from "lucide-react";
 import {
-  Events,
   disposer,
-  slotPrefix,
+  Events,
   type HostMetaState,
   type PluginHost,
   type Ref,
   type SlotProps,
+  slotPrefix,
 } from "@my-file-manager/plugin-sdk";
+import { FileText, FolderClosed } from "lucide-react";
+import type { CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const INFO_TAB = "info";
 const TAB_PREFIX = "detail-tab";
@@ -82,10 +83,7 @@ const baseName = (path: string): string => {
  *  `detail-tab:<name>` contribution — first-registration order, so 信息 is always
  *  index 0 and is the fallback target. Both the render and the write-back effect read
  *  this, which is what keeps "valid tab" from drifting into two definitions. */
-const liveTabIds = (host: PluginHost): string[] => [
-  INFO_TAB,
-  ...host.contributedSlots(TAB_PREFIX).map(tabIdOf),
-];
+const liveTabIds = (host: PluginHost): string[] => [INFO_TAB, ...host.contributedSlots(TAB_PREFIX).map(tabIdOf)];
 
 const ELLIPSIS = "…";
 /** 中间省略：保留路径头部与末段名称，长路径读起来仍然认得出在哪。完整路径不进正文，
@@ -97,10 +95,7 @@ function abbreviatePath(path: string, budget = 46): string {
   const tailBudget = Math.max(8, Math.min(base.length, Math.floor(budget / 2)));
   const headBudget = Math.max(6, budget - tailBudget - ELLIPSIS.length);
   const head = dir.length <= headBudget ? dir : `${dir.slice(0, headBudget)}${ELLIPSIS}`;
-  const tail =
-    base.length <= tailBudget
-      ? base
-      : `${ELLIPSIS}${base.slice(base.length - tailBudget)}`;
+  const tail = base.length <= tailBudget ? base : `${ELLIPSIS}${base.slice(base.length - tailBudget)}`;
   return head + tail;
 }
 
@@ -205,18 +200,30 @@ export function InspectorContainer({ host }: SlotProps) {
 function FocusHeader({ focus }: { focus: Ref | null }) {
   if (!focus) {
     return (
-      <div className="fm-empty" style={{ padding: "24px 10px" }}><span className="fm-empty-icon"><FileText size={26} /></span><Text size="sm" fw={600}>文件信息</Text><Text size="xs" c="dimmed">选中项目，查看预览、属性与历史</Text></div>
+      <div className="fm-empty" style={{ padding: "24px 10px" }}>
+        <span className="fm-empty-icon">
+          <FileText size={26} />
+        </span>
+        <Text size="sm" fw={600}>
+          文件信息
+        </Text>
+        <Text size="xs" c="dimmed">
+          选中项目，查看预览、属性与历史
+        </Text>
+      </div>
     );
   }
   const isDir = focus.kind === "folder";
   return (
     <Group className="fm-inspector-header" gap={10} wrap="nowrap" align="center" style={headerStyle}>
-      <span className="fm-inspector-icon">{isDir ? (
-        <FolderClosed size={23} color="var(--mantine-color-yellow-6)" />
-      ) : (
-        <FileText size={23} color="var(--mantine-color-gray-6)" />
-      )}
-      </span><div style={{ minWidth: 0, flex: 1 }}>
+      <span className="fm-inspector-icon">
+        {isDir ? (
+          <FolderClosed size={23} color="var(--mantine-color-yellow-6)" />
+        ) : (
+          <FileText size={23} color="var(--mantine-color-gray-6)" />
+        )}
+      </span>
+      <div style={{ minWidth: 0, flex: 1 }}>
         {/* 第一行：名称 + 类型徽标。两者都不参与收缩竞争——名称 truncate 让位，
             徽标 flex 0 0 auto，所以栏再窄也不会丢掉“是什么类型的东西”这一眼信息。 */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -252,9 +259,16 @@ function Zone({ host, slotId }: { host: PluginHost; slotId: string }) {
       {content ? (
         <Outlet id={slotId} />
       ) : (
-        <div className={slotId === "file-extension-zone" ? "fm-extension-placeholder" : undefined} style={emptyZoneStyle}>
-          <Text size="xs" fw={600}>{ZONE_LABELS[slotId] ?? slotId}</Text>
-          <Text size="xs" c="dimmed">{slotId === "file-extension-zone" ? "启用文件扩展插件后，相关功能会显示在这里。" : "暂无内容"}</Text>
+        <div
+          className={slotId === "file-extension-zone" ? "fm-extension-placeholder" : undefined}
+          style={emptyZoneStyle}
+        >
+          <Text size="xs" fw={600}>
+            {ZONE_LABELS[slotId] ?? slotId}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {slotId === "file-extension-zone" ? "启用文件扩展插件后，相关功能会显示在这里。" : "暂无内容"}
+          </Text>
         </div>
       )}
     </div>

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use cordis_core::event::{ListenerRegistrationError, observer};
+use cordis_core::event::{observer, ListenerRegistrationError};
 use cordis_core::{Context, InjectSpec, Plugin, Routing, Service};
 use fm_contracts::capability::{DbCapability, HashAlgo, HashCapability};
 use fm_contracts::events::{FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs};
@@ -114,8 +114,8 @@ impl Plugin for FileHistoryPlugin {
         let max_entries = input.max_entries_per_file;
 
         // Generation-owned listener: dropped/disposed with the fiber.
-        let _listener = ctx.on::<FileChanged, _>(observer(
-            move |ctx: Context, args: FileChangedArgs| {
+        let _listener =
+            ctx.on::<FileChanged, _>(observer(move |ctx: Context, args: FileChangedArgs| {
                 let hash = Arc::clone(&hash);
                 let db = Arc::clone(&db);
                 async move {
@@ -128,20 +128,19 @@ impl Plugin for FileHistoryPlugin {
                     // Blocking hash IO off the kernel poll (consumer-guide rule 5).
                     let hash_api = Arc::clone(hash.api());
                     let p = path.clone();
-                    let digest = tokio::task::spawn_blocking(move || {
-                        hash_api.file(&p, HashAlgo::Blake3)
-                    })
-                    .await
-                    .map_err(|e| HistoryError::Capability(e.to_string()))?
-                    .map_err(|e| HistoryError::Capability(e.to_string()))?;
+                    let digest =
+                        tokio::task::spawn_blocking(move || hash_api.file(&p, HashAlgo::Blake3))
+                            .await
+                            .map_err(|e| HistoryError::Capability(e.to_string()))?
+                            .map_err(|e| HistoryError::Capability(e.to_string()))?;
 
                     let db_api = Arc::clone(db.api());
                     let key = path.clone();
                     let recorded = tokio::task::spawn_blocking(move || {
                         let log = db_api.read_log(STORE, &key)?;
-                        let last = log.last().and_then(|v| {
-                            serde_json::from_value::<HistoryEntry>(v.clone()).ok()
-                        });
+                        let last = log
+                            .last()
+                            .and_then(|v| serde_json::from_value::<HistoryEntry>(v.clone()).ok());
                         if last.as_ref().map(|e| e.hash.as_str()) == Some(digest.as_str()) {
                             // Unchanged content: no new snapshot.
                             return Ok::<_, fm_contracts::CapabilityError>(false);
@@ -161,18 +160,14 @@ impl Plugin for FileHistoryPlugin {
 
                     if recorded {
                         tracing::debug!(path = %path, "file-history: snapshot recorded");
-                        ctx.emit::<HistoryUpdated>(
-                            Routing::Unscoped,
-                            HistoryUpdatedArgs { path },
-                        )
-                        .await
-                        .map_err(|e| HistoryError::Capability(e.to_string()))?;
+                        ctx.emit::<HistoryUpdated>(Routing::Unscoped, HistoryUpdatedArgs { path })
+                            .await
+                            .map_err(|e| HistoryError::Capability(e.to_string()))?;
                     }
                     let _ = max_entries; // trimming wired when db exposes a log trim
                     Ok(())
                 }
-            },
-        ))?;
+            }))?;
         Ok(())
     }
 }

@@ -16,7 +16,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cordis_core::event::{ListenerRegistrationError, observer};
+use cordis_core::event::{observer, ListenerRegistrationError};
 use cordis_core::{Context, Plugin};
 use fm_contracts::events::{HistoryUpdated, HistoryUpdatedArgs};
 use fm_kernel::capabilities::CapabilitySet;

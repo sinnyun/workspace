@@ -11,6 +11,7 @@ pub mod file_kind;
 pub mod fs;
 pub mod hash;
 pub mod resource;
+pub mod search;
 pub mod shell_ops;
 pub mod shell_thumb;
 pub mod sys;
@@ -18,18 +19,19 @@ pub mod watch;
 
 use std::sync::Arc;
 
-use cordis_core::Context;
 use cordis_core::service::ServicePublishError;
+use cordis_core::Context;
 use fm_contracts::capability::{
     DbCapability, FileKindCapability, FsCapability, FsResourceCapability, HashCapability,
-    ShellFileOperationCapability, ShellThumbnailCapability, SysCapability,
+    SearchCapability, ShellFileOperationCapability, ShellThumbnailCapability, SysCapability,
 };
 
 pub use db::SqliteDb;
 pub use file_kind::FileKinds;
-pub use fs::{StdFs, home_dir};
+pub use fs::{home_dir, StdFs};
 pub use hash::StreamingHash;
 pub use resource::Resources;
+pub use search::Search;
 pub use shell_ops::ShellOps;
 pub use shell_thumb::ShellThumbs;
 pub use sys::Sys;
@@ -55,6 +57,8 @@ pub struct CapabilitySet {
     pub resource: Arc<Resources>,
     /// Volume space + cancellable recursive scans (`sys.*`).
     pub sys: Arc<Sys>,
+    /// Name index for search (`search.*`).
+    pub search: Arc<Search>,
     /// Per-store SQLite storage.
     pub db: Arc<SqliteDb>,
 }
@@ -70,6 +74,7 @@ impl CapabilitySet {
             file_kinds: Arc::new(FileKinds::new()),
             resource: Arc::new(Resources::new()),
             sys: Arc::new(Sys::new()),
+            search: Arc::new(Search::open(&index_path_for(db_path))?),
             db: Arc::new(SqliteDb::open(db_path)?),
         })
     }
@@ -90,10 +95,15 @@ impl CapabilitySet {
         // `publish` is (the boot fiber applies on a worker). Capturing it here
         // rather than at `start` time is what keeps a bulk copy that outlives the
         // boot sequence able to report at all.
-        self.shell_ops.attach(ctx.clone(), tokio::runtime::Handle::current());
+        self.shell_ops
+            .attach(ctx.clone(), tokio::runtime::Handle::current());
         // A scan publishes `scan:*` from its own worker threads, so it needs the
         // same runtime handle the Shell provider does.
-        self.sys.attach(ctx.clone(), tokio::runtime::Handle::current());
+        self.sys
+            .attach(ctx.clone(), tokio::runtime::Handle::current());
+        // An indexing job publishes `search:index-*` from its own threads too.
+        self.search
+            .attach(ctx.clone(), tokio::runtime::Handle::current());
         let _fs = ctx.provide::<FsCapability>(Arc::new(FsCapability::new(self.fs.clone())))?;
         let _hash =
             ctx.provide::<HashCapability>(Arc::new(HashCapability::new(self.hash.clone())))?;
@@ -104,15 +114,35 @@ impl CapabilitySet {
         let _ops = ctx.provide::<ShellFileOperationCapability>(Arc::new(
             ShellFileOperationCapability::new(self.shell_ops.clone()),
         ))?;
-        let _kinds =
-            ctx.provide::<FileKindCapability>(Arc::new(FileKindCapability::new(
-                self.file_kinds.clone(),
-            )))?;
+        let _kinds = ctx.provide::<FileKindCapability>(Arc::new(FileKindCapability::new(
+            self.file_kinds.clone(),
+        )))?;
         let _resource = ctx.provide::<FsResourceCapability>(Arc::new(
             FsResourceCapability::new(self.resource.clone()),
         ))?;
-        let _sys =
-            ctx.provide::<SysCapability>(Arc::new(SysCapability::new(self.sys.clone())))?;
+        let _sys = ctx.provide::<SysCapability>(Arc::new(SysCapability::new(self.sys.clone())))?;
+        let _search =
+            ctx.provide::<SearchCapability>(Arc::new(SearchCapability::new(self.search.clone())))?;
         Ok(())
+    }
+}
+
+/// The name index file for a given app database path.
+///
+/// A memory database cannot share its index with another connection, so a test
+/// set keeps its index **in memory too** by using the same `:memory:` spelling.
+/// A real set gets a sibling file next to `fm.sqlite`, which is what makes the
+/// index survive a restart and stay out of the app's key/value storage.
+fn index_path_for(db_path: &str) -> String {
+    if db_path == ":memory:" {
+        return ":memory:".to_owned();
+    }
+    let path = std::path::Path::new(db_path);
+    let name = format!("search-index-{}.db", std::process::id());
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => {
+            parent.join(name).to_string_lossy().into_owned()
+        }
+        _ => name,
     }
 }

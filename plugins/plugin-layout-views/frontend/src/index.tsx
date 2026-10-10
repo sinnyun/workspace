@@ -22,10 +22,11 @@
  * Geometry + selection only: this file never lists a directory, a favorite or a tag,
  * and it never writes meta state (`sidebar:view:changed` belongs to the A rail).
  */
-import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
+
 import { Stack, Text, Transition } from "@mantine/core";
-import { type PluginHost, type SlotProps } from "@my-file-manager/plugin-sdk";
+import type { PluginHost, SlotProps } from "@my-file-manager/plugin-sdk";
+import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
 
 const PREFIX = "nav-panel";
 

@@ -8,8 +8,8 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use fm_contracts::capability::{
-    CapabilityError, FsApi, ListEntry, MAX_TEXT_READ_BYTES, ReadChunkOut, ReadTextOut, StatOut,
-    TextReadState,
+    CapabilityError, FsApi, ListEntry, ReadChunkOut, ReadTextOut, StatOut, TextReadState,
+    MAX_TEXT_READ_BYTES,
 };
 
 /// std-fs backed implementation of [`FsApi`].
@@ -90,13 +90,14 @@ impl FsApi for StdFs {
             )));
         }
         let byte_length = meta.len();
-        let out = |state: TextReadState, text: Option<String>, encoding: Option<String>| ReadTextOut {
-            path: path.to_owned(),
-            state,
-            text,
-            encoding,
-            byte_length,
-        };
+        let out =
+            |state: TextReadState, text: Option<String>, encoding: Option<String>| ReadTextOut {
+                path: path.to_owned(),
+                state,
+                text,
+                encoding,
+                byte_length,
+            };
         // Refuse the size before reading it: the ceiling exists so a 2 GB "text
         // file" cannot be pulled into the WebView by an accidental focus.
         if byte_length > MAX_TEXT_READ_BYTES {
@@ -104,7 +105,9 @@ impl FsApi for StdFs {
         }
         let bytes = fs::read(path).map_err(CapabilityError::from_io)?;
         match decode_text(&bytes) {
-            Decoded::Text { text, encoding } => Ok(out(TextReadState::Ok, Some(text), Some(encoding))),
+            Decoded::Text { text, encoding } => {
+                Ok(out(TextReadState::Ok, Some(text), Some(encoding)))
+            }
             Decoded::Binary => Ok(out(TextReadState::Binary, None, None)),
         }
     }
@@ -198,9 +201,7 @@ fn looks_binary(text: &str) -> bool {
     let mut total = 0usize;
     for ch in sample {
         total += 1;
-        if ch == '\u{FFFD}' {
-            odd += 1;
-        } else if ch.is_control() && !matches!(ch, '\t' | '\n' | '\r') {
+        if ch == '\u{FFFD}' || (ch.is_control() && !matches!(ch, '\t' | '\n' | '\r')) {
             odd += 1;
         }
     }
@@ -239,10 +240,20 @@ mod tests {
 
     #[test]
     fn a_utf8_bom_is_stripped_not_shown() {
-        let bytes = [0xEF, 0xBB, 0xBF].into_iter().chain("表头\n".chars().flat_map(|c| c.encode_utf8(&mut [0u8; 4]).bytes().collect::<Vec<u8>>())).collect::<Vec<u8>>();
+        let bytes = [0xEF, 0xBB, 0xBF]
+            .into_iter()
+            .chain(
+                "表头\n"
+                    .chars()
+                    .flat_map(|c| c.encode_utf8(&mut [0u8; 4]).bytes().collect::<Vec<u8>>()),
+            )
+            .collect::<Vec<u8>>();
         let (text, encoding) = decoded(&bytes);
         assert_eq!(encoding, "UTF-8");
-        assert!(text.starts_with("表头"), "BOM leaked into the body: {text:?}");
+        assert!(
+            text.starts_with("表头"),
+            "BOM leaked into the body: {text:?}"
+        );
         assert!(!text.contains('\u{FEFF}'));
     }
 
@@ -250,10 +261,16 @@ mod tests {
     fn non_utf8_text_is_decoded_by_the_detector() {
         // GBK bytes for the same sentence: only a detector + decoder can read it.
         let (gbk, _, _) = encoding_rs::GBK.encode("中文乱码测试\n");
-        assert!(!std::str::from_utf8(&gbk).is_ok(), "fixture must not be UTF-8");
+        assert!(
+            std::str::from_utf8(&gbk).is_err(),
+            "fixture must not be UTF-8"
+        );
         let (text, encoding) = decoded(&gbk);
         assert_eq!(text, "中文乱码测试\n");
-        assert!(encoding.contains("GBK") || encoding.contains("gb18030"), "got {encoding}");
+        assert!(
+            encoding.contains("GBK") || encoding.contains("gb18030"),
+            "got {encoding}"
+        );
     }
 
     #[test]
@@ -301,7 +318,10 @@ mod tests {
     fn a_directory_is_a_caller_error_not_a_state() {
         let dir = tempfile::tempdir().unwrap();
         let err = StdFs.read_text(&dir.path().to_string_lossy()).unwrap_err();
-        assert!(matches!(err, CapabilityError::InvalidArgument(_)), "{err:?}");
+        assert!(
+            matches!(err, CapabilityError::InvalidArgument(_)),
+            "{err:?}"
+        );
     }
 
     #[test]

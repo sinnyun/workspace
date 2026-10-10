@@ -69,9 +69,7 @@ impl PluginServer {
                 }
             }
         }
-        Self {
-            plugins: by_name,
-        }
+        Self { plugins: by_name }
     }
 
     /// Manifests of all discovered frontend plugins (for `plugins_list_frontend`).

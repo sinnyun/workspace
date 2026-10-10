@@ -3,11 +3,15 @@ export function createToolbarStore<T>() {
   const sessions = new Map<string, Map<string, { value: T; visible: boolean }>>();
   const active = new Map<string, string>();
   const listeners = new Set<() => void>();
-  const notify = () => { for (const listener of listeners) listener(); };
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
   return {
     subscribe(listener: () => void) {
       listeners.add(listener);
-      return () => { listeners.delete(listener); };
+      return () => {
+        listeners.delete(listener);
+      };
     },
     set(session: string, pane: string, value: T, visible: boolean) {
       const entries = sessions.get(session) ?? new Map();
@@ -15,11 +19,17 @@ export function createToolbarStore<T>() {
       sessions.set(session, entries);
       notify();
     },
-    claim(session: string, pane: string) { active.set(session, pane); notify(); },
+    claim(session: string, pane: string) {
+      active.set(session, pane);
+      notify();
+    },
     remove(session: string, pane: string) {
       const entries = sessions.get(session);
       entries?.delete(pane);
-      if (!entries?.size) { sessions.delete(session); active.delete(session); }
+      if (!entries?.size) {
+        sessions.delete(session);
+        active.delete(session);
+      }
       notify();
     },
     get(session: string): T | null {

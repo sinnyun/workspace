@@ -7,8 +7,14 @@
  *
  * Event names and payload shapes mirror the Rust `fm-contracts` crate; a
  * contract test (P3-3) keeps the two sides in sync.
+ *
+ * Also the shared display layer: the size/date formatters every plugin must
+ * agree on live here, so a plugin never writes its own. Both libraries are
+ * inlined into the one `shared/plugin-sdk.js` the import map gives everyone.
  */
 
+import dayjs from "dayjs";
+import prettyBytes from "pretty-bytes";
 import type { ComponentType } from "react";
 
 // ─────────────────────────── host meta state ───────────────────────────
@@ -130,10 +136,7 @@ export interface PluginHost {
 
   // —— capabilities (gated by manifest permissions.capabilities) ——
   /** Invoke an atomic capability by `domain.action` name. Rejects if not whitelisted. */
-  invoke<T = unknown>(
-    capability: string,
-    args?: Record<string, unknown>,
-  ): Promise<T>;
+  invoke<T = unknown>(capability: string, args?: Record<string, unknown>): Promise<T>;
 
   // —— meta state (read-only) ——
   getState(): HostMetaState;
@@ -145,6 +148,11 @@ export interface PluginHost {
    *  decides which halves a plugin gets (docs/plugin-functional/
    *  plugin-context-menu.md). */
   contextMenu?: ContextMenuHost;
+
+  // —— commands (gated by manifest permissions.commands) ——
+  /** Present only when the manifest asks for it; `permissions.commands`
+   *  decides which halves a plugin gets (docs/04 P7-30). */
+  commands?: CommandHost;
 }
 
 // ─────────────────────────── context menu ───────────────────────────
@@ -244,11 +252,65 @@ export interface ContextMenuRequest {
   context: ContextMenuContext;
 }
 
+// ─────────────────────────── commands ───────────────────────────
+
+/** One command a plugin publishes to the command surfaces (docs/04 P7-30).
+ *  The owning plugin runs it; the base only routes invocation and owns the
+ *  keyboard shortcut, so a command's business meaning stays private. */
+export interface CommandDescriptor {
+  /** Stable id, unique app-wide; prefix it with your plugin name. */
+  id: string;
+  /** Display text (Chinese) shown on the palette row. */
+  title: string;
+  /** Group heading the palette renders the command under. */
+  group?: string;
+  /** Secondary line, e.g. what the command acts on. */
+  subtitle?: string;
+  /** Keyboard shortcut the BASE dispatches, canonical form `Ctrl+Shift+P`:
+   *  `+`-separated modifiers (ctrl/alt/shift/meta, any order) plus one letter
+   *  or digit. Duplicates and malformed strings refuse the whole registration —
+   *  a silently never-firing shortcut is worse than a loud refusal at load. */
+  shortcut?: string;
+  /** Run the command. A rejection surfaces verbatim on the invoking surface —
+   *  the palette shows it in place and stays open. */
+  run(): void | Promise<void>;
+}
+
+/** The command face of the host, gated by `permissions.commands`. Exactly one
+ *  plugin may be the provider (the palette plugin) — same rule as the
+ *  context-menu panel, so the palette cannot be hijacked by a second claimant. */
+export interface CommandHost {
+  /** Provider only: take ownership of the palette. The base rejects a second
+   *  provider and warns. */
+  provide(): CommandLauncher | null;
+  /** Register one command. Returns an unregister handle; the base also drops
+   *  it automatically when the plugin unloads or is disabled. */
+  register(descriptor: CommandDescriptor): () => void;
+}
+
+/** What the provider plugin gets from the base: the live command list plus a
+ *  `run` that owns busy state and failure capture, so no palette has to
+ *  re-implement the lifecycle (mirrors {@link ContextMenuProvider}). */
+export interface CommandLauncher {
+  /** Every registered command with the owning plugin name, in registration order. */
+  commands(): Array<{ owner: string; descriptor: CommandDescriptor }>;
+  /** Fires whenever the command set changes (register, unregister, unload). */
+  onChange(cb: () => void): () => void;
+  /** Run one command. Resolves `true` when it completed and `false` when it was
+   *  refused (unknown id, another command still running) or threw — in both
+   *  failure cases {@link CommandLauncher.lastError} carries what to show. */
+  run(target: { owner: string; id: string }): Promise<boolean>;
+  /** The command currently running, or null. */
+  executing(): { owner: string; id: string } | null;
+  /** The last command failure, cleared when a new run starts. */
+  lastError(): { id: string; message: string } | null;
+}
+
 // ─────────────────────────── activate entry ───────────────────────────
 
 /** A frontend plugin entry must export `activate`. Called once on load; if it
  *  returns a function, that is the teardown hook run on disable/unload. */
-export type ActivateFn = (host: PluginHost) => void | (() => void);
+export type ActivateFn = (host: PluginHost) => undefined | (() => void);
 
 /** Shape of a loaded frontend plugin ESM module. */
 export interface PluginModule {
@@ -306,6 +368,16 @@ export interface PluginManifest {
     contextMenu?: {
       open?: string[];
       contribute?: boolean;
+      provide?: boolean;
+    };
+    /** Command grants (docs/04 P7-30). Absent entirely = no command access;
+     *  `host.commands` stays undefined.
+     *  - `register`: may publish commands (their `run` executes as this plugin)
+     *    and declare shortcuts the base dispatches.
+     *  - `provide`: may claim the palette itself — the palette plugin. The base
+     *    lets exactly one provider win, first come first served. */
+    commands?: {
+      register?: boolean;
       provide?: boolean;
     };
   };
@@ -404,14 +476,24 @@ export interface PreviewStateChangedArgs {
   progress: number | null;
 }
 
+/** `tags:updated` — the tag owner (`plugin-view-tags`) finished a successful
+ *  write to the `db.tags` store. Carries **no payload** by design: re-broadcasting
+ *  the store would be a second copy of shared state that can go stale; consumers
+ *  re-query through {@link listTags} instead. Frontend bus only (no Rust
+ *  counterpart). */
+export type TagsUpdatedArgs = undefined;
+
 /** Well-known event names (single source for string literals). */
 export const Events = {
   fileChanged: "file:changed",
   historyUpdated: "history:updated",
+  tagsUpdated: "tags:updated",
   shellOperationProgress: "shell:operation:progress",
   shellOperationDone: "shell:operation:done",
   scanProgress: "scan:progress",
   scanDone: "scan:done",
+  searchIndexProgress: "search:index-progress",
+  searchIndexDone: "search:index-done",
   selectionChanged: "selection:changed",
   tabActivated: "tab:activated",
   sidebarViewChanged: "sidebar:view:changed",
@@ -825,6 +907,199 @@ export interface ScanDonePayload {
   entries: number;
 }
 
+// ─────────────────────────── search channel (P7-28 / P7-29) ───────────────────────────
+// The name index lives in its own rebuildable SQLite file and is served by four
+// capabilities: read state, query one page, start a job, stop a job. Results are
+// paged request/response (`offset` + `hasMore`), so there is no result event —
+// the roadmap's `search:results` name was folded into `search.query`.
+
+/** Longest query text the host looks at; longer input is truncated. Mirrors
+ *  `SEARCH_MAX_TEXT_CHARS` (Rust). */
+export const SEARCH_MAX_TEXT_CHARS = 128;
+
+/** Biggest page one `search.query` may return. Mirrors `SEARCH_MAX_PAGE` (Rust). */
+export const SEARCH_MAX_PAGE = 200;
+
+/** Queries shorter than this cannot be answered from the trigram index, so the
+ *  host uses a bounded substring scan instead. Mirrors `SEARCH_TRIGRAM_MIN_CHARS`
+ *  (Rust). */
+export const SEARCH_TRIGRAM_MIN_CHARS = 3;
+
+/** Minimum gap between two `search:index-progress` emissions. Mirrors
+ *  `SEARCH_PROGRESS_INTERVAL_MS` (Rust). */
+export const SEARCH_PROGRESS_INTERVAL_MS = 120;
+
+/** Deepest directory level the indexer walks. Mirrors `SEARCH_INDEX_MAX_DEPTH`
+ *  (Rust): deeper rows are never written, so dev and host index the same set. */
+export const SEARCH_INDEX_MAX_DEPTH = 64;
+
+/** What hits are filtered to. Mirrors `SearchScope` (Rust). */
+export type SearchScope = "all" | "file" | "dir";
+
+/** Index lifecycle. No percentage on purpose: the entry ceiling means the total
+ *  is unknown up front. Mirrors `SearchIndexState` (Rust). */
+export type SearchIndexState = "empty" | "indexing" | "ready" | "partial" | "failed";
+
+/** `search.query` arguments. Only `text` is required, so the command palette can
+ *  send `{ text }` and get relevance-ordered hits. */
+export interface SearchQueryIn {
+  text: string;
+  /** Only hits inside this directory subtree; omitted = every indexed root. */
+  within?: string | null;
+  scope?: SearchScope;
+  /** Clamped to `SEARCH_MAX_PAGE`. */
+  limit?: number | null;
+  /** Rows to skip, i.e. the cursor for the next page. */
+  offset?: number;
+}
+
+/** One hit. There is no `score`: the order the host returns **is** the ranking. */
+export interface SearchHit {
+  path: string;
+  name: string;
+  /** Directory the name lives in, so the row can show context without a second
+   *  round trip. */
+  parent: string;
+  isDir: boolean;
+  /** `null` for directories, matching `ListEntry.size`. */
+  size?: number | null;
+  /** `null` for directories too: a hit must read exactly like the listing row. */
+  modifiedMs?: number | null;
+}
+
+/** `search.query` answer: one page plus enough state to explain itself. */
+export interface SearchQueryOut {
+  /** The text actually searched, after clamping/truncation. */
+  text: string;
+  scope: SearchScope;
+  tookMs: number;
+  /** Matches the index knows about for this query, not just this page. */
+  total: number;
+  offset: number;
+  hasMore: boolean;
+  hits: SearchHit[];
+  /** The index's own state, so a page can tell "还没有索引" from "没有匹配" from
+   *  "索引不完整". Never derived from how many rows this page found. */
+  state: SearchIndexState;
+}
+
+/** `search.status` answer. */
+export interface SearchStatusOut {
+  state: SearchIndexState;
+  entries: number;
+  roots: string[];
+  /** Wall-clock length of the last job that reached a terminal state. */
+  lastJobMs: number;
+  /** Chinese, provider-authored reason for `partial`/`failed`. */
+  detail?: string | null;
+}
+
+/** `search.index.start` arguments. */
+export interface SearchIndexIn {
+  /** Absolute directories to walk. Empty = the host's default roots. */
+  roots?: string[];
+  /** `true` → drop and rebuild; `false` → bring up to date. */
+  rebuild?: boolean;
+}
+
+/** `search.index.start` answer: an id and the roots it accepted. Progress is in
+ *  the events, exactly like `sys.scan.start`. */
+export interface SearchIndexAck {
+  jobId: string;
+  roots: string[];
+  state: SearchIndexState;
+}
+
+/** `search:index-progress` payload — counters only, never a percentage. */
+export interface SearchIndexProgressPayload {
+  jobId: string;
+  state: SearchIndexState;
+  entries: number;
+  /** Directory currently being listed; a display hint, not a cursor. */
+  currentPath: string;
+  elapsedMs: number;
+}
+
+/** `search:index-done` payload. Terminal, and separate from progress so a
+ *  cancelled job cannot be inferred from a missing tick. */
+export interface SearchIndexDonePayload {
+  jobId: string;
+  state: SearchIndexState;
+  entries: number;
+  roots: string[];
+  elapsedMs: number;
+  /** `true` → the index is **partial**: "no results" is not "no matches". */
+  cancelled: boolean;
+  detail?: string | null;
+}
+
+// ─────────────────────── tags store (P7-32, docs/04) ───────────────────────
+// The tags store lives in the generic `db` capability as store `tags` — a kv
+// row per tag, key = name, value = the JSON record below. That keeps the store
+// schema-free on the Rust side: the owner (`plugin-view-tags`) owns the meaning
+// of its rows, everyone else reads them through the shapes here (docs/09 §3.4).
+
+/** One member of a tag. `kind` is the same opaque string a `Ref` carries
+ *  (`folder` / `file` / a viewer's own kind). Paths stay verbatim — on a
+ *  case-sensitive drive two spellings may be two different files. A path
+ *  appears at most once per tag: the kind is a refreshed property, not part
+ *  of a member's identity. */
+export interface TagMember {
+  path: string;
+  kind: string;
+}
+
+/** One tag as stored: `db.tags` kv key = name, value = this record. `seq` is the
+ *  creation order — kv rows would otherwise come back sorted by name, and
+ *  re-ranking names on rename is not what "creation order" means. */
+export interface TagRecord {
+  name: string;
+  seq: number;
+  members: TagMember[];
+}
+
+/** Parse raw `db.tags.list` kv rows (`[key, value]` tuples) into records. This is
+ *  the read boundary of shared state: junk rows and malformed members are dropped
+ *  rather than coerced, a duplicate path inside one tag collapses to its first
+ *  entry, and the result is ordered by `seq` (name as tie-break) so every consumer
+ *  sees the same order. */
+export function parseTagRows(rows: unknown): TagRecord[] {
+  if (!Array.isArray(rows)) return [];
+  const out: TagRecord[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length < 2) continue;
+    const rawName = row[0];
+    const rawValue = row[1];
+    const name = typeof rawName === "string" ? rawName.trim() : "";
+    if (!name || !rawValue || typeof rawValue !== "object") continue;
+    const rec = rawValue as Record<string, unknown>;
+    const seq = typeof rec.seq === "number" && Number.isFinite(rec.seq) ? rec.seq : 0;
+    const members: TagMember[] = [];
+    const seen = new Set<string>();
+    if (Array.isArray(rec.members)) {
+      for (const item of rec.members) {
+        if (!item || typeof item !== "object") continue;
+        const m = item as Record<string, unknown>;
+        const path = typeof m.path === "string" ? m.path : "";
+        const kind = typeof m.kind === "string" ? m.kind : "";
+        if (!path || !kind || seen.has(path)) continue;
+        seen.add(path);
+        members.push({ path, kind });
+      }
+    }
+    out.push({ name, seq, members });
+  }
+  out.sort((a, b) => a.seq - b.seq || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return out;
+}
+
+/** The single read path every tag consumer goes through (chips, tag views,
+ *  command palette): one keyless `db.tags.list` round trip. The caller's manifest
+ *  must list `db.tags.list` in `permissions.capabilities`. */
+export async function listTags(host: PluginHost): Promise<TagRecord[]> {
+  return parseTagRows(await host.invoke<unknown>("db.tags.list", {}));
+}
+
 /** Well-known capability names. Mirrors `fm_contracts::capability::names` (Rust);
  *  the contract test (P3-3) asserts the two sets are identical. */
 export const Capabilities = {
@@ -848,6 +1123,10 @@ export const Capabilities = {
   sysDiskList: "sys.disk.list",
   sysScanStart: "sys.scan.start",
   sysScanCancel: "sys.scan.cancel",
+  searchQuery: "search.query",
+  searchStatus: "search.status",
+  searchIndexStart: "search.index.start",
+  searchIndexCancel: "search.index.cancel",
   watchSubscribe: "watch.subscribe",
 } as const;
 
@@ -900,11 +1179,11 @@ export function validateManifest(m: PluginManifest): string | null {
   if (m.schemaVersion !== MANIFEST_SCHEMA_VERSION) {
     return `unsupported schemaVersion ${m.schemaVersion} (host accepts ${MANIFEST_SCHEMA_VERSION})`;
   }
-  if (!m.name || !m.name.trim()) return "name must be non-empty";
-  if (!m.version || !m.version.trim()) return "version must be non-empty";
+  if (!m.name?.trim()) return "name must be non-empty";
+  if (!m.version?.trim()) return "version must be non-empty";
   if (!m.backend && !m.frontend) return "manifest declares neither backend nor frontend";
   if (m.frontend) {
-    if (!m.frontend.entry || !m.frontend.entry.trim()) return "frontend.entry must be non-empty";
+    if (!m.frontend.entry?.trim()) return "frontend.entry must be non-empty";
     for (const slot of m.frontend.slots ?? []) {
       if (!slot.id?.trim() || !slot.export?.trim()) {
         return `slot in plugin \`${m.name}\` has empty id/export`;
@@ -966,4 +1245,36 @@ export function disposer(...fns: Array<() => void>): () => void {
 export function errorMessage(err: unknown): string {
   const text = err instanceof Error ? err.message : String(err);
   return text.replace(/^Error:\s*/, "");
+}
+
+// ───────────────────── display formatting (docs/06 P6-21) ─────────────────────
+
+/** What a cell shows when there is no value to format. */
+const NO_VALUE = "—";
+
+const isMs = (ms: number | null | undefined): ms is number => typeof ms === "number" && Number.isFinite(ms) && ms > 0;
+
+/**
+ * The one size format the whole app uses: binary math with `KiB/MiB/…` labels,
+ * at most one decimal. Four plugins each had their own `formatSize`, which is
+ * how the same file ended up as `3.4 KB` here and `3.42 KB` there.
+ */
+export function formatSize(bytes: number | null | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return NO_VALUE;
+  return prettyBytes(bytes, { binary: true, maximumFractionDigits: 1 });
+}
+
+/** `2026-10-27` — a date only, for dense columns. */
+export function formatDate(ms: number | null | undefined, fallback = ""): string {
+  return isMs(ms) ? dayjs(ms).format("YYYY-MM-DD") : fallback;
+}
+
+/** `2026-10-27 11:33` — local time, minute resolution. */
+export function formatDateTime(ms: number | null | undefined, fallback = NO_VALUE): string {
+  return isMs(ms) ? dayjs(ms).format("YYYY-MM-DD HH:mm") : fallback;
+}
+
+/** `11:33:05` — time of day only, for cache timestamps and log rows. */
+export function formatClock(ms: number | null | undefined, fallback = NO_VALUE): string {
+  return isMs(ms) ? dayjs(ms).format("HH:mm:ss") : fallback;
 }

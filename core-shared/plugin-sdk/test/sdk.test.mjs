@@ -1,17 +1,26 @@
 // SDK pure-function unit tests (roadmap P3-2/P3-4). Run with `node --test`
 // (Node strips the SDK's TS types natively; no test framework dependency).
-import test from "node:test";
+
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
+  BASE_SLOT_IDS,
+  Capabilities,
+  disposer,
+  Events,
+  errorMessage,
+  FrontendCapabilities,
+  formatClock,
+  formatDate,
+  formatDateTime,
+  formatSize,
   matchesPermission,
+  SEARCH_MAX_PAGE,
+  SEARCH_MAX_TEXT_CHARS,
+  SEARCH_PROGRESS_INTERVAL_MS,
+  SEARCH_TRIGRAM_MIN_CHARS,
   slotPrefix,
   validateManifest,
-  disposer,
-  errorMessage,
-  Events,
-  Capabilities,
-  FrontendCapabilities,
-  BASE_SLOT_IDS,
 } from "../src/index.ts";
 
 test("matchesPermission: exact, prefix and wildcard", () => {
@@ -108,10 +117,7 @@ test("validateManifest rejects drift the type system cannot catch", () => {
     version: "1.0.0",
     permissions: { capabilities: [], events: { subscribe: [], emit: [] } },
   };
-  assert.match(
-    validateManifest({ ...base, schemaVersion: 2 }),
-    /unsupported schemaVersion/,
-  );
+  assert.match(validateManifest({ ...base, schemaVersion: 2 }), /unsupported schemaVersion/);
   assert.match(validateManifest({ ...base, schemaVersion: 1, name: "  " }), /name/);
   assert.match(validateManifest({ ...base, schemaVersion: 1, version: "" }), /version/);
   assert.match(validateManifest({ ...base, schemaVersion: 1 }), /neither backend nor frontend/);
@@ -167,21 +173,47 @@ test("well-known names are stable string literals", () => {
   assert.equal(Events.focusChanged, "focus:changed");
   assert.equal(Events.slotDisposed, "slot:disposed");
   assert.equal(Capabilities.fsList, "fs.list");
-  assert.equal(Capabilities.thumbImage, "thumb.image");
+  assert.equal(Capabilities.shellThumbnailRead, "shell.thumbnail.read");
   assert.equal(Capabilities.watchSubscribe, "watch.subscribe");
+  // `thumb.image` and the app-side `image` decode path were removed with P7-15:
+  // thumbnails come from the Windows Shell only, so nothing may reintroduce it.
+  assert.equal("thumbImage" in Capabilities, false);
+});
+
+test("search contract: names, bounds and the folded result event", () => {
+  assert.equal(Capabilities.searchQuery, "search.query");
+  assert.equal(Capabilities.searchStatus, "search.status");
+  assert.equal(Capabilities.searchIndexStart, "search.index.start");
+  assert.equal(Capabilities.searchIndexCancel, "search.index.cancel");
+  assert.equal(Events.searchIndexProgress, "search:index-progress");
+  assert.equal(Events.searchIndexDone, "search:index-done");
+  // Bounds are part of the contract, not per-plugin opinion (D24).
+  assert.equal(SEARCH_MAX_TEXT_CHARS, 128);
+  assert.equal(SEARCH_MAX_PAGE, 200);
+  assert.equal(SEARCH_TRIGRAM_MIN_CHARS, 3);
+  assert.equal(SEARCH_PROGRESS_INTERVAL_MS, 120);
+  // Results ride on the paged `search.query` reply; a broadcast event would let
+  // every open pane re-render on an unrelated index.
+  assert.equal(
+    Object.values(Events).some((name) => name.startsWith("search:results")),
+    false,
+  );
 });
 
 test("BASE_SLOT_IDS is the outer-region grid the loader validates against", () => {
-  assert.deepEqual([...BASE_SLOT_IDS].sort(), [
-    "activity-rail-zone",
-    "bottom-drawer",
-    "command-palette",
-    "file-sidebar-zone",
-    "main-view-zone",
-    "nav-zone",
-    "statusbar-zone",
-    "topbar-zone",
-  ].sort());
+  assert.deepEqual(
+    [...BASE_SLOT_IDS].sort(),
+    [
+      "activity-rail-zone",
+      "bottom-drawer",
+      "command-palette",
+      "file-sidebar-zone",
+      "main-view-zone",
+      "nav-zone",
+      "statusbar-zone",
+      "topbar-zone",
+    ].sort(),
+  );
 });
 
 test("errorMessage: provider text reaches the UI without the Error: class prefix", () => {
@@ -203,4 +235,32 @@ test("frontend base capabilities stay out of the Rust capability set", () => {
   assert.equal(matchesPermission("plugins.list", ["plugins.*"]), true);
   assert.equal(matchesPermission("plugins.list", ["plugins.list"]), true);
   assert.equal(matchesPermission("plugins.list", ["fs.list"]), false);
+});
+
+test("formatSize: one unit scale for the whole app, no second implementation", () => {
+  assert.equal(formatSize(0), "0 B");
+  assert.equal(formatSize(96), "96 B");
+  assert.equal(formatSize(900), "900 B");
+  assert.equal(formatSize(1024), "1 KiB");
+  assert.equal(formatSize(3482), "3.4 KiB");
+  assert.equal(formatSize(81 * 1024 * 1024), "81 MiB");
+  // unrepresentable input never reaches the UI as NaN
+  assert.equal(formatSize(null), "—");
+  assert.equal(formatSize(undefined), "—");
+  assert.equal(formatSize(-1), "—");
+  assert.equal(formatSize(Number.NaN), "—");
+});
+
+test("date formatters: fixed shapes, placeholder instead of Invalid Date", () => {
+  const at = new Date(2026, 9, 7, 8, 5, 3).getTime();
+  assert.equal(formatDate(at), "2026-10-07");
+  assert.equal(formatDateTime(at), "2026-10-07 08:05");
+  assert.equal(formatClock(at), "08:05:03");
+  // dense columns stay blank; sparse panels show the placeholder
+  assert.equal(formatDate(null), "");
+  assert.equal(formatDate(null, "—"), "—");
+  assert.equal(formatDateTime(null), "—");
+  assert.equal(formatDateTime(Number.NaN), "—");
+  assert.equal(formatDateTime(0), "—");
+  assert.equal(formatClock(undefined), "—");
 });

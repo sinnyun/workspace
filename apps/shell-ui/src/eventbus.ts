@@ -24,7 +24,7 @@ class EventBus {
     const h = handler as Handler;
     set.add(h);
     return () => {
-      set!.delete(h);
+      set?.delete(h);
     };
   }
 

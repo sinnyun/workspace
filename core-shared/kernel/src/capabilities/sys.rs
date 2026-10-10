@@ -508,7 +508,13 @@ fn walk(
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(listing) => {
                     current = listing.path.clone();
-                    let derived = combine(listing, &mut arena, &mut skipped, &mut entries, &mut visited);
+                    let derived = combine(
+                        listing,
+                        &mut arena,
+                        &mut skipped,
+                        &mut entries,
+                        &mut visited,
+                    );
                     queue.settle(derived);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -876,9 +882,8 @@ fn list_volumes(path: &str) -> Result<Vec<DiskVolume>, CapabilityError> {
     let root = volume_root_of(path).ok_or_else(|| {
         CapabilityError::InvalidArgument(format!("cannot tell which volume holds: {path}"))
     })?;
-    let first = volume_of(&root).ok_or_else(|| {
-        CapabilityError::NotFound(format!("volume is not available: {root}"))
-    })?;
+    let first = volume_of(&root)
+        .ok_or_else(|| CapabilityError::NotFound(format!("volume is not available: {root}")))?;
     let mut volumes = vec![first];
     for other in drive_roots().into_iter().filter(|r| *r != root) {
         if let Some(vol) = volume_of(&other) {
@@ -896,8 +901,7 @@ fn volume_root_of(path: &str) -> Option<String> {
         let letter = bytes[0].to_ascii_uppercase() as char;
         return Some(format!("{letter}:\\"));
     }
-    if path.starts_with("\\\\") {
-        let rest = &path[2..];
+    if let Some(rest) = path.strip_prefix("\\\\") {
         let mut parts = rest.split('\\');
         let host = parts.next()?;
         let share = parts.next()?;
@@ -914,9 +918,7 @@ fn drive_roots() -> Vec<String> {
     let mask = unsafe { GetLogicalDrives() };
     (0..26u32)
         .filter(|bit| mask & (1 << bit) != 0)
-        .filter_map(|bit| {
-            char::from_u32(u32::from(b'A') + bit).map(|l| format!("{l}:\\"))
-        })
+        .filter_map(|bit| char::from_u32(u32::from(b'A') + bit).map(|l| format!("{l}:\\")))
         .collect()
 }
 
@@ -1079,7 +1081,7 @@ mod tests {
         assert_eq!(two.bytes, 25);
         // Files are blocks too: a directory's own files must not vanish from the
         // picture, or the children could not add up to their parent.
-        assert!(child(&out.done.tree, "a.txt").is_dir == false);
+        assert!(!child(&out.done.tree, "a.txt").is_dir);
         assert_eq!(child(&out.done.tree, "a.txt").bytes, 100);
         let empty = child(&out.done.tree, "empty");
         assert_eq!(empty.bytes, 0);
@@ -1161,7 +1163,10 @@ mod tests {
             &mut entries,
             &mut visited,
         );
-        assert!(derived.is_empty(), "a failed directory owes the queue nothing");
+        assert!(
+            derived.is_empty(),
+            "a failed directory owes the queue nothing"
+        );
 
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].reason, ScanSkipReason::Denied);
@@ -1250,7 +1255,10 @@ mod tests {
                 root_path: "   ".to_owned(),
             })
             .unwrap_err();
-        assert!(matches!(blank, CapabilityError::InvalidArgument(_)), "{blank}");
+        assert!(
+            matches!(blank, CapabilityError::InvalidArgument(_)),
+            "{blank}"
+        );
     }
 
     #[test]
@@ -1325,12 +1333,9 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let seen = Arc::new(Mutex::new(Vec::<ScanProgress>::new()));
         let sink = Arc::clone(&seen);
-        walk(
-            "scan-progress",
-            dir.path(),
-            &cancel,
-            &|args| lock(&sink).push(args),
-        );
+        walk("scan-progress", dir.path(), &cancel, &|args| {
+            lock(&sink).push(args)
+        });
         // A small tree finishes before the throttle can fire, so the assertion is
         // about shape, not about how many ticks happened to land.
         for tick in lock(&seen).iter() {
@@ -1348,8 +1353,7 @@ mod tests {
         assert!(!out.is_empty());
         let first = &out[0];
         assert!(
-            temp
-                .path()
+            temp.path()
                 .display()
                 .to_string()
                 .to_ascii_uppercase()

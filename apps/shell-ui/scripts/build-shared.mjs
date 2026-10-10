@@ -6,10 +6,11 @@
 // React (hooks don't break) and ONE Mantine (theme/portals stay consistent).
 //
 // Run: node scripts/build-shared.mjs   (wired as `pnpm --filter shell-ui build:shared`)
-import { build } from "vite";
-import { fileURLToPath } from "node:url";
+
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { build } from "vite";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -30,6 +31,7 @@ const shared = {
   "@mantine/core": "mantine-core",
   "@mantine/hooks": "mantine-hooks",
   "@mantine/notifications": "mantine-notifications",
+  "@mantine/spotlight": "mantine-spotlight",
   "@my-file-manager/plugin-sdk": "plugin-sdk",
 };
 
@@ -43,13 +45,7 @@ const external = Object.keys(shared);
 // build time and emit explicit `export const X = __d["X"]` re-exports so the ESM
 // facade has real static named exports. The ESM packages (Mantine, SDK) keep
 // `export *`, which preserves their native named exports.
-const cjsSpecs = new Set([
-  "react",
-  "react-dom",
-  "react-dom/client",
-  "react/jsx-runtime",
-  "react/jsx-dev-runtime",
-]);
+const cjsSpecs = new Set(["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"]);
 
 /** Enumerate a module's export names at build time (Node's CJS interop). */
 async function exportNamesOf(spec) {

@@ -23,11 +23,12 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::pluginsrv::PluginServer;
+use fm_contracts::capability::names;
 use fm_contracts::capability::{
     DiskListIn, FileKindApi, FileOperationIn, FsResourceApi, HashAlgo, PickIn, PickOut,
-    ReadResourceIn, ResourceIn, ScanIn, ShellFileOperationApi, SysApi,
+    ReadResourceIn, ResourceIn, ScanIn, SearchApi, SearchIndexIn, SearchQueryIn,
+    ShellFileOperationApi, SysApi,
 };
-use fm_contracts::capability::names;
 use fm_contracts::{FsApi, HashApi, ShellThumbnailApi, ThumbnailPolicy};
 use fm_kernel::capabilities::{CapabilitySet, WatchHub};
 use fm_kernel::kernel::Kernel;
@@ -305,6 +306,56 @@ pub async fn invoke_capability(
             .await
             .map_err(|e| e.to_string())?
         }
+        // The name index (docs/05 D24). Everything answered here comes *from a
+        // cache*: `search.status` and `search.query` read SQLite without touching the
+        // disk, and `search.index.start` returns a job id only — the walk reports
+        // through `search:index-progress` / `search:index-done`, forwarded by the
+        // event bridge, exactly like a scan.
+        names::SEARCH_STATUS => tokio::task::spawn_blocking(move || {
+            caps.search
+                .status()
+                .map_err(|e| e.to_string())
+                .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+        })
+        .await
+        .map_err(|e| e.to_string())?,
+        names::SEARCH_QUERY => {
+            let req = parse_dto::<SearchQueryIn>(&args)?;
+            tokio::task::spawn_blocking(move || {
+                caps.search
+                    .query(&req)
+                    .map_err(|e| e.to_string())
+                    .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+        names::SEARCH_INDEX_START => {
+            // Roots are validated on this call, so a directory that cannot be listed
+            // is an error the UI sees at once rather than a job that never reports.
+            let req = parse_dto::<SearchIndexIn>(&args)?;
+            tokio::task::spawn_blocking(move || {
+                caps.search
+                    .start_index(&req)
+                    .map_err(|e| e.to_string())
+                    .and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+        names::SEARCH_INDEX_CANCEL => {
+            // `false` for an id that already finished: the UI must not be able to
+            // believe it stopped something that was never walking.
+            let job_id = arg(&args, "jobId")?.to_owned();
+            tokio::task::spawn_blocking(move || {
+                caps.search
+                    .cancel_index(&job_id)
+                    .map(Value::Bool)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
         names::FILE_KIND => {
             let path = required_path(&args)?;
             // `isDir` is the caller's own stat (contract: a listing already knows
@@ -472,6 +523,12 @@ fn run_db(
     args: &Value,
 ) -> Result<Value, String> {
     use fm_contracts::capability::DbApi;
+    // Keyless `list` answers the store's kv rows — the one op with no key, so it
+    // must be answered before the key is resolved (tags store, P7-32).
+    if op == "list" && args.get("key").is_none() && args.get("path").is_none() {
+        let rows = db.list(store).map_err(|e| e.to_string())?;
+        return serde_json::to_value(rows).map_err(|e| e.to_string());
+    }
     let key = arg(args, "key").or_else(|_| arg(args, "path"))?.to_owned();
     match op {
         "get" => {
@@ -484,15 +541,9 @@ fn run_db(
             Ok(Value::Bool(true))
         }
         "list" => {
-            // `list` with a `key`/`path` reads that key's ordered log (history);
-            // without one, it lists the store's kv rows.
-            if args.get("key").is_some() || args.get("path").is_some() {
-                let log = db.read_log(store, &key).map_err(|e| e.to_string())?;
-                serde_json::to_value(log).map_err(|e| e.to_string())
-            } else {
-                let rows = db.list(store).map_err(|e| e.to_string())?;
-                serde_json::to_value(rows).map_err(|e| e.to_string())
-            }
+            // With a key, `list` reads that key's ordered log (history).
+            let log = db.read_log(store, &key).map_err(|e| e.to_string())?;
+            serde_json::to_value(log).map_err(|e| e.to_string())
         }
         "append" => {
             let value = args.get("value").cloned().unwrap_or(Value::Null);
@@ -513,7 +564,9 @@ fn run_db(
 
 /// List discovered frontend plugin manifests (consumed by the shell loader).
 #[tauri::command]
-pub fn plugins_list_frontend(state: State<'_, HostState<tauri::Wry>>) -> Result<Vec<Value>, String> {
+pub fn plugins_list_frontend(
+    state: State<'_, HostState<tauri::Wry>>,
+) -> Result<Vec<Value>, String> {
     Ok(state.plugins.list_frontend_manifest())
 }
 
@@ -525,4 +578,79 @@ pub async fn watch_subscribe(
 ) -> Result<(), String> {
     let ctx = state.kernel.ctx().clone();
     state.watch.subscribe(ctx, &path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn db() -> Arc<fm_kernel::capabilities::SqliteDb> {
+        Arc::new(fm_kernel::capabilities::SqliteDb::open(":memory:").expect("open in-memory db"))
+    }
+
+    /// The `db.<store>` dispatch: keyless `list` answers kv rows (`[key, value]`
+    /// tuples, tags store), keyed ops answer the log or the row, and missing keys
+    /// on key-requiring ops keep the frozen error (P7-32 regression).
+    #[test]
+    fn db_dispatch_covers_kv_rows_and_logs() {
+        let db = db();
+        run_db(
+            &db,
+            "tags",
+            "put",
+            &json!({ "key": "alpha", "value": { "seq": 1 } }),
+        )
+        .unwrap();
+        run_db(
+            &db,
+            "tags",
+            "put",
+            &json!({ "key": "beta", "value": { "seq": 0 } }),
+        )
+        .unwrap();
+        assert_eq!(
+            run_db(&db, "tags", "list", &json!({})).unwrap(),
+            json!([["alpha", { "seq": 1 }], ["beta", { "seq": 0 }]])
+        );
+        assert_eq!(
+            run_db(&db, "tags", "get", &json!({ "key": "beta" })).unwrap(),
+            json!({ "seq": 0 })
+        );
+        assert_eq!(
+            run_db(&db, "tags", "get", &json!({ "key": "missing" })).unwrap(),
+            json!(null)
+        );
+
+        run_db(
+            &db,
+            "tags",
+            "append",
+            &json!({ "key": "alpha", "value": 1 }),
+        )
+        .unwrap();
+        run_db(
+            &db,
+            "tags",
+            "append",
+            &json!({ "key": "alpha", "value": 2 }),
+        )
+        .unwrap();
+        assert_eq!(
+            run_db(&db, "tags", "list", &json!({ "key": "alpha" })).unwrap(),
+            json!([1, 2])
+        );
+        assert_eq!(
+            run_db(&db, "tags", "readLog", &json!({ "path": "alpha" })).unwrap(),
+            json!([1, 2])
+        );
+
+        run_db(&db, "tags", "delete", &json!({ "key": "alpha" })).unwrap();
+        assert_eq!(
+            run_db(&db, "tags", "list", &json!({})).unwrap(),
+            json!([["beta", { "seq": 0 }]])
+        );
+        assert!(run_db(&db, "tags", "get", &json!({})).is_err());
+        assert!(run_db(&db, "tags", "nope", &json!({ "key": "beta" })).is_err());
+    }
 }

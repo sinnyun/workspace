@@ -16,7 +16,8 @@ fn manifest_path() -> String {
 fn bundled_manifest_parses_and_validates() {
     let text = std::fs::read_to_string(manifest_path()).expect("shipped manifest must exist");
     let m: PluginManifest = serde_json::from_str(&text).expect("manifest must match the schema");
-    m.validate().expect("manifest must pass semantic validation");
+    m.validate()
+        .expect("manifest must pass semantic validation");
 
     assert_eq!(m.name, "plugin-file-history");
     let fe = m.frontend.expect("file-history ships a frontend");
@@ -24,7 +25,10 @@ fn bundled_manifest_parses_and_validates() {
     let slots = fe.slots.expect("declares slots");
     assert_eq!(slots[0].id, "detail-tab:history");
     assert_eq!(slots[0].export, "HistoryPanel");
-    assert!(m.permissions.capabilities.contains(&"db.history.*".to_owned()));
+    assert!(m
+        .permissions
+        .capabilities
+        .contains(&"db.history.*".to_owned()));
 }
 
 #[test]

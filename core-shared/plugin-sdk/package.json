@@ -15,5 +15,9 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.23",
+    "pretty-bytes": "^6.1.1"
   }
 }

@@ -42,7 +42,10 @@ export const theme = createTheme({
     },
     Menu: {
       defaultProps: { radius: "md" },
-      styles: { dropdown: { boxShadow: "var(--mantine-shadow-md)" }, item: { borderRadius: "var(--mantine-radius-sm)" } },
+      styles: {
+        dropdown: { boxShadow: "var(--mantine-shadow-md)" },
+        item: { borderRadius: "var(--mantine-radius-sm)" },
+      },
     },
     Tabs: {
       styles: {

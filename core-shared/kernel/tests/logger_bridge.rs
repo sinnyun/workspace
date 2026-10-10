@@ -38,9 +38,8 @@ impl Plugin for SinkPlugin {
     }
 
     async fn apply(&self, ctx: Context, _: &()) -> Result<(), Self::ApplyError> {
-        let buffer = Arc::new(
-            BufferExporter::new(64, Level::Info).expect("buffer exporter capacity"),
-        );
+        let buffer =
+            Arc::new(BufferExporter::new(64, Level::Info).expect("buffer exporter capacity"));
         // add_exporter takes the Arc; keep a clone for the test to snapshot.
         *self.sink.lock().unwrap() = Some(buffer.clone());
         let _registration = ctx.add_exporter(buffer)?;
@@ -81,4 +80,3 @@ async fn runtime_diagnostics_reach_a_registered_exporter() {
 
     kernel.shutdown().await;
 }
-

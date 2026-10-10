@@ -26,10 +26,7 @@ export function registerBaseCapability(capability: string, fn: Mock): void {
   baseCaps.set(capability, fn);
 }
 
-export async function invokeCapability<T>(
-  capability: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
+export async function invokeCapability<T>(capability: string, args?: Record<string, unknown>): Promise<T> {
   const base = baseCaps.get(capability);
   if (base) return base(args ?? {}) as T;
   try {
@@ -42,8 +39,6 @@ export async function invokeCapability<T>(
     // Not in Tauri, or the command is unknown: try a registered mock.
     const mock = mocks.get(capability);
     if (mock) return mock(args ?? {}) as T;
-    throw new Error(
-      `invoke "${capability}" failed (no Tauri runtime and no mock): ${String(err)}`,
-    );
+    throw new Error(`invoke "${capability}" failed (no Tauri runtime and no mock): ${String(err)}`);
   }
 }

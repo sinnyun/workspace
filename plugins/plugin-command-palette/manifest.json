@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-command-palette",
+  "version": "0.1.0",
+  "displayName": "命令面板",
+  "description": "Ctrl+Shift+P 呼出的命令面板：检索并执行各插件注册的命令，也可跳转到当前目录里的文件。",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      {
+        "id": "command-palette",
+        "export": "CommandPalette",
+        "label": "命令面板"
+      }
+    ],
+    "provides": []
+  },
+  "permissions": {
+    "capabilities": [
+      "fs.list"
+    ],
+    "events": {
+      "subscribe": [],
+      "emit": [
+        "sidebar:selection:changed",
+        "focus:changed"
+      ]
+    },
+    "slots": {
+      "contribute": [
+        "command-palette"
+      ]
+    },
+    "commands": {
+      "register": true,
+      "provide": true
+    }
+  }
+}

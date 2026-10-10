@@ -24,6 +24,10 @@ my-file-manager/
 ├── Cargo.toml                     # cargo workspace 根
 ├── package.json                   # pnpm workspace 根(仅工作区声明与脚本)
 ├── pnpm-workspace.yaml
+├── biome.jsonc                    # 前端 lint/format 单一配置(含 styles.css 的 !important 例外说明)
+├── deny.toml                      # cargo-deny 供应链审计配置(CI deny job)
+├── lefthook.yml                   # pre-commit 钩子(biome --staged / typecheck / rustfmt)
+├── .github/workflows/ci.yml       # PR 门禁(web/rust/deny)+ 标签发布(tauri-action)
 │
 ├── apps/
 │   ├── host/                      # Tauri v2 宿主(薄壳,可执行体 fm-host)
@@ -43,6 +47,7 @@ my-file-manager/
 │       ├── index.html             # 含 import map:react/react-dom/@mantine/* → 宿主单例
 │       ├── vite.config.ts         # 共享单例伺服 + dev-plugins + dev import map 改写
 │       ├── scripts/build-shared.mjs # 预构建共享单例两套变体(prod/dev)
+│       ├── vitest.config.ts       # 单测配置(jsdom;刻意不复用 vite.config 的单例外置,见 04 P6-33 取证)
 │       └── src/
 │           ├── main.tsx
 │           ├── App.tsx            # 外层区域网格(A/B/C/D+工具栏+状态栏)+顶部会话容器+外层槽挂载
@@ -54,12 +59,13 @@ my-file-manager/
 │           ├── state.ts           # 级联元状态:每会话一份快照(activeTabId/activeSidebarView/sidebarSelection/focusRef/activeDetailTab,zustand)+ 总线单写路径
 │           ├── invoke.ts          # 能力分流:**基座前端能力表 → Tauri `invoke` → 浏览器 mock**
 │           ├── dev-mocks.ts       # 当前浏览器 dev mock 含旧 canvas 缩略图路径；迁移目标只用固定 fixture/unsupported 状态，不生成图
+│           ├── PluginSlot.test.tsx / commands.test.ts  # 单测(P6-33:错误边界渲染 4 条 + 命令服务 10 条)
 │
 ├── core-shared/
 │   ├── contracts/                 # Rust 契约包(Event/Capability/DTO/manifest + fm-contract-dump)
 │   ├── kernel/                    # fm-kernel:**无 Tauri 依赖**的后端内核
 │   │   └── src/
-│   │       ├── capabilities/      # 原子能力:fs / hash / thumb / db / watch(第三方库唯一落位)
+│   │       ├── capabilities/      # 原子能力:fs / hash / thumb / db / watch / search / shell / sys 等(第三方库唯一落位)
 │   │       ├── kernel.rs          # cordis Context 引导、provider fiber、boot/teardown
 │   │       ├── registry.rs        # 静态后端插件注册表(待 P6-41 由 loader/build.rs 生成)
 │   │       └── logger.rs          # cordis Logger → tracing 桥
@@ -73,7 +79,7 @@ my-file-manager/
 │   ├── plugin-layout-panes/       # ✅ 框架容器:C 分栏,占 main-view-zone,提供 pane-slot:<paneId>
 │   ├── plugin-layout-views/       # ✅ 框架容器:B 视图互斥,占 nav-zone,提供 nav-panel:<viewId>
 │   ├── plugin-inspector/          # ✅ 框架容器:D 详情,占 file-sidebar-zone,提供 detail-tab/preview-zone/detail-info-zone/file-extension-zone
-│   ├── plugin-file-browser/       # ✅ 内容插件:每栏一个独立实例(独立地址栏+历史前进后退/列表或网格/虚拟滚动),运行时注入 pane-slot:*;自带偏好 `fm.file-browser.prefs.v1` + 设置页 settings-page:file-browser
+│   ├── plugin-file-browser/       # ✅ 内容插件:每栏一个独立实例(独立地址栏+历史前进后退/列表·网格·表格/虚拟滚动),运行时注入 pane-slot:*;表格排序与列可见性走 @tanstack/react-table v9;自带偏好 `fm.file-browser.prefs.v1` + 设置页 settings-page:file-browser
 │   ├── plugin-view-file-tree/     # ✅ A+B 侧栏视图:目录树(react-arborist,自写懒加载)
 │   ├── plugin-view-favorites/     # ✅ A+B 侧栏视图:主页 + 收藏
 │   ├── plugin-view-tags/          # ✅ A+B 侧栏视图:标签与成员
@@ -82,13 +88,15 @@ my-file-manager/
 │   ├── plugin-file-ops/           # ✅ Windows 原生文件操作:经 Shell 复制/移动/重命名/新建/回收站,状态栏进度与逐项结果
 │   ├── plugin-preview/            # ✅ 统一预览:preview-zone 的"缩略图/文件预览"两模式 + settings-page:preview(Open File Viewer)
 │   ├── plugin-storage-analysis/   # ✅ 空间分析:topbar-zone 按钮 → 固定浮层面板,echarts treemap 下钻/取消/缓存
+│   ├── plugin-search/             # ✅ 名称搜索:内核 FTS5 索引能力(search.*)+ topbar 入口 → 固定 620×640 浮层(分页取更多/索引目录补建·重建·取消);命令 search.open/search.index-current
+│   ├── plugin-command-palette/    # ✅ 命令面板(Ctrl+Shift+P):command-palette 槽唯一提供者,检索执行基座命令登记簿 + 跳当前目录文件;登记簿/调度/清理归基座(D25)
 │   ├── plugin-settings/           # ✅ 设置插件:A 栏齿轮 → **悬浮面板**(软件设置/插件设置分页)。软件设置含主题三态 + 插件启停列表;提供嵌套槽 settings-page:<name> 给各插件放自己的设置页
 │   ├── plugin-mock-data/          # ✅ 开发期:`/stress` 压力数据集的 B 区入口(activity-rail + nav-panel:stress)
 │   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/级联与槽事件捕获面板(bottom-drawer)
 │   ├── plugin-dev-slot-harness/   # ✅ 开发期:嵌套槽运行时验证夹具(bottom-drawer + 提供 dev-pane:<n>,含越权拒绝取证)
 │   │   # 除 file-history 外均为纯前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │   │   # 最后三个是开发期演示/调试插件,只在浏览器 dev 的模拟索引里装载(见 08 §5.3)
-│   └── (规划,见 08)业务:plugin-search / plugin-windows-thumbnails /
+│   └── (规划,见 08)业务:plugin-windows-thumbnails /
 │       plugin-history-metadata
 │       # 每个前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │       # 全栈插件再加 backend/(cargo 成员,只依赖 fm-contracts + cordis,经能力契约)
@@ -131,9 +139,15 @@ my-file-manager/
 - **运行期启用/禁用**:前端插件的启停由 `loader` 持有(状态在 `fm.plugins.disabled.v1`),关闭 = 执行该插件的卸载钩子并回收其注册的全部槽,开启 = 立即 `import()` 装载;三个界面框架容器与设置面板本身是核心插件,不可关闭。后端插件的运行期启停另走 cordis-loader 加载计划(§4.1)。
 
 ### 4.4 一键脚本(pnpm 根 `package.json`)
-- `dev`:并发起 Vite(shell-ui)+ `tauri dev`。
-- `build:plugins`:构建所有 `plugins/*/frontend`。
-- `build`:构建前端插件 → 构建 shell-ui → `tauri build`(cargo 编入后端插件)。
+- `dev`:起 Vite(shell-ui,默认 `:1420`)。
+- `build:shared`:构建共享集(`shared-dist/`,基座与插件共用的单例)。
+- `build:plugins`:构建所有 `plugins/*/frontend` 到各自 `dist/`。
+- `build:shell`:构建 shell-ui。
+- `typecheck`:`pnpm -r typecheck` 全仓类型检查。
+- `test`:`pnpm -r test` 全仓单测(shell-ui 走 vitest,SDK 走 node --test;P6-33)。
+- `lint` / `lint:fix` / `format` / `format:check`:Biome 检查与格式化(P6-31)。
+- `lint:rust` / `format:rust` / `format:check:rust` / `test:rust`:Rust 侧 clippy(`-D warnings`)/ rustfmt / `cargo test --workspace`(P6-32)。
+- `tauri`:经 shell 的 tauri 透传启动宿主。
 
 ---
 

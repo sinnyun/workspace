@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "name": "plugin-file-browser",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "displayName": "文件浏览",
-  "description": "浏览文件夹，切换列表或网格，查看图片缩略图；可设置默认视图与缩略图显示。",
+  "description": "浏览文件夹，切换列表、网格或表格，查看图片缩略图与关联标签；可设置默认视图、表格列与缩略图显示。",
   "author": "base",
   "minHostVersion": "0.1.0",
   "frontend": {
@@ -25,14 +25,16 @@
     "capabilities": [
       "fs.home",
       "fs.list",
-      "shell.thumbnail.read"
+      "shell.thumbnail.read",
+      "db.tags.list"
     ],
     "events": {
       "subscribe": [
         "sidebar:selection:changed",
         "slot:registered",
         "slot:disposed",
-        "file:changed"
+        "file:changed",
+        "tags:updated"
       ],
       "emit": [
         "focus:changed"

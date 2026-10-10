@@ -18,8 +18,8 @@
  */
 import type {
   ContextMenuContext,
-  ContextMenuItemDescriptor,
   ContextMenuHost,
+  ContextMenuItemDescriptor,
   ContextMenuProvider,
   ContextMenuRequest,
   PluginManifest,
@@ -89,9 +89,7 @@ class ContextMenuService {
   /** Claim the panel. Only one plugin ever gets a provider back. */
   claimProvider(owner: string): ContextMenuProvider | null {
     if (this.provider && this.provider !== owner) {
-      console.warn(
-        `[context-menu] panel already provided by "${this.provider}" — "${owner}" refused`,
-      );
+      console.warn(`[context-menu] panel already provided by "${this.provider}" — "${owner}" refused`);
       return null;
     }
     this.provider = owner;
@@ -99,10 +97,7 @@ class ContextMenuService {
     const isOwner = (): boolean => this.provider === owner;
     return {
       current: () => (isOwner() ? this.request : null),
-      items: () =>
-        isOwner()
-          ? this.registrations.map((r) => ({ owner: r.owner, descriptor: r.descriptor }))
-          : [],
+      items: () => (isOwner() ? this.registrations.map((r) => ({ owner: r.owner, descriptor: r.descriptor })) : []),
       onChange: (cb) => {
         if (!isOwner()) return () => {};
         this.listeners.add(cb);

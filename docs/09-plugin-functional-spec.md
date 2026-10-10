@@ -180,7 +180,7 @@
 | 每栏路径、模式及浏览历史 | file-browser | `fm.file-browser.v1` localStorage | 按会话和 paneId 隔离；重新打开从安全目录恢复；不存在路径报错并提供回退 |
 | 浏览偏好 | file-browser | `fm.file-browser.prefs.v1` localStorage | defaultMode、缩略图等；更改即时广播给所有实例；单栏显式选择优先于默认 |
 | 收藏 | favorites | `fm.view-favorites.v1` localStorage（当前） | 插件独占；未来若需要跨端/统一备份再迁移专属 DB store |
-| 标签与成员 | view-tags | `fm.view-tags.v1` localStorage（当前） | 插件独占；其它插件不能直接读取。跨插件显示 chips 必须新增受控契约/API |
+| 标签与成员 | view-tags | 通用 db 能力 `db.tags` store（kv 行 key=标签名, value={seq,members}） | owner 独占写（`db.tags.*`）；其它插件只能经受权只读（`db.tags.list`，读走 SDK `listTags`）；写成功发无载荷 `tags:updated` 触发消费方重查；旧 `fm.view-tags.v1` 一次性导入（见 D26） |
 | 预览偏好 | preview | `fm.preview.prefs.v1` localStorage | `{autoLoadText,maxTextChars,defaultFit}`；双方校验；迁移旧 text 偏好时停止双写 |
 | 文件历史与版本 | Lore（由 file-history backend 适配） | 用户选择的 Lore 仓库保存版本正文与提交；插件偏好仅存仓库选择等配置；旧 `db.history.*` 元信息只读保留 | Lore 是版本真相；仓库范围必须用户确认；仓库删除/清理需明确确认；不得把凭据或正文放入偏好 |
 | 版本展示元数据 | history-metadata backend | 独占 `db.historyMetadata.*` + 应用数据目录中的缩略图 blob；主键 `(repositoryId,revisionId,path)` | 只保存某个 revision 创建时的展示属性，不存文件正文、不管理 Lore 版本；清理元数据不影响 Lore 历史 |
@@ -201,33 +201,31 @@
 | `plugin-layout-views` 侧栏容器 | ✅ `nav-zone`；提供 `nav-panel:*` | 接受 `sidebar:view:changed`；根据活跃 viewId 显示唯一面板 | 无业务持久状态；目标处理无贡献/被禁用 view 的空态和回退，不卸载非活动视图导致无谓丢失局部展开状态 |
 | `plugin-inspector` 详情容器 | ✅ `file-sidebar-zone`；提供详情、预览嵌套槽 | 输入当前 `focusRef`、详情 tab 贡献；输出 `detail:tab:changed` | 目标：无焦点、目录、普通文件、未知 kind 各有模板；标题路径截断但可查阅；tab 被移除时安全回退；扩展贡献独立失败；窄栏滚动局部化 |
 | `plugin-settings` 设置 | ✅ 活动栏齿轮 Popover；插件设置嵌套页 | 软件设置：亮/暗/跟随系统；插件启停；每个 `settings-page:*` | 外层主题沿 Mantine 持久化；disabled 清单由 loader 管理；核心插件锁定。Popover 固定尺寸、内部分页滚动；启停显示加载/失败回滚；子页面标签来自贡献者 manifest label |
-| `plugin-context-menu` 右键菜单框架 | 🔵 规划；应用级 Mantine `ContextMenuLayer` | 统一处理各 surface 的上下文与锚点，按条件聚合/分组/排序贡献项；业务插件加载时注册、卸载时移除；执行 handler 始终归贡献插件 | `ContextMenuContext` 只短期驻留内存；框架不调用业务 capability、不持久化上下文。定义键鼠/辅助技术交互、生命周期、ACL、错误与取消契约 |
+| `plugin-context-menu` 右键菜单框架 | ✅ 已交付（P6-72）；应用级 Mantine `ContextMenuLayer` | 统一处理各 surface 的上下文与锚点，按条件聚合/分组/排序贡献项；业务插件加载时注册、卸载时移除；执行 handler 始终归贡献插件 | `ContextMenuContext` 只短期驻留内存；框架不调用业务 capability、不持久化上下文；已含统一定位、键盘操作与插件回调派发 |
 
 ### 8.2 已实现的用户功能插件
 
 | 插件 | 当前状态 / 槽 | 完整功能目标 | 数据、交互和跨插件行为 |
 |---|---|---|---|
-| `plugin-file-browser` 文件浏览 | ✅ 列表/网格、每栏地址栏/历史、虚拟列表、图片缩略图、顶栏视图下拉；`pane-slot:*` 与设置页 | 地址输入/提交/取消；后退、前进、上级、刷新；文件夹分组后文件分组；列表/网格共享选择和焦点；空目录、超大列表、无权限、路径失效；列出名称/类型图标/大小/修改时间；网格可见项才取 Windows 系统缩略图；规划标签 chips、表格视图与更多排序 | `fs.home/list/shell.thumbnail.read`（规划替换）；每栏独立历史与选择；订侧栏选择/slot 生命周期，发 focus Ref。模式切换保持路径、滚动可合理归零、选择保持；请求序号避免过期列表覆盖；目录变更后若焦点已离开当前目录则清焦点。缩略图无结果显示文件类型图标，关闭后停止请求并隐藏图像 |
+| `plugin-file-browser` 文件浏览 | ✅ 列表/网格/表格、每栏地址栏/历史、虚拟列表、图片缩略图、顶栏视图下拉、三模式标签 chips；`pane-slot:*` 与设置页 | 地址输入/提交/取消；后退、前进、上级、刷新；文件夹分组后文件分组；三种模式共享选择和焦点；空目录、超大列表、无权限、路径失效；列出名称/类型图标/大小/修改时间；网格可见项才取 Windows 系统缩略图；表格按列排序并配置列可见性；标签 chips 三种模式可见、点击开标签视图；区间多选（未交付） | `fs.home/list/shell.thumbnail.read/db.tags.list`（标签只读，走 SDK `listTags` 并订 `tags:updated` 重查，D26）；每栏独立历史与选择；订侧栏选择/slot 生命周期，发 focus Ref。模式切换保持路径、滚动可合理归零、选择保持；请求序号避免过期列表覆盖；目录变更后若焦点已离开当前目录则清焦点。缩略图无结果显示文件类型图标，关闭后停止请求并隐藏图像。未点表头时行序等于 `fs.list` 顺序，隐藏排序主键使目录在两种方向都成组在前，排序不落存储、列可见性落插件自有偏好；标签视图是历史栈普通项（`tag://` 不外显），无上级目录，标签被删即时报错并可随撤销自愈 |
 | `plugin-view-file-tree` 目录树 | ✅ 活动栏图标 + `nav-panel:file-tree` | 懒加载目录；展开/折叠、加载中、错误重试、空目录；点击目录作为侧栏选择；保持键盘导航 | `fs.home/list`；发 sidebar view/selection Ref。展开路径暂存于组件内存；刷新树时保留可验证节点；每个树项不得触发 N 次 stat |
 | `plugin-view-favorites` 收藏视图 | ✅ 活动栏 + `nav-panel:favorites` | 首页/收藏位置列表；添加、移除、重命名或排序（具体编辑入口随实现明确）；点击目录驱动浏览器；失效项提示移除/重新定位 | 当前独占 `fm.view-favorites.v1`；`fs.home`；发 sidebar selection。写入原子化；损坏数据回退并可恢复；定义收藏路径失效策略 |
-| `plugin-view-tags` 标签视图 | ✅ 活动栏 + `nav-panel:tags` | 标签集合增删改名、成员管理、按标签浏览；成员点击聚焦文件；标签本身与文件 Ref 区分 kind | 当前独占 `fm.view-tags.v1`；发 view/selection/focus。不得供浏览器直接读 localStorage；规划卡片标签 chips 时新增受控查询/批量查询契约并确定删除文件/重复路径处理 |
+| `plugin-view-tags` 标签视图 | ✅ 活动栏 + `nav-panel:tags` | 标签集合增删改名、成员管理、按标签浏览；成员点击聚焦文件；标签本身与文件 Ref 区分 kind | 独占 `db.tags` store（唯一写者）；发 view/selection/focus 与 `tags:updated`。跨插件读取经受权 `db.tags.list`（SDK `listTags`）；同 path 单标签唯一，删除文件不自动清成员（D26） |
 | `plugin-file-details` 文件详情 | ✅ `detail-info-zone` 基础属性与 BLAKE3 | 按当前焦点展示文件名、路径、大小、类型、修改时间、哈希；文件夹展示适用的目录信息；可复制路径；慢 hash 单独 loading/error | `fs.stat/hash.compute/fs.home/fs.readText`（按实现权限）；订 selection 兼容事件。每个异步响应核验 ref；大文件哈希如未有进度契约显示 indeterminate；二进制不强行 readText |
 | `plugin-file-history` Lore 文件历史与版本操作 | 🟡 `detail-tab:history`，当前是旧式 hash/元数据快照 | Lore 仓库内版本查询、dirty、显式创建、只读查看、diff、安全恢复；版本行展示由独立 metadata 插件贡献 | `file:changed` 仅刷新 Lore 工作区状态；用户操作经 Lore 适配层。消费 metadata 插件发出的 restore request 并负责确认/执行；自身不保存版本缩略图属性 |
 | `plugin-history-metadata` 历史版本信息 | 🔵 规划；贡献 `history-record:metadata` 子插槽 | 按 revision 保存 Windows 系统缩略图、文件大小/类型、图片尺寸和采集状态；供历史版本行展示；点击切换只发送 restore request | 订 Lore revision 创建生命周期，采集属性并写独占 `db.historyMetadata.*`/blob；不拥有 Lore capabilities，不提交、不恢复、不读取 Lore 私有存储 |
 | `plugin-preview` 统一预览 | ✅ 已交付（批次 6）；`preview-zone` + `settings-page:preview`；Open File Viewer React SDK | 预览区提供“缩略图 / 文件预览”切换；新焦点默认只显示 Windows 缩略图，不加载 viewer、不读取正文；用户主动点击后才统一分派文本/代码/Markdown、图片、PDF、音视频、Office、压缩包等；加载/不支持/损坏/加密/超限状态可恢复 | `file.kind` + 授权预览资源句柄/range 通道；`fm.preview.prefs.v1` 仅存格式偏好，不存模式。切回缩略图/焦点变化取消读取、撤销句柄并释放 media/worker；不暴露裸路径 |
+| `plugin-file-ops` Windows 原生文件操作 | ✅ 批次 5（真机 Shell 行为 🟡）；状态栏操作行 + 经 `host.contextMenu` 贡献条目 | 收集路径/目标/新名称 → 校验授权 → 经 Windows `IFileOperation` 完成 copy/move/rename/create/delete（默认回收站）→ 进度与逐项结果进状态栏；open/reveal 走 Tauri opener/dialog | 不自写复制/移动/删除实现；COM 在 STA 专用线程。订 `shell:operation:progress/done`（progress 显式标注是否可信，不做假百分比；partial-failure 是独立终态）；发 `file:changed`；取消走 `shell.cancelFileOperation` |
+| `plugin-storage-analysis` 空间分析 | ✅ 批次 7；topbar 按钮 → 固定 560×640 自有浮层 | 选根目录 → 扫描进度 → echarts treemap → 下钻/返回/合并明细；可取消；结果缓存 | `sys.disk.list` + `sys.scan.start/cancel`；订 `scan:progress/done`（计数式）与 `file:changed` 失效缓存；扫描不阻塞文件浏览 |
+| `plugin-search` 搜索 | ✅ 批次 9；topbar 入口 → 固定 620×640 浮层；贡献 `settings-page:search` | 按名称检索已索引的文件夹/文件：分页取更多（offset+hasMore）、把目录补进索引/重建/取消（进度与终态事件）、命中双击交给系统默认程序或打开所在目录；空态与错误如实显示 | 能力 `search.status/query/index.start/index.cancel`；订 `search:index-progress/done`（计数式，不给百分比）；发 `sidebar:selection:changed`；命令 `search.open`/`search.index-current`；偏好 `fm.search.prefs.v1`；FTS5 索引封在内核能力内，库句柄不出内核（D24） |
+| `plugin-command-palette` 命令面板 | ✅ 批次 9；`command-palette` 槽的唯一提供者（固定 620×420，内部滚动） | Ctrl+Shift+P 开合；检索并执行基座命令登记簿里的命令（标题/副标题/快捷键过滤），同时按当前目录 `fs.list` 搜文件名并跳转；上下键+Enter 执行、Esc 关闭；重开清空查询 | 登记簿/唯一 keydown 监听/busy 守卫归基座命令服务（D25）；畸形或重复快捷键整条拒绝；可编辑控件里只响应带修饰键的组合；命令异常就地显示；插件卸载即回收其命令与快捷键；面板只渲染与检索，不持登记簿 |
 | `plugin-mock-data` 模拟数据（dev） | ✅ dev only 活动栏 + `nav-panel:stress` | 选择 1K/10K/100K/500K/空目录/读取失败数据，驱动真实浏览与详情链路 | 仅浏览器开发 mock 索引存在，发布宿主不得发现；发 Ref，不将 stress 文件逻辑塞进业务插件；用于性能、空态和失败态回归 |
 
 ### 8.3 后续业务插件（规划，不得误认为已提供）
 
 | 插件 | 主要入口/依赖 | 目标数据流和功能 | 必需状态与待冻结契约 |
 |---|---|---|---|
-| `plugin-file-ops` Windows 原生文件操作（全栈） | topbar、状态栏、详情操作；Windows `IFileOperation` + 已注册 Tauri opener/dialog | 收集路径/目标/新名称 → 校验授权 → 调用系统 Shell 完成 copy/move/rename/create/delete → 系统冲突/进度对话框 → 返回结果并刷新列表；open/reveal 走 opener | 不自写文件复制/移动/删除实现；删除默认进回收站；后台结果/进度 DTO 先进入 Rust contracts + SDK。能力建议 `shell.fileOperation/openPath/revealItemInDir/pickFile/pickDirectory`，实现前冻结；COM 用 STA 线程 |
-| `plugin-search` 搜索（全栈） | 命令面板 + 搜索结果 pane；FTS5/Tantivy 待选 | 输入词、范围和类型条件 → 查询索引 → 增量结果 → 打开结果所在目录并聚焦文件；索引后台更新 | 保存用户过滤偏好，不保存明文文件内容之外的额外副本；索引可重建；定义暂停/取消/部分结果；`search.query`/`search:results` schema、排序和索引状态需冻结 |
-| `plugin-preview` 统一预览 | `preview-zone`；Open File Viewer React SDK | 一个容器分派文本/Markdown、图片、PDF、媒体、Office、压缩包等；格式按本地样本逐步验收；加载/不支持/损坏/加密/超限状态明确；视频帧不得自制为缩略图 | 订焦点；通过路径绑定、只读、短时资源句柄与 range 数据通道读取；禁裸路径 URL、禁任意远程加载；切焦点撤销句柄并释放 worker/media/object URL |
-| `plugin-windows-thumbnails` Windows 系统缩略图 | Windows Shell `IThumbnailCache` | 缓存命中读取或允许 Shell handler 提取；仅缓存模式未命中显示类型图标；不解析系统 cache 文件、不经应用生成 | `shell.thumbnail.read`（规划；DTO 待冻结）；消费者按可见性请求；系统缓存归 Windows 管理，应用短期引用可丢弃 |
-| `plugin-storage-analysis` 空间分析 | `pane-slot:*`；echarts、`sys.disk`、遍历能力 | 选根目录 → 扫描进度 → treemap/目录大小 → 点击下钻/返回；扫描失败与权限跳过统计 | 扫描可取消；聚合结果缓存须按路径和时间失效；不能阻塞文件浏览；排除/符号链接/硬链接策略待定 |
-| 文件操作扩展：标签 chips / 表格视图 | file-browser 内功能，不另造隐式跨插件依赖 | 表格排序/列配置/键盘选择；标签 chip 显示关联标签并可筛选 | TanStack Table 规划；跨插件标签必须经受权的 `tags.*` 能力或事件 DTO，禁止读取 tags 的私有存储 |
-| 命令面板与全局命令 | 基座 Spotlight + 各插件注册项 | 搜索命令、键盘打开、插件卸载后移除命令、命令错误就地显示 | 命令注册/执行接口目前需单列设计（SDK 当前 `PluginHost` 没有 command API）；不得仅以占位 slot 假称已实现 |
+| `plugin-windows-thumbnails` Windows 系统缩略图 | Windows Shell `IThumbnailCache` | 缓存命中读取或允许 Shell handler 提取；仅缓存模式未命中显示类型图标；不解析系统 cache 文件、不经应用生成 | 内核 `shell.thumbnail.read` 已交付并被 file-browser/preview 消费；本插件剩独立开关页与策略落位（P6-7）；系统缓存归 Windows 管理，应用短期引用可丢弃 |
 
 独立 `plugin-archive` 压缩包虚拟目录浏览/解压已取消，不纳入当前规划；统一预览器支持某些压缩格式的只读预览仍单独评估。
 

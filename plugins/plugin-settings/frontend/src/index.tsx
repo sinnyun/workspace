@@ -20,8 +20,7 @@
  * 浮层自适应，每次切换都会重算高度并让 floating-ui 重新定位 → 面板既变形又挪位。
  * 因此外层与内层 tab 条固定不缩，正文区自己出滚动条。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+
 import {
   ActionIcon,
   Badge,
@@ -36,14 +35,16 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { Monitor, Moon, Settings, Sun, X } from "lucide-react";
 import {
-  FrontendCapabilities,
   errorMessage,
+  FrontendCapabilities,
   type PluginInfo,
   type PluginSetEnabledArgs,
   type SlotProps,
 } from "@my-file-manager/plugin-sdk";
+import { Monitor, Moon, Settings, Sun, X } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** 各插件贡献自己设置页的嵌套槽前缀（本插件在 manifest `frontend.provides` 里声明）。 */
 const SETTINGS_PREFIX = "settings-page";
@@ -111,10 +112,7 @@ export function SettingsEntry({ host }: SlotProps) {
         });
       };
       host
-        .invoke<PluginInfo[]>(
-          FrontendCapabilities.pluginsSetEnabled,
-          { name, enabled } satisfies PluginSetEnabledArgs,
-        )
+        .invoke<PluginInfo[]>(FrontendCapabilities.pluginsSetEnabled, { name, enabled } satisfies PluginSetEnabledArgs)
         // 成功以基座返回的 plugins.list 真实 enabled 为准刷新，而不是保留本地乐观值。
         .then((list) => setPlugins(list))
         // 失败：记下行级中文原因；settle 撤销乐观值后开关回弹到原值。
@@ -204,12 +202,7 @@ export function SettingsEntry({ host }: SlotProps) {
             />
           </div>
           <div style={sectionStyle(section === "plugins")}>
-            <PluginPages
-              host={host}
-              pages={pages}
-              active={activePage}
-              onSelect={(id) => setPage(id)}
-            />
+            <PluginPages host={host} pages={pages} active={activePage} onSelect={(id) => setPage(id)} />
           </div>
         </div>
       </Popover.Dropdown>
@@ -424,13 +417,10 @@ function Block({ title, hint, children }: { title: string; hint?: string; childr
  *  React 会把值为 undefined 的行内样式属性删掉，所以两个分支都写全。
  *  活动页占满正文高度并自己滚动——面板外形因此与内容多少无关。 */
 const sectionStyle = (active: boolean): CSSProperties =>
-  active
-    ? { display: "block", height: "100%", overflowY: "auto", overflowX: "hidden" }
-    : { display: "none" };
+  active ? { display: "block", height: "100%", overflowY: "auto", overflowX: "hidden" } : { display: "none" };
 
 /** 同一分页内的子页切换：只管显隐，滚动权在上面的分页体。 */
-const showHideStyle = (active: boolean): CSSProperties =>
-  active ? { display: "block" } : { display: "none" };
+const showHideStyle = (active: boolean): CSSProperties => (active ? { display: "block" } : { display: "none" });
 
 const railButtonStyle = (active: boolean): CSSProperties => ({
   display: "flex",

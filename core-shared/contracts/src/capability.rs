@@ -57,6 +57,14 @@ pub mod names {
     pub const SYS_SCAN_START: &str = "sys.scan.start";
     /// Ask a live scan to stop (`sys.scan.cancel`).
     pub const SYS_SCAN_CANCEL: &str = "sys.scan.cancel";
+    /// One page of name-index hits (`search.query`).
+    pub const SEARCH_QUERY: &str = "search.query";
+    /// Read the index state without touching the index file (`search.status`).
+    pub const SEARCH_STATUS: &str = "search.status";
+    /// Start or rebuild the name index (`search.index.start`).
+    pub const SEARCH_INDEX_START: &str = "search.index.start";
+    /// Ask a live indexing job to stop (`search.index.cancel`).
+    pub const SEARCH_INDEX_CANCEL: &str = "search.index.cancel";
     /// Prefix for the dynamic per-store db capabilities (`db.<store>.<op>`).
     pub const DB_PREFIX: &str = "db.";
 }
@@ -135,8 +143,12 @@ pub trait FsApi: Send + Sync + 'static {
     /// Stat one path.
     fn stat(&self, path: &str) -> Result<StatOut, CapabilityError>;
     /// Read `len` bytes starting at `offset`.
-    fn read_chunk(&self, path: &str, offset: u64, len: u64)
-        -> Result<ReadChunkOut, CapabilityError>;
+    fn read_chunk(
+        &self,
+        path: &str,
+        offset: u64,
+        len: u64,
+    ) -> Result<ReadChunkOut, CapabilityError>;
     /// Read a file as text, decoding it (see [`ReadTextOut`]). Never returns the
     /// raw bytes of a binary file pretending to be text.
     fn read_text(&self, path: &str) -> Result<ReadTextOut, CapabilityError>;
@@ -782,11 +794,14 @@ pub trait DbApi: Send + Sync + 'static {
     /// List `(key, value)` rows in `store`, ordered by key.
     fn list(&self, store: &str) -> Result<Vec<(String, serde_json::Value)>, CapabilityError>;
     /// Append a JSON row to an ordered log under `key` in `store`.
-    fn append(&self, store: &str, key: &str, value: &serde_json::Value)
-        -> Result<(), CapabilityError>;
+    fn append(
+        &self,
+        store: &str,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), CapabilityError>;
     /// Read the ordered log at `key` (oldest first).
-    fn read_log(&self, store: &str, key: &str)
-        -> Result<Vec<serde_json::Value>, CapabilityError>;
+    fn read_log(&self, store: &str, key: &str) -> Result<Vec<serde_json::Value>, CapabilityError>;
     /// Delete `key` from `store`.
     fn delete(&self, store: &str, key: &str) -> Result<(), CapabilityError>;
 }
@@ -1012,6 +1027,226 @@ impl Service for SysCapability {
     const NAME: &'static str = "capability.sys";
 }
 
+// ─────────────────── search channel (P7-28 / P7-29) ───────────────────
+
+/// Longest query text the host looks at. Longer input is a paste, not a search,
+/// so it is truncated rather than rejected. Mirrors `SEARCH_MAX_TEXT_CHARS` (TS).
+pub const SEARCH_MAX_TEXT_CHARS: usize = 128;
+
+/// Biggest page one `search.query` may return. Mirrors `SEARCH_MAX_PAGE` (TS).
+pub const SEARCH_MAX_PAGE: u32 = 200;
+
+/// Rows one indexing transaction commits. Small enough that a cancelled job
+/// leaves at most one batch of orphan rows to re-do.
+pub const SEARCH_INDEX_BATCH: usize = 2_000;
+
+/// Entry ceiling for one indexing root. Past it the job stops and says so in
+/// `detail` — an index is a cache, so a partial index is honest, while a silent
+/// one would make "no results" a lie.
+pub const SEARCH_INDEX_MAX_ENTRIES: u64 = 2_000_000;
+
+/// Depth ceiling for the walk. Directory cycles on Windows are possible through
+/// junctions, and the walk never follows a link to a directory anyway.
+pub const SEARCH_INDEX_MAX_DEPTH: u32 = 64;
+
+/// Minimum gap between two `search:index-progress` emissions.
+pub const SEARCH_PROGRESS_INTERVAL_MS: u64 = 120;
+
+/// Queries shorter than this cannot be answered from the `trigram` index (SQLite
+/// builds it from 3-character sequences), so the host answers them with a bounded
+/// substring scan instead. Public because the UI can promise the difference
+/// between "slow" and "wrong" — see docs/05 D24.
+pub const SEARCH_TRIGRAM_MIN_CHARS: usize = 3;
+
+/// What a hit is filtered to. Wire names mirror the TS union `SearchScope`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchScope {
+    #[default]
+    All,
+    File,
+    Dir,
+}
+
+/// Index lifecycle state. Deliberately *not* a progress percentage: the entry
+/// ceiling means the total is unknown up front, so a percentage would be a
+/// fabrication (same reasoning as `ScanState`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchIndexState {
+    /// No index file, or it holds nothing.
+    Empty,
+    /// A job is walking right now.
+    Indexing,
+    /// The last job finished and the index is queryable.
+    Ready,
+    /// The last job was cancelled or hit an entry/depth ceiling.
+    Partial,
+    /// The last job failed; `detail` says why.
+    Failed,
+}
+
+/// `search.query` input. `text` is the only required field, so the command
+/// palette can send `{text}` and get relevance-ordered hits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQueryIn {
+    pub text: String,
+    /// Only hits inside this directory subtree. `None`/empty = every indexed root.
+    #[serde(default)]
+    pub within: Option<String>,
+    #[serde(default)]
+    pub scope: SearchScope,
+    /// Requested page size; clamped to [`SEARCH_MAX_PAGE`].
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Rows to skip, i.e. the cursor for the next page.
+    #[serde(default)]
+    pub offset: u32,
+}
+
+/// One hit. There is no `score` on purpose: the order the host returns **is** the
+/// ranking, and a score field invites every consumer to invent its own ordering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub path: String,
+    pub name: String,
+    /// Directory the name lives in, so the UI can show context without a second
+    /// round trip.
+    pub parent: String,
+    pub is_dir: bool,
+    /// `None` for directories, matching `ListEntry.size`.
+    #[serde(default)]
+    pub size: Option<u64>,
+    /// `None` for directories too, for the same reason: a hit has to read exactly
+    /// like the listing row for the same entry.
+    #[serde(default)]
+    pub modified_ms: Option<i64>,
+}
+
+/// `search.query` answer: one page plus enough state to explain itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQueryOut {
+    /// The text actually searched, after clamping/truncation.
+    pub text: String,
+    pub scope: SearchScope,
+    pub took_ms: u64,
+    /// Matches the index knows about for this query, not just this page.
+    pub total: u64,
+    pub offset: u32,
+    pub has_more: bool,
+    pub hits: Vec<SearchHit>,
+    /// The index's own state, so a page can tell "还没有索引" from "没有匹配" from
+    /// "索引不完整". Never derived from how many rows this page found — an empty
+    /// index and an interrupted job are different truths.
+    pub state: SearchIndexState,
+}
+
+/// `search.status` answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchStatusOut {
+    pub state: SearchIndexState,
+    pub entries: u64,
+    pub roots: Vec<String>,
+    /// Wall-clock length of the last job that reached a terminal state.
+    pub last_job_ms: u64,
+    /// Chinese, provider-authored reason for `partial`/`failed`; `None` otherwise.
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+/// `search.index.start` input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchIndexIn {
+    /// Absolute directories to walk. Empty = the host's default roots (every
+    /// already-indexed root, or the user profile on a first run).
+    #[serde(default)]
+    pub roots: Vec<String>,
+    /// `true` → drop everything and rebuild; `false` → bring the index up to date.
+    #[serde(default)]
+    pub rebuild: bool,
+}
+
+/// `search.index.start` answer: an id and the roots it accepted. The truth about
+/// progress arrives as events, exactly like `sys.scan.start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchIndexAck {
+    pub job_id: String,
+    pub roots: Vec<String>,
+    pub state: SearchIndexState,
+}
+
+/// `search:index-progress` payload — counters only, never a percentage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchIndexProgress {
+    pub job_id: String,
+    pub state: SearchIndexState,
+    pub entries: u64,
+    /// Directory currently being listed; a display hint, not a cursor.
+    pub current_path: String,
+    pub elapsed_ms: u64,
+}
+
+/// `search:index-done` payload. Terminal, and separate from progress so a
+/// cancelled or failed job cannot be inferred from a missing tick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchIndexDone {
+    pub job_id: String,
+    pub state: SearchIndexState,
+    pub entries: u64,
+    pub roots: Vec<String>,
+    pub elapsed_ms: u64,
+    /// `true` → the index is **partial**; the UI must not present it as the whole
+    /// volume and must not treat "no results" as "no matches".
+    pub cancelled: bool,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+/// The name index: query it, read its state, start or stop a job.
+///
+/// A separate service from [`FsApi`] because an index has a lifetime of its own
+/// (job id, cancel flag, worker threads, a file that may be deleted wholesale)
+/// and because every answer it gives is *from a cache*, which `fs` never is.
+pub trait SearchApi: Send + Sync + 'static {
+    /// Index state, read without walking anything.
+    fn status(&self) -> Result<SearchStatusOut, CapabilityError>;
+    /// One page of hits. An empty index is a valid answer with `state: Empty`,
+    /// not an error.
+    fn query(&self, req: &SearchQueryIn) -> Result<SearchQueryOut, CapabilityError>;
+    /// Start a job. Roots that are not readable directories are an error **on the
+    /// call**, not a later `search:index-done` — a job that can never report would
+    /// leave the UI waiting.
+    fn start_index(&self, req: &SearchIndexIn) -> Result<SearchIndexAck, CapabilityError>;
+    /// Ask a live job to stop. `false` for an unknown or finished id.
+    fn cancel_index(&self, job_id: &str) -> Result<bool, CapabilityError>;
+}
+
+/// cordis `Service` marker for the search capability.
+pub struct SearchCapability {
+    api: Arc<dyn SearchApi>,
+}
+
+impl SearchCapability {
+    pub fn new(api: Arc<dyn SearchApi>) -> Self {
+        Self { api }
+    }
+    pub fn api(&self) -> &Arc<dyn SearchApi> {
+        &self.api
+    }
+}
+
+impl Service for SearchCapability {
+    const NAME: &'static str = "capability.search";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1118,7 +1353,13 @@ mod tests {
                 items: vec![],
                 cross_volume_move: false,
             }),
-            vec!["crossVolumeMove", "items", "operationId", "requestToken", "state"]
+            vec![
+                "crossVolumeMove",
+                "items",
+                "operationId",
+                "requestToken",
+                "state"
+            ]
         );
         assert_eq!(
             keys(&FileKindOut {
@@ -1161,6 +1402,124 @@ mod tests {
         assert_eq!(req.destination, None);
     }
 
+    /// Search DTOs are the wire shape the command palette and `plugin-search`
+    /// read, so their field names are frozen here too.
+    #[test]
+    fn search_dto_field_names_are_camel_case_and_complete() {
+        assert_eq!(
+            keys(&SearchQueryIn {
+                text: String::new(),
+                within: None,
+                scope: SearchScope::All,
+                limit: None,
+                offset: 0,
+            }),
+            vec!["limit", "offset", "scope", "text", "within"]
+        );
+        assert_eq!(
+            keys(&SearchHit {
+                path: String::new(),
+                name: String::new(),
+                parent: String::new(),
+                is_dir: false,
+                size: None,
+                modified_ms: None,
+            }),
+            vec!["isDir", "modifiedMs", "name", "parent", "path", "size"]
+        );
+        assert_eq!(
+            keys(&SearchQueryOut {
+                text: String::new(),
+                scope: SearchScope::All,
+                took_ms: 0,
+                total: 0,
+                offset: 0,
+                has_more: false,
+                hits: vec![],
+                state: SearchIndexState::Empty,
+            }),
+            vec!["hasMore", "hits", "offset", "scope", "state", "text", "tookMs", "total"]
+        );
+        assert_eq!(
+            keys(&SearchStatusOut {
+                state: SearchIndexState::Ready,
+                entries: 0,
+                roots: vec![],
+                last_job_ms: 0,
+                detail: None,
+            }),
+            vec!["detail", "entries", "lastJobMs", "roots", "state"]
+        );
+        assert_eq!(
+            keys(&SearchIndexIn {
+                roots: vec![],
+                rebuild: false,
+            }),
+            vec!["rebuild", "roots"]
+        );
+        assert_eq!(
+            keys(&SearchIndexAck {
+                job_id: String::new(),
+                roots: vec![],
+                state: SearchIndexState::Indexing,
+            }),
+            vec!["jobId", "roots", "state"]
+        );
+        assert_eq!(
+            keys(&SearchIndexProgress {
+                job_id: String::new(),
+                state: SearchIndexState::Indexing,
+                entries: 0,
+                current_path: String::new(),
+                elapsed_ms: 0,
+            }),
+            vec!["currentPath", "elapsedMs", "entries", "jobId", "state"]
+        );
+        assert_eq!(
+            keys(&SearchIndexDone {
+                job_id: String::new(),
+                state: SearchIndexState::Ready,
+                entries: 0,
+                roots: vec![],
+                elapsed_ms: 0,
+                cancelled: false,
+                detail: None,
+            }),
+            vec![
+                "cancelled",
+                "detail",
+                "elapsedMs",
+                "entries",
+                "jobId",
+                "roots",
+                "state"
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(SearchScope::Dir).unwrap(),
+            json!("dir")
+        );
+        assert_eq!(
+            serde_json::to_value(SearchIndexState::Partial).unwrap(),
+            json!("partial")
+        );
+    }
+
+    /// A query with only `text` must deserialize — the palette sends exactly
+    /// that — and `rebuild` must default to *false* so an omitted field never
+    /// silently throws away a built index.
+    #[test]
+    fn search_inputs_have_safe_defaults() {
+        let req: SearchQueryIn = serde_json::from_value(json!({ "text": "报告" })).unwrap();
+        assert_eq!(req.scope, SearchScope::All);
+        assert_eq!(req.offset, 0);
+        assert_eq!(req.limit, None);
+
+        let job: SearchIndexIn = serde_json::from_value(json!({ "roots": ["C:/tmp"] })).unwrap();
+        assert!(!job.rebuild);
+        assert_eq!(job.roots, vec!["C:/tmp".to_owned()]);
+    }
+
     #[test]
     fn list_entry_round_trips_optional_metadata() {
         let entry = ListEntry {
@@ -1170,7 +1529,8 @@ mod tests {
             size: Some(12),
             modified_ms: Some(1_700_000_000_000),
         };
-        let back: ListEntry = serde_json::from_str(&serde_json::to_string(&entry).unwrap()).unwrap();
+        let back: ListEntry =
+            serde_json::from_str(&serde_json::to_string(&entry).unwrap()).unwrap();
         assert_eq!(entry, back);
 
         let dir = ListEntry {

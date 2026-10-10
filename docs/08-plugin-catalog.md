@@ -18,7 +18,7 @@
 | **B. 能力层(kernel/capabilities)** | 原子 Rust 能力,对外只经 `domain.action` 契约 | 重第三方库、可被多插件复用、无业务策略 | rusqlite、notify、blake3/sha2、`ignore`+`rayon`、Windows Shell `IFileOperation`/`IThumbnailCache` adapters、Lore 版本库适配、`infer`、`sysinfo`、`tantivy`/FTS5 |
 | **C. 后端插件(逻辑 fiber)** | 订阅事件 + 编排能力 = 业务策略 | 有业务语义、静态编译进宿主(R4) | file-history 的"工作区变化→Lore 状态/历史查询→用户提交/恢复"策略 |
 | **D. 前端共享单例(import map)** | 基座 + 插件复用的框架级前端包 | **多消费者**且**必须单例**(否则 hooks 多实例) | react、react-dom、@mantine/*、plugin-sdk |
-| **E. 前端插件自带 bundle(打进插件 dist)** | 单插件专用的功能库 | **单消费者**、非单例要求 | CodeMirror、Shiki、echarts、react-arborist、@tanstack/*、react-markdown、react-pdf、react-photo-view、@dnd-kit |
+| **E. 前端插件自带 bundle(打进插件 dist)** | 单插件专用的功能库 | **单消费者**、非单例要求 | CodeMirror、Shiki、echarts、react-arborist、@tanstack/*、react-markdown、react-pdf、react-photo-view |
 
 **关键约束**:
 - **D 与 E 的分界是"是否多消费者 + 是否要求单例"**。只有框架与 Mantine 进 import map 共享;功能库(即便体积大)只被一个插件用,就**打进该插件自己的 ESM dist**,保持插件 drop-in 自包含、不撑爆共享集。
@@ -40,7 +40,7 @@
 | `file-sidebar-zone` | D 详情容器 | ✅ 存在 | **由 `plugin-inspector` 容器占用**(P6-47),容器再向下提供 `detail-tab:*`/`preview-zone`/`detail-info-zone`/`file-extension-zone` |
 | `statusbar-zone` | 底部状态栏 | ✅ 存在(基座自带 `会话 N · 文件/目录 <路径>` 文本 + `statusbar-zone` 扩展位) | file-ops(复制进度)、选中统计 |
 | `bottom-drawer` | 底部调试抽屉(非 A/B/C/D 网格区,开发/排障用) | ✅ 存在 | `devtools-log`(性能/错误/事件捕获面板)、`dev-slot-harness`(嵌套槽验证夹具),均仅 dev 索引装载 |
-| `command-palette` | 全局命令面板 | 🔵 规划(基座 spotlight) | 各插件注册命令 |
+| `command-palette` | 全局命令面板(浮层) | ✅ 存在 | `plugin-command-palette` 是唯一面板提供者(P7-30)：它自己把 `Ctrl+Shift+P` 注册成 `palette.open` 命令，其他插件经 `host.commands.register` 注册命令 |
 
 **嵌套槽(基座嵌套槽运行时 P6-45 已就绪:manifest `frontend.provides` 声明前缀 + `permissions.slots.contribute` 授权注入;容器插件才能 `provideSlot`)**:
 
@@ -66,9 +66,9 @@
 
 - **元状态(级联引用,见 01 §9)**:`activeTabId`(顶部会话)、`activeSidebarView`(A)、`sidebarSelection: Ref\|null`(B→C)、`focusRef: Ref\|null`(C→D)、`activeDetailTab`(D)。`Ref={kind,id,sourcePlugin}`,基座只搬运不解释。业务数据(历史、标签、收藏、缩略图缓存)一律插件自建自持。
 - **协调事件(前端总线,TS SDK 内,不跨 IPC)**:`tab:activated`、`sidebar:view:changed`、`sidebar:selection:changed`、`focus:changed`、`detail:tab:changed`,以及嵌套槽 `slot:registered/reconfigured/disposed`(02 §4.5/§6.4)。
-- **跨层领域事件(已冻结 v1,需 Rust 契约)**:`file:changed`、`history:updated`(见 02 §7.1)。
+- **跨层领域事件(已冻结 v1,需 Rust 契约)**:`file:changed`、`history:updated`(见 02 §7.1);进度/终态类:`shell:operation:progress`/`shell:operation:done`(file-ops)、`scan:progress`/`scan:done`(storage-analysis)、`search:index-progress`/`search:index-done`(search)。
 - **规划新增领域事件(进 Phase 6 时同步 contracts↔plugin-sdk 并跑 `contract:check`)**:
-  `file:operation:progress`、`file:operation:complete`(file-ops)、`search:results`(search)、`thumbnail:state:changed`(仅缩略图状态，不含图像内容)、`preview:state:changed`(预览状态)、`history:metadata:updated`(版本展示信息失效提示)、`command:invoke`(面板)。右键菜单的 `history:revision:restore-requested` 仅为前端总线事件。
+  `thumbnail:state:changed`(仅缩略图状态，不含图像内容)、`history:metadata:updated`(版本展示信息失效提示)。前端总线专用(不进 Rust 契约)的还有 `history:revision:restore-requested`(右键菜单)、`preview:state:changed`(预览自报状态)、命令执行(基座命令服务内完成,无事件——原规划名 `command:invoke` 不需要)。搜索命中随分页 `search.query` 返回,不分开发播 `search:results`(D24)。
 
 ---
 
@@ -90,7 +90,7 @@
 | `file.metadata.read`、`db.historyMetadata.*`（拟议） | Windows Shell 属性读取 + 插件独占元数据存储 | history-metadata；保存/查询版本展示信息 | P6-71 |
 | `text.diff` | `similar` | 仅当 Lore diff API 无法满足文本显示时作展示辅助 | P6-11（随 Lore 方案复核） |
 | `db.<store>.*` | `rusqlite`(+ `refinery` 迁移 / `r2d2_sqlite` 池) | search 索引(规划)、插件元数据 | P6-12；不再作为文件版本内容来源 |
-| `search.query`(索引) | `tantivy` **或** SQLite FTS5 | search | P6-9(⚪ 先评估 FTS5) |
+| `search.query`/`search.status`/`search.index.start`/`search.index.cancel`(名称索引) | SQLite FTS5(trigram;`rusqlite` bundled 自带) | search | ✅ P6-9/P7-28(定案见 [D24](05-decisions.md)) |
 | `fs.chunks`(内容定义分块) | `fastcdc` | 仅在未来非 Lore 场景确有块级存储需求时复核 | P6-13（Lore 接管版本内容，原计划暂缓） |
 | `fs.openResource`/`fs.readResource`/`fs.closeResource` | host 只读、路径绑定、短时资源句柄(512 KiB 分片、64 MiB 预览上限、≤16 活跃句柄、TTL 5 分钟) | `plugin-preview` / Open File Viewer | ✅ P7-20 |
 
@@ -107,12 +107,13 @@
 | `plugin-layout-panes` | 前端 | C 主视图 | `main-view-zone` | `pane-slot:<paneId>` | `fm.layout-panes.v1`,按会话 `activeTabId` 存 `{mode,ids,seq,colPct,rowPct}` | 分栏容器:切单栏/左右双栏/2×2 四栏;稳定 paneId + 单一 keyed 数组迁移子树不丢状态;按模式**增量挂载** outlet;**每栏都是有界 flex 列**(栅格行轨 `minmax(0,1fr)`、栏 `display:flex`+`min-height:0`、outlet `overflow:hidden`),滚动权交给内容插件 | ✅ |
 | `plugin-inspector` | 前端 | D 详情 | `file-sidebar-zone` | `detail-tab:<name>`、`preview-zone`、`detail-info-zone`、`file-extension-zone` | 活动 tab 取 `meta.activeDetailTab` | 详情容器:焦点标题条(名称/路径/类型徽标)+ tab 条(信息 + `contributedSlots("detail-tab")` 扫到的,标题取 `host.slotLabel`)+ 焦点 kind 模板(文件/文件夹/其他);tab 全挂载、隐藏非活动;空槽显示中文占位 | ✅ |
 | `plugin-layout-views` | 前端 | B 侧栏 | `nav-zone` | `nav-panel:<viewId>` | 无(读 `meta.activeSidebarView`) | 视图互斥容器:只渲染活动视图对应出口可见,其余 `display:none`;**互斥是容器职责**,视图插件不写 self-hide | ✅ |
-| `plugin-file-browser` | 前端 | C 内容 | (运行时注入 `pane-slot:*`);贡献 `settings-page:file-browser` | — | 每栏 `fm.file-browser.v1`(`会话\|槽id` → `{cwd,mode}`)+ 插件偏好 `fm.file-browser.prefs.v1`(`{defaultMode,thumbnails}`) | 每栏独立地址栏/历史栈、列表或网格虚拟流、文件夹/文件分组、类型图标、大小与 `modifiedMs`；网格按可见性懒取 `shell.thumbnail.read`，无结果回退类型图标；禁止应用生成缩略图。设置页控制显示方式与缩略图开关 | ✅ 浏览器现状；缩略图能力迁移待做 |
+| `plugin-file-browser` | 前端 | C 内容 | (运行时注入 `pane-slot:*`);贡献 `settings-page:file-browser` | — | 每栏 `fm.file-browser.v1`(`会话\|槽id` → `{cwd,mode}`)+ 插件偏好 `fm.file-browser.prefs.v1`(`{defaultMode,thumbnails,tableColumns}`) | 每栏独立地址栏/历史栈、列表/网格/表格三条共用虚拟化流、文件夹/文件分组、类型图标、大小与 `modifiedMs`；网格按可见性懒取 `shell.thumbnail.read`，无结果回退类型图标；禁止应用生成缩略图。表格模式由 `@tanstack/react-table` 提供列排序与列可见性，隐藏的 `dir` 主键保证两种方向都文件夹成组在前，未排序时透传 `fs.list` 顺序。设置页控制默认显示方式、缩略图开关与表格列开关 | ✅ |
 | `plugin-settings` | 前端 | 悬浮层(不占六区) | `activity-rail-zone`(底部齿轮) | `settings-page:<name>` | `fm.plugins.disabled.v1`(启停列表,由基座 loader 读写) | **设置面板容器**:齿轮点击开 Mantine `Popover`(受控 `opened`:开合由齿轮自己翻、`onChange` 收 ESC/外点)。外层分页 **软件设置**(主题三态 + 插件启停列表)与 **插件设置**(逐个 `settings-page:<name>` 出口,标题取贡献者 `label`,全挂载、隐藏非活动)。启停经基座前端能力 `plugins.list`/`plugins.setEnabled`,**核心插件(三容器 + 设置自己)显示 `基础插件` 且开关禁用**。**面板尺寸固定**(`620×560`,不随分页重算),正文各自 `overflow-y:auto`,子页 tab 条 `sticky`(00 §4.26) | ✅ |
 | `plugin-context-menu` | 前端 | 应用级浮层 | `ContextMenuLayer`(Mantine overlay,挂在 `statusbar-zone`) | `host.contextMenu.registerItem` 注册接口 | 当前右键上下文(短时内存) | 右键框架:统一定位、上下文、分组/排序/键盘操作和插件回调派发；业务菜单项由其他插件注册 | ✅ |
+| `plugin-command-palette` | 前端 | 应用级浮层 | `command-palette`(Mantine Spotlight,固定 620×420,内部列表滚动) | — | 无持久化(查询/选中态组件内,重开清空) | 命令面板(Ctrl+Shift+P):检索并执行**基座命令服务**里各插件注册的命令(登记簿/派发/清理归基座,D25),行内同时按当前目录 `fs.list` 搜文件名并跳转;`command-palette` 槽的唯一提供者 | ✅ |
 | `plugin-view-file-tree` | 前端 | A+B | `activity-rail-zone`(图标)、`nav-panel:file-tree` | — | 展开态与已加载目录在组件内(ref),不持久化 | 侧栏视图:目录树(react-arborist,自写懒加载) | ✅ |
 | `plugin-view-favorites` | 前端 | A+B | `activity-rail-zone`、`nav-panel:favorites` | — | `fm.view-favorites.v1` 收藏列表 | 侧栏视图:主页 + 收藏/书签;选中发 `sidebar:selection:changed` | ✅ |
-| `plugin-view-tags` | 前端 | A+B | `activity-rail-zone`、`nav-panel:tags` | — | `fm.view-tags.v1` 标签与成员 | 侧栏视图:标签/集合;点标签发 `{kind:"tag"}` 选择,点成员发 `focus:changed` | ✅ |
+| `plugin-view-tags` | 前端 | A+B | `activity-rail-zone`、`nav-panel:tags` | — | `db.tags` store(kv 行 key=标签名,value `{seq,members}`;唯一写者;旧 `fm.view-tags.v1` 一次性导入) | 侧栏视图:标签/集合;点标签发 `{kind:"tag"}` 选择,点成员发 `focus:changed`;增删改名/成员增删后发无载荷 `tags:updated`(D26) | ✅ |
 
 要点:
 - 容器插件(`layout-panes`/`inspector`/`layout-views`/`settings`)**只管几何与承载**,不碰内容业务;内容插件只认 `slotId`,不感知自己处在哪种分栏。设置面板同理:它只分页与承载各插件自己的设置页,**不解释任何页内内容的含义**,也不读写任何他插件的偏好键。
@@ -127,11 +128,11 @@
 
 | 插件 | 形态 | 目的 | 前端库(E/D 落位) | 依赖能力(B) | 主要 slot | 关键事件 | 优先级 / 归属 P6 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| `plugin-file-browser` | 前端 | 列表/网格/标签浏览与导航(目录树见 `view-file-tree`) | 现有:`@tanstack/react-virtual`(列表与网格共用一条虚拟化流)、`lucide-react` 类型图标、自写 `formatSize`;规划 `@tanstack/react-table`、`dayjs`、`pretty-bytes` | `fs.home`、`fs.list`、`shell.thumbnail.read`（规划替换） | `pane-slot:*`(运行时按 outlet 自动注入,每栏独立实例) | 发 `focus:changed`;订 `sidebar:selection:changed`、`slot:registered`/`slot:disposed` | 高 | P6-16/19/21 剩余 | ✅ 列表·网格虚拟滚动 / 🔵 改用 Windows 系统缩略图、标签 chips、表格视图 |
+| `plugin-file-browser` | 前端 | 列表/网格/表格/标签浏览与导航(目录树见 `view-file-tree`) | 现有:`@tanstack/react-virtual`(三种显示方式共用一条虚拟化流)、`@tanstack/react-table` **v9**(排序 + 列可见性,随插件 dist 打包,gzip 47.6 kB)、`lucide-react` 类型图标、SDK `formatSize`/`formatDate`(内部 `pretty-bytes` + `dayjs`)、SDK `listTags`(标签 chips 与标签视图的数据源) | `fs.home`、`fs.list`、`shell.thumbnail.read`、`db.tags.list`(只读,订 `tags:updated` 重查) | `pane-slot:*`(运行时按 outlet 自动注入,每栏独立实例) | 发 `focus:changed`;订 `sidebar:selection:changed`、`slot:registered`/`slot:disposed`、`tags:updated` | 高 | P6-15/16/20/21 ✅;余快捷键(P6-19) | ✅ 列表·网格·表格(含排序/列配置)虚拟滚动 + 三模式标签 chips(点击开 `标签「X」` 视图) |
 | `plugin-file-ops` | **全栈；Windows 原生 provider** | 系统默认打开/资源管理器定位、复制/移动/回收站删除/重命名/新建 | Rust Windows COM `IFileOperation`(STA 专用线程)；`tauri-plugin-opener`/`dialog`；Mantine 仅用于收集新名称/目标 | `shell.fileOperation`、`shell.cancelFileOperation`、`shell.openPath`、`shell.revealItemInDir`、`shell.pickDirectory`、`clipboard.write` | `statusbar-zone`(操作状态行)；经 `host.contextMenu` 贡献条目/空白区动作 | 订 `shell:operation:progress`/`shell:operation:done`;发 `file:changed` | 高 | P7-16~19 | ✅(真机 Shell 行为 🟡) |
 | `plugin-file-history` | **全栈** | Lore 仓库内版本历史查询、dirty 状态、用户创建版本、只读查看、diff 与安全恢复；不保存版本展示元数据 | Mantine `detail-tab:history` 时间线；文本差异按需接 `react-diff-view`；版本行提供 `history-record:metadata` 子槽 | 拟议 `lore.*` 权限契约；旧 `db.history.*` 仅只读兼容 | `detail-tab:history` | 订 `file:changed` 作失效提示；发/订 `history:updated`；消费 `history:revision:restore-requested` 并执行 Lore 恢复 | 高 | P6-69/70 | ✅ 旧式基础元数据快照 / 🔵 Lore 迁移 |
 | `plugin-history-metadata` | **全栈辅助** | 按 Lore revision 保存创建时的系统缩略图、文件大小、类型、图片尺寸和采集状态；为历史版本行提供信息卡片；不管理 Lore 版本 | Mantine 子组件注入 `history-record:metadata`；缩略图仅读 Windows Shell 系统缓存/handler | `shell.thumbnail.read`、`file.metadata.read`、独占 `db.historyMetadata.*`；禁止 `lore.change.commit`/`lore.file.restore` | `history-record:metadata` | 订 Lore revision 生命周期事件；发 `history:metadata:updated`；只发 restore-request，不执行恢复 | 高 | P6-71 | 🔵 |
-| `plugin-search` | **全栈** | 文件名 + 内容检索 | 复用 `@mantine/spotlight`(D 共享)+ 结果列表 | `search.query`、`fs.list`(建索引) | `command-palette`、`pane-slot:*`(结果) | 发 `search:results`;订 `file:changed`(增量索引) | 中 | P6-9/14 | 🔵(引擎  待评估) |
+| `plugin-search` | 前端(索引引擎封在内核能力里) | 按名称检索已索引的文件夹与文件:顶栏入口 → 固定 620×640 自有浮层(分页取更多、索引目录管理、打开命中所在目录) | 自写结果列表(Mantine 输入/列表);无第三方检索库 | `search.status`、`search.query`、`search.index.start`、`search.index.cancel`、`shell.pickDirectory`、`shell.openPath` | `topbar-zone`;贡献 `settings-page:search` | 订 `search:index-progress`/`search:index-done`;发 `sidebar:selection:changed`;命令 `search.open`/`search.index-current` | 中 | P6-9/14 | ✅ 批次 9(FTS5 定案见 D24) |
 | `plugin-preview` | 前端 | 预览区默认展示系统缩略图；用户点击切换后再用同一个 viewer 统一预览文本/代码/Markdown、图片、PDF、音视频、Office、压缩包；表外格式在申请句柄前如实拒绝 | ★ Open File Viewer React SDK + core（MIT；`officePlugin` 覆盖 docx/xlsx/pptx；pdf 资产本地化） | `file.kind`、`fs.readText`、`fs.openResource`/`fs.readResource`/`fs.closeResource`、`shell.thumbnail.read`、`shell.openPath` | `preview-zone`;贡献 `settings-page:preview` | 随 `focusRef` 刷新；发 `preview:state:changed` | 高 | P7-20~22 | ✅(真窗口/真 Shell 图 🟡) |
 | `plugin-windows-thumbnails` | 前端策略 + host Windows capability | 读取 Windows Shell 缩略图及系统缓存；不生成、不解析缓存文件 | Windows Shell `IThumbnailCache` / 已注册系统 handlers | `shell.thumbnail.read`（拟议） | 自有设置页 `settings-page:windows-thumbnails`；被授权消费者调用 | 拟议 `thumbnail:state:changed`（仅状态元数据） | 高 | P6-7 | 🔵 |
 | `plugin-storage-analysis` | 前端 | 磁盘占用 treemap / 空间分析（固定 560×640 浮层，下钻/合并明细/取消/缓存） | `echarts`(`echarts/core` + `TreemapChart` + `CanvasRenderer`) | `shell.pickDirectory`、`sys.disk.list`、`sys.scan.start`、`sys.scan.cancel` | `topbar-zone`(按钮 + 自有浮层) | 订 `scan:progress`/`scan:done`/`file:changed` | 低 | P7-23/24 | ✅ |
@@ -156,7 +157,7 @@
 | `plugin-history-metadata` | 全栈辅助 | `history-record:metadata` | `shell.thumbnail.read`、`file.metadata.read`、`db.historyMetadata.*` | 订 Lore revision 生命周期；发 `history:metadata:updated`、`history:revision:restore-requested` | 为每条 revision 保存并展示版本创建时的缩略图和文件属性；不调用 Lore 恢复 | 🔵 |
 | `plugin-mock-data` | 前端(dev) | `activity-rail-zone` + `nav-panel:stress`(B 区视图) | `fs.list` | 发 `sidebar:view:changed`、`sidebar:selection:changed` | 压力数据集入口:列 `/stress` 下各数据集目录,点击即以**不透明引用**驱动 C 区任意栏加载真实条目(每栏独立,可左右对比不同量级) | ✅ |
 | `plugin-devtools-log` | 前端(dev) | `bottom-drawer` | — | 订 `selection:changed`/`file:changed`/`history:updated` + 级联 5 事件 + `slot:registered`/`slot:reconfigured`/`slot:disposed` | 捕获 console / `window` 错误 / `unhandledrejection` / longtask / 白名单事件入环形缓冲(上限 5000),面板可筛选/搜索/新旧序/清空/导出 JSON;在 dev 索引里**最先装载**以捕获他插件 | ✅ |
-| `plugin-dev-slot-harness` | 前端(dev) | `bottom-drawer`;提供 `dev-pane:<n>` | — | 订 `slot:registered`/`slot:reconfigured`/`slot:disposed` | 嵌套槽运行时(P6-45)验证夹具:注册 `dev-pane` 前缀并渲染两个 `<SlotOutlet>`,卡片随 `focusRef` 更新;**故意**越权注入 `file-sidebar-zone` 与 `provideSlot("forbidden-prefix:0")`,让两条 gating 拒绝路径在调试台留证 | ✅ |
+| `plugin-dev-slot-harness` | 前端(dev) | `bottom-drawer`;提供 `dev-pane:<n>` | — | 订 `slot:registered`/`slot:reconfigured`/`slot:disposed` | 嵌套槽运行时(P6-45)验证夹具:注册 `dev-pane` 前缀并渲染两个 `<SlotOutlet>`,卡片随 `focusRef` 更新;**故意**越权注入 `file-sidebar-zone` 与 `provideSlot("forbidden-prefix:0")`,让两条 gating 拒绝路径在调试台留证;另**故意**调 `host.commands.provide()`(未授权)并注册畸形快捷键 `"Ctrl+"` 与重复快捷键 `"Ctrl+Shift+F"`,三条拒绝警告进 console(P7-30 取证) | ✅ |
 
 ### 5.4 `/stress` 压力数据集(dev only,`apps/shell-ui/src/dev-mocks.ts`)
 
@@ -185,7 +186,7 @@
 | 元状态(级联引用) | `zustand`(已在用) | `activeTabId`/`activeSidebarView`/`sidebarSelection`/`focusRef`/`activeDetailTab`(不透明 `Ref`,基座不解释) |
 | 事件总线 | 自写 + `@tauri-apps/api` | 后端事件→前端(已实现桥) |
 | `PluginHost` | plugin-sdk | invoke/on/emit/state + 命令注册(受权限约束) |
-| 命令面板 | `@mantine/spotlight` | 基座提供面板,插件注册命令项 |
+| 命令服务 | 自写 `commands.ts`(登记簿/快捷键派发/清理) | 基座持命令登记簿、唯一 keydown 监听(懒装、capture:true)与 busy 守卫;校验应用级唯一 id/快捷键,畸形或重复**整条拒绝**(不静默丢键);插件卸载即回收其全部命令与快捷键(D25)。面板本体是 `plugin-command-palette`,不在基座 |
 | 国际化 | `i18next` + `react-i18next`(**未接**) | 基座 provider,插件按需取文案。当前所有界面文案为**中文硬编码**(基座/容器/插件各自内联),多语言属 P6-26 |
 | 系统通知 | `@mantine/notifications`(应用内)+ `tauri-plugin-notification`(系统级) | |
 | 窗口/单实例/开机 | `tauri-plugin-window-state`/`-single-instance`/`-autostart` | 纯外壳行为,无插槽 |
@@ -194,9 +195,9 @@
 
 ---
 
-## 7. manifest 草案(格式对 file-browser / file-ops / search)
+## 7. manifest 摘要(与仓库一致)
 
-沿用 02 §2 schema(`schemaVersion=1`,camelCase,`crate` 键)。`plugin-layout-panes`、`plugin-file-browser`、`plugin-context-menu`、`plugin-file-ops`、`plugin-preview`、`plugin-storage-analysis` 都是**落地清单**(与仓库一致);`plugin-search` 仅示例**分布**,代码未写。
+沿用 02 §2 schema(`schemaVersion=1`,camelCase,`crate` 键)。`plugin-layout-panes`、`plugin-file-browser`、`plugin-context-menu`、`plugin-file-ops`、`plugin-preview`、`plugin-storage-analysis`、`plugin-search`、`plugin-command-palette` 都是**落地清单**(与仓库一致)。
 
 ```jsonc
 // plugins/plugin-layout-panes/manifest.json  (框架容器:占用 main-view-zone,向下提供 pane-slot:<paneId>)
@@ -287,26 +288,49 @@
 ```
 
 ```jsonc
-// plugins/plugin-search/manifest.json  (全栈:后端建/查索引,前端 spotlight + 结果面板注入 pane-slot)
+// plugins/plugin-search/manifest.json  (纯前端编排:顶栏入口 → 自有固定 620×640 浮层;索引引擎在内核 search.* 能力里,D24)
 {
   "schemaVersion": 1, "name": "plugin-search", "version": "0.1.0",
   "displayName": "搜索", "minHostVersion": "0.1.0",
-  "backend": { "crate": "plugin-search-backend", "enabledByDefault": true, "config": { "engine": "fts5" } },
   "frontend": {
     "entry": "frontend/dist/index.js",
-    "slots": [ { "id": "command-palette", "export": "SearchPalette" } ],   // 结果面板运行时 contributeToSlot('pane-slot:<n>', SearchResults)
+    "slots": [
+      { "id": "topbar-zone", "export": "SearchToolbar", "label": "搜索" },
+      { "id": "settings-page:search", "export": "SettingsPage", "label": "搜索" }
+    ],
     "provides": []
   },
   "permissions": {
-    "capabilities": ["search.query", "fs.list"],
-    "events": { "subscribe": ["file:changed"], "emit": ["search:results"] },
-    "slots": { "contribute": ["pane-slot:*"] }
+    "capabilities": ["search.status", "search.query", "search.index.start", "search.index.cancel",
+                     "shell.pickDirectory", "shell.openPath"],
+    "events": { "subscribe": ["search:index-progress", "search:index-done"], "emit": ["sidebar:selection:changed"] },
+    "slots": { "contribute": ["topbar-zone", "settings-page:search"] },
+    "commands": { "register": true }              // 提供 search.open / search.index-current
+  }
+}
+```
+
+```jsonc
+// plugins/plugin-command-palette/manifest.json  (面板本体;命令登记簿/快捷键派发/清理归基座命令服务,D25)
+{
+  "schemaVersion": 1, "name": "plugin-command-palette", "version": "0.1.0",
+  "displayName": "命令面板", "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [ { "id": "command-palette", "export": "CommandPalette", "label": "命令面板" } ],
+    "provides": []
+  },
+  "permissions": {
+    "capabilities": ["fs.list"],
+    "events": { "subscribe": [], "emit": ["sidebar:selection:changed", "focus:changed"] },
+    "slots": { "contribute": ["command-palette"] },
+    "commands": { "register": true, "provide": true }   // 注册 palette.open;provide 才可领面板启动器
   }
 }
 ```
 
 > **容器 vs 内容**:容器插件(`provides` 非空)占用一个外层槽并向下提供嵌套槽;内容插件用 `frontend.slots` 声明固定槽(外层或容器嵌套槽),或在 `activate()` 里 `host.contributeToSlot('pane-slot:<paneId>', Comp)` 注入动态槽(故 `frontend.slots` 留空、改在 `permissions.slots.contribute` 授权前缀,如 `pane-slot:*`)。声明式槽条目可带 `label`(真实例子:`{ "id": "detail-tab:history", "export": "HistoryPanel", "label": "历史" }`),容器用 `host.slotLabel(id)` 题名;空白 `label` 在装载期即被 `validateManifest`/Rust `validate()` 拒。动态槽的数量由容器决定,内容插件靠 `providedSlots(prefix)` + `slot:registered`/`slot:disposed` 发现并跟随,不扒 React 内部。每栏放哪个内容插件、如何切换,是 `plugin-layout-panes` 的容器职责(P6-46)。
-> 后端插件**只声明并使用能力**,不直连 Windows Shell COM 或 `tantivy`——系统文件操作经能力层 host adapter；搜索后端唯一例外可直连索引库(若索引本身被视为重能力,则同样封进 `search.query` 能力,后端插件仅编排)。二选一在 P6-9 评估时定,记进 05 决策。
+> 后端插件**只声明并使用能力**,不直连 Windows Shell COM——系统文件操作经能力层 host adapter。搜索已定案(D24):FTS5(`rusqlite` bundled)封在内核 `search.*` 能力里,库句柄不出内核,**没有搜索后端插件**,前端插件只编排能力与事件。`commands` 半区与 `contextMenu` 同构:声明 `register:true` 才拿到 `host.commands`,再声明 `provide:true` 才可 `commands.provide()` 领面板启动器;未声明的面不存在,调用即拒绝(D25)。
 
 ---
 
@@ -317,9 +341,9 @@
 
 **建议实现顺序**(每步都产出可 dogfood 的新插件并验证架构):
 0. **框架/布局先行(P6-43~48/54/55,已交付)**:基座补外层区域网格 + 顶部会话容器 + 嵌套槽运行时(provide/contribute + `slot:*` 生命周期 + 稳定 paneId 迁移),再落 `plugin-layout-panes`(C 分栏)、`plugin-inspector`(D tab 容器)、`plugin-layout-views`(B 视图互斥),并把最小浏览能力拆成 `plugin-file-browser`(每栏实例)与 `view-*` 侧栏视图。**先立外壳与级联状态,后续业务插件才有稳定的挂载点**——现在挂载点已稳定,基座内零业务状态。
-1. **file-browser 与 Windows 缩略图迁移**(✅ 每栏独立地址栏+历史前进后退、列表/网格统一虚拟滚动、mtime 日期列、**插件自有设置页**、`shell.thumbnail.read` 替换应用自制生成链均已交付；剩余标签 chips 与表格视图；`plugin-windows-thumbnails` 的独立开关页仍未落)。
+1. **file-browser 与 Windows 缩略图迁移**(✅ 每栏独立地址栏+历史前进后退、列表/网格/表格统一虚拟滚动、表格列排序与列可见性、mtime 日期列、标签 chips 与标签视图(批次 11,`db.tags` 契约见 D26)、**插件自有设置页**、`shell.thumbnail.read` 替换应用自制生成链均已交付；`plugin-windows-thumbnails` 的独立开关页仍未落)。
 2. **file-ops**(✅ 批次 5：首个新增后端能力 + 进度事件,验证了能力层扩展、契约两侧同步与错误隔离在写操作上的表现)。
-3. **search**(验证重能力/索引 + spotlight 命令注册)。
+3. **search**(✅ 批次 9:FTS5 名称索引封进内核 `search.*` 能力、无搜索后端插件(D24);命令注册面 + `plugin-command-palette`(D25))。
 4. **统一 preview**(✅ 批次 6：纯文本与其余格式同在唯一 `plugin-preview` 内；Open File Viewer React SDK + 受限本地资源句柄，逐类真实样本取证；不拆分 Markdown/图片/PDF/媒体应用插件)。
 5. **file-history 增强(diff)**:复用 preview 的 diff-view 与 `text.diff` 能力。
-6. 视需要:media(缩略图独立开关页)、表格视图。storage-analysis 已随批次 7 交付。
+6. 视需要:media(缩略图独立开关页)。storage-analysis 已随批次 7 交付。

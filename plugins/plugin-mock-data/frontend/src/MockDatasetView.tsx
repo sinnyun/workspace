@@ -8,16 +8,12 @@
  * at — virtualization, thumbnails, group headers — instead of a side panel with
  * its own hand-rolled window.
  */
-import { useEffect, useState } from "react";
+
+import { Divider, Group, Stack, Text } from "@mantine/core";
+import { Events, errorMessage, type ListEntry, type Ref, type SlotProps } from "@my-file-manager/plugin-sdk";
+import { File, Folder } from "lucide-react";
 import type { CSSProperties } from "react";
-import { Divider, Stack, Text } from "@mantine/core";
-import {
-  Events,
-  errorMessage,
-  type ListEntry,
-  type Ref,
-  type SlotProps,
-} from "@my-file-manager/plugin-sdk";
+import { useEffect, useState } from "react";
 
 const DATASET_ROOT = "/stress";
 
@@ -56,16 +52,13 @@ export function MockDatasetView({ host }: SlotProps) {
       )}
       <div style={listStyle}>
         {entries.map((ent) => (
-          <button
-            key={ent.path}
-            type="button"
-            onClick={() => open(ent)}
-            title={ent.path}
-            style={rowStyle}
-          >
-            <Text size="xs" truncate style={{ flex: 1 }}>
-              {ent.isDir ? `📁 ${ent.name}` : `📄 ${ent.name}`}
-            </Text>
+          <button key={ent.path} type="button" onClick={() => open(ent)} title={ent.path} style={rowStyle}>
+            <Group gap={6} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+              {ent.isDir ? <Folder size={14} /> : <File size={14} />}
+              <Text size="xs" truncate style={{ flex: 1, minWidth: 0 }}>
+                {ent.name}
+              </Text>
+            </Group>
           </button>
         ))}
       </div>
