@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "plugin-view-tags",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "标签视图",
   "description": "用标签整理选中的文件和文件夹，快速查看标签内的项目。",
   "author": "base",
@@ -21,6 +21,10 @@
     },
     "slots": {
       "contribute": ["activity-rail-zone", "nav-panel:tags"]
+    },
+    "contextMenu": {
+      "contribute": true,
+      "open": ["tags.tag", "tags.member"]
     }
   }
 }

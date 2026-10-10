@@ -76,6 +76,24 @@ pub struct Permissions {
     /// before nested slots existed simply omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slots: Option<SlotPermissions>,
+    /// Context-menu grants (docs/plugin-functional/plugin-context-menu.md).
+    /// Optional; absent means the plugin gets no `host.contextMenu` face at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_menu: Option<ContextMenuPermissions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMenuPermissions {
+    /// Surface ids this plugin may ask the panel to open for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open: Option<Vec<String>>,
+    /// May register menu items whose `execute` runs as this plugin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contribute: Option<bool>,
+    /// May claim the panel itself. The base serves exactly one provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provide: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -141,6 +159,16 @@ impl PluginManifest {
                 }
             }
         }
+        if let Some(cm) = self.permissions.context_menu.as_ref() {
+            for surface in cm.open.iter().flatten() {
+                if surface.trim().is_empty() {
+                    return Err(format!(
+                        "permissions.contextMenu.open in plugin `{}` has empty entry",
+                        self.name
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -195,6 +223,48 @@ mod tests {
             Some("版本")
         );
         assert_eq!(labeled.validate(), Ok(()));
+    }
+
+    /// `permissions.contextMenu` is an addition: absent means no menu face at all,
+    /// and a blank surface id is refused on both sides of the bridge.
+    #[test]
+    fn context_menu_grants_round_trip_and_validate() {
+        let m: PluginManifest = serde_json::from_str(
+            r#"{"schemaVersion":1,"name":"plugin-context-menu","version":"1.0.0",
+                "frontend":{"entry":"e.js","slots":[{"id":"main-view-zone","export":"C"}]},
+                "permissions":{"capabilities":[],"events":{"subscribe":[],"emit":[]},
+                               "contextMenu":{"open":["browser.list.item"],"contribute":true,"provide":true}}}"#,
+        )
+        .unwrap();
+        assert_eq!(m.validate(), Ok(()));
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["permissions"]["contextMenu"]["open"][0], "browser.list.item");
+        assert_eq!(
+            json["permissions"]["contextMenu"]["provide"],
+            serde_json::Value::Bool(true)
+        );
+
+        let plain: PluginManifest = serde_json::from_str(
+            r#"{"schemaVersion":1,"name":"p","version":"1.0.0",
+                "frontend":{"entry":"e.js"},
+                "permissions":{"capabilities":[],"events":{"subscribe":[],"emit":[]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(plain.permissions.context_menu, None);
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap()["permissions"].get("contextMenu"),
+            None,
+            "an absent grant must not appear in the serialized manifest"
+        );
+
+        let bad: PluginManifest = serde_json::from_str(
+            r#"{"schemaVersion":1,"name":"p","version":"1.0.0",
+                "frontend":{"entry":"e.js"},
+                "permissions":{"capabilities":[],"events":{"subscribe":[],"emit":[]},
+                               "contextMenu":{"open":[""]}}}"#,
+        )
+        .unwrap();
+        assert!(bad.validate().unwrap_err().contains("contextMenu.open"));
     }
 
     #[test]

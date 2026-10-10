@@ -28,6 +28,9 @@
 >
 > **6E 第二轮交付 P6-56~60(2026-10-08,对照 `docs/界面布局.jpg` 收口)**:基座外壳改全 Mantine 组件并以**亮色**为默认(`MantineProvider defaultColorScheme="light"`),顶栏三态主题切换(跟随系统/亮色/暗色)与 `plugin-settings` 面板操作同一份 Mantine 配色值;新增**槽标签发现面**(manifest `frontend.slots[].label` → `host.slotLabel`),D 的 tab 标题由贡献者自己声明、容器零硬编码;`plugin-file-browser` 每栏拿到**独立地址栏 + 后退/前进/上级/刷新历史栈**与 列表/网格 双模式(统一 `@tanstack/react-virtual` 流、文件夹/文件分组、类型图标);D 增焦点标题条、A/B/C/D 文案与状态栏全中文;新增 `plugin-settings`、`plugin-preview-text`。全 14 个 dev 插件加载 0 控制台错误。
 > **6E 后续收口(2026-10-09,按实际使用反馈)**:Mantine 主题统一管理颜色、字体、圆角、阴影、焦点与基础控件样式；壳层 CSS 只负责布局几何/滚动/响应式，插件内容使用 Mantine 组件和主题变量。顶部主题切换移除，设置面板是唯一主题入口；文件浏览与分栏插件各向 `topbar-zone` 贡献一个下拉按钮，分别切换列表/网格与单/双/四栏。此规则覆盖 P6-56/57 原“顶栏主题切换”交互，Mantine 共享主题能力和亮色默认保留。
+>
+> **Phase 7 已立(2026-10-09)**:按 [09 §8](09-plugin-functional-spec.md) 与 [`docs/plugin-functional/`](plugin-functional/README.md) 把逐插件缺口排成 10 个难度递增批次(P7-1~34),并附**代码现状核对**表校准工作量——已实测交付的部分(分栏拖动、树虚拟化、每栏历史栈、详情 kind 模板)不重做,只补核对确认的真实缺口。两个决策门:`P7-25` Lore 可行性 spike、`P7-28` 索引引擎选型,未过门前不排其后任务。
+> **批次 1~7 已交付并取证(2026-10-10)**:P7-1~24 中除三处需要真机 GUI 的事实(真 Tauri 窗口、真实 Shell 缩略图字节、真实 `chardetng` 猜测)保持 🟡 外全部 ✅。六套 headless 门禁同时全绿:`run.mjs` 40/40、`run-b.mjs` 15/15、`run-c.mjs` 11/11、`run-d.mjs` 47/47、`run-e.mjs` 47/47、`run-f.mjs` 125/125(截图 `.artifacts/shots/06..85`),加 `pnpm -r typecheck` 干净、`contract:check` `contract OK`、`cargo test -p fm-kernel` 67 passed。新增落地插件:`plugin-context-menu`、`plugin-file-ops`、`plugin-preview`、`plugin-storage-analysis`;新增后端能力:`file.kind`、`fs.openResource/readResource/closeResource`、`shell.fileOperation/cancelFileOperation/openPath/revealItemInDir/pickFile/pickDirectory`、`shell.thumbnail.read`(删除应用侧生成缩略图的 `kernel/src/capabilities/thumb.rs` 路线)、`sys.disk.list`、`sys.scan.start/cancel`;`clipboard.write` 由前端基座自己服务(与 `host.contextMenu` 同类,不进 Rust 契约)。
 
 ---
 
@@ -42,6 +45,7 @@
 | **Phase 4** | 首个全栈插件打通 | file-history 前后端 + 全链路数据流验证 | P3 |
 | **Phase 5** | 加固与打包 | 错误隔离、可观测、tauri build、契约冻结 v1 | P4 |
 | **Phase 6** | 既定开源栈落地 | 把 [06](06-open-source-stack.md) 选型接入:能力扩展 / 功能插件 / 质量工具链 / cordis 运行时补全 | P4(基座可用即可并行推进) |
+| **Phase 7** | 插件功能按规格收口 + 规划插件落地 | 依 [09 §8](09-plugin-functional-spec.md) 与 [`docs/plugin-functional/`](plugin-functional/README.md) 逐插件补齐目标行为;9 个批次按难度递增排期 | P6(容器/槽/能力基线已交付) |
 
 ---
 
@@ -134,14 +138,14 @@
 
 | # | 能力 / 任务 | 采用库 | 完成条件 | 状态 |
 |---|---|---|---|---|
-| P6-1 | 并行目录遍历 + 大目录基准(收口 P1-7) | `ignore`(尊重 gitignore)或 `jwalk`(纯并行更快) + `rayon` | `fs.list` 并行遍历;10万级目录基准达预期;`fs.readChunk`/`hash.compute` 流式分块 | 🔵 |
+| P6-1 | 并行目录遍历 + 大目录基准(收口 P1-7) | 定案改为自有有界工作线程池(`std::fs` + 8 worker),不引 `jwalk`/`rayon`/`ignore` | 体积统计走 `sys.scan.start` 的并行遍历;`fs.readChunk`/`hash.compute` 流式分块;10 万级真实磁盘基准仍未跑 | 🟡(P7-23 交付实现,基准未取证) |
 | P6-2 | Windows 原生回收站删除 | Windows Shell `IFileOperation` + `FOFX_RECYCLEONDELETE` | `plugin-file-ops` 经授权 host capability 调用；由系统处理回收站和确认，不实现永久删除 | 🔵 |
 | P6-3 | Windows 原生复制 / 移动 | Windows Shell `IFileOperation` + 系统冲突/进度对话框 | `plugin-file-ops` 不引入 `fs_extra` 或自写分块复制；COM 调用放专用 STA 线程，返回逐项结果和取消状态 | 🔵 |
 | P6-4 | 文件名自然排序 | `natord` | 列表/排序 "2 file" < "10 file" | ✅(`fs.list` 出参按 `natord::compare_ignore_case` 排好,provider 负责顺序,浏览器不再排序;dev mock 生成序与之对齐) |
-| P6-5 | 磁盘/系统信息 | `sysinfo` | 能力 `sys.disk`(剩余空间、占用统计) | 🔵 |
-| P6-6 | 类型识别(MIME) | `infer`(魔数)+ `mime_guess`(扩展名兜底) | 能力 `file.kind`,供预览/图标插件消费 | 🔵 |
+| P6-5 | 磁盘/系统信息 | 定案：直接 Win32(`GetDiskFreeSpaceExW`/`GetVolumeInformationW`),不引 `sysinfo`(见 D20) | 能力 `sys.disk.list`(剩余空间、文件系统名)随 P7-23 交付 | ✅ |
+| P6-6 | 类型识别(MIME) | 定案：内核单一扩展名表,不引 `infer`/`mime_guess`,不嗅探(见 D20) | 能力 `file.kind` 随 P7-16 冻结并交付,供预览/图标/右键三屏消费 | ✅ |
 | P6-7 | 旧应用自制图像缩略图（迁移源记录） | 当前 `image` + `base64` 实现 | 当前代码经 `thumb.image` 解码/缩放；该实现由 P6-66 替换，目标应用不得自制缩略图 | ✅ 现有实现；已被新决策取代 |
-| P6-8 | 文本编码探测 | `encoding_rs` + `chardetng` | `fs.readText` 非 UTF-8 正确预览 | 🔵 |
+| P6-8 | 文本编码探测 | `encoding_rs` + `chardetng` | `fs.readText` 非 UTF-8 正确预览 | ✅(随 P7-19 交付) |
 | P6-9 | 全文检索(内容搜索插件) | `tantivy`(大)/ SQLite **FTS5**(小数据,零额外依赖) | 搜索插件后端索引 + `search.query` 能力;**先评估 FTS5 是否够用**再定 tantivy | ⚪ |
 | P6-10 | 归档浏览与解压 | `plugin-archive` | 曾规划 zip/tar/7z 虚拟目录浏览与解压；已取消，不纳入当前开发路线；统一预览器内的压缩包只读预览单独评估 | ⚫ 已取消 |
 | P6-11 | 文本差异(file-history 内容 diff) | Lore revision diff API；文本展示 `react-diff-view` | 优先由 Lore 提供版本比较；若接口不覆盖纯文本显示需求，再用 `react-diff-view` 呈现 | 🔵（随 Lore 历史迁移） |
@@ -160,10 +164,10 @@
 | P6-19 | 快捷键 | `react-hotkeys-hook` | 基座级键位,插件可声明 | 🔵 |
 | P6-20 | 图标 | `lucide-react`(+ 文件类型图标 `@vscode/codicons`) | 基座与插件统一图标源,替换现有内联/emoji | 🟡(基座顶栏/折叠/会话、D 焦点标题、browser 文件类型图标已用 lucide;A 栏活动图标仍是 emoji) |
 | P6-21 | 日期 & 文件大小格式化 | `dayjs` + `pretty-bytes` | 时间线/列表展示 | 🔵(现为插件内自写 `toLocaleString`/`formatSize`) |
-| P6-22 | 统一文件预览插件 | Open File Viewer React SDK（MIT；依赖与格式按需验证） | 将现有纯文本预览并入唯一 `plugin-preview`；格式统一分派、受限本地资源句柄、按需 worker/资源清理 | 🔵（接替 P6-22/24 的分散预览计划） |
+| P6-22 | 统一文件预览插件 | Open File Viewer React SDK（MIT；依赖与格式按需验证） | 唯一 `plugin-preview` 承载文本/图片/PDF/音视频/Office/压缩包分派、受限本地资源句柄、按需 worker/资源清理 | ✅(随 P7-21 交付) |
 | P6-23 | 版本 diff 面板 | `react-diff-view` | 消费 P6-11 后端 diff | 🔵 |
-| P6-24 | 统一预览格式覆盖 | Open File Viewer 内部格式插件（只保留一个应用预览插件） | Markdown/PDF/图片/媒体/Office 等按代表性样本逐类启用和验收；不再拆成独立应用插件 | 🔵 |
-| P6-25 | 磁盘占用 treemap | `echarts`(`echarts-for-react`) | 消费 P6-5 `sys.disk` + 遍历数据 | 🔵 |
+| P6-24 | 统一预览格式覆盖 | Open File Viewer 内部格式插件（只保留一个应用预览插件） | 文本/代码/Markdown、图片、PDF、音视频、Office、压缩包已按代表性本地样本逐类取证；表外类别(如矢量图)在申请句柄前如实拒绝 | ✅(随 P7-22 交付) |
+| P6-25 | 磁盘占用 treemap | `echarts`(`echarts/core` + `TreemapChart` + `CanvasRenderer`) | 消费 `sys.disk.list` + `sys.scan.start` 的聚合遍历数据，下钻/合并/取消随 P7-24 交付 | ✅ |
 | P6-26 | i18n | `i18next` + `react-i18next` | 基座+插件文案 | 🔵 |
 | P6-27 | 操作参数表单 | Mantine form/modal（仅收集新名称/目标等参数） | 表单负责输入校验和确认；实际重命名/创建/删除均委托系统原生 provider，不实现文件操作算法 | 🔵 |
 | P6-28 | 系统级通知 | `tauri-plugin-notification` | 长任务完成通知(应用内通知已用 `@mantine/notifications`) | 🔵 |
@@ -208,17 +212,17 @@
 | P6-55 | 主浏览能力外置 `plugin-file-browser` | 前端插件 | 基座不含浏览逻辑;`activate` 扫 `providedSlots("pane-slot")` + 订 `slot:registered/disposed`,每栏注入一个独立实例(各自路径/选择/地址栏) | ✅ | `vite dev` 实测:2×2 四栏各有一个独立浏览器实例(地址栏 4 个,路径见 P6-46);后创建的 `pane-slot:p2/p3` 无需重载即被自动注入;基座 `App.tsx` 零业务状态(无地址栏/目录列表/条目计数),`state.ts` 只有 `activateTab` + `initCascadeBus` 两条写入路径;每栏路径按会话记忆在 `fm.file-browser.v1`(`会话\|槽id` 为键),切会话不互串 |
 | P6-56 | 基座 Mantine 外壳 + 亮色默认 | 基座 `shell-ui`(`App.tsx`/`main.tsx`) | 外壳控件使用 Mantine；Mantine 主题集中定义色彩、字体、圆角、阴影、焦点与常用组件样式；默认亮色 | ✅ | 暗色由 Mantine scheme 变量驱动；主题定义集中于 `apps/shell-ui/src/theme.ts` |
 | P6-57 | `plugin-settings`(A 齿轮 + 设置悬浮面板) | 前端插件 | 主题三选(跟随系统/亮色/暗色)仅在设置页呈现；调用共享 Mantine 配色状态 | ✅ | 设置页即时应用并持久化；顶部不重复放置主题控件 |
-| P6-58 | `plugin-preview-text`(文本预览进 D) | 前端插件 | 随级联 `focusRef` 经 gated `fs.readText` 读文本,填 inspector 的 `preview-zone`;超长截断(20 万字符) | ✅ | 实测:焦点 `/demo/src/main.rs` → 信息 tab 内 `预览` 区显示该文件内容;`file-extension-zone` 无注入时显示中文占位 `插件预留：暂无插件注入`;manifest 只授权 `fs.readText`,越权能力路径未变 |
+| P6-58 | 文本预览进 D(`plugin-preview`) | 前端插件 | 随级联 `focusRef` 经 gated `fs.readText` 读文本,填 inspector 的 `preview-zone`;超长截断(默认 20 万字符) | ✅ | 实测(批次 6 取证,截图 63..85):焦点 `.txt`/`.rs`/`.md` 在 D 的 `preview-zone` 经 gated `fs.readText` 出正文,并带真实编码行 `编码 UTF-8 · 3.4 KB`;字符上限调小后截断可观察(截图 85) |
 | P6-59 | `plugin-file-browser` 增强:每栏历史导航 + 列表/网格 + 统一虚拟滚动 | 前端插件 | 每栏独立历史栈(后退/前进/上级/刷新)、列表或网格按 `会话\|槽id` 持久化、文件夹/文件分组带整路径、类型图标与大小;`@tanstack/react-virtual` 单条流 | ✅ | 实测:`/demo/src →「上级目录」→ /demo →「后退」→ /demo/src`,前进由 `disabled` 转可用;`fm.file-browser.v1 = {"tab-1\|pane-slot:p0":{"cwd":"/demo/src","mode":"grid"},…}`(每栏独立);网格卡片 `lib.rs / RS / 900 B`;分组条底色改取 `var(--mantine-color-body)`,暗色下实测 `rgb(36,36,36)`(原先写死 `gray-0` 会在暗色留白条);插件 vite 配置加 `define: process.env.NODE_ENV`(react-virtual 读它,同 react-arborist 坑) |
 | P6-60 | 界面文案中文化 + 槽标签发现面 | SDK/契约 + `plugin-inspector` + 基座 | manifest `frontend.slots[].label`(可选,空白拒) → 注册项携带 → `host.slotLabel(slotId)`;容器用贡献者自己的名字题 tab,D 焦点标题条/区域占位/分栏头全中文,槽 id 只留在 `title` 悬停提示 | ✅ | `cargo test -p fm-contracts`(`label` 往返 `"版本"`、缺省序列化为 Null、空白拒绝)+ SDK `node --test` 10 项(含 label 可选元数据);浏览器实测:D tab 可见文本 `信息`/`历史`(且移除会覆盖可访问名的英文 `aria-label`)、分栏头显示 `栏 1`(悬停 `pane-slot:p0`)、折叠按钮 `折叠侧栏`/`折叠详情`、状态栏 `会话 1 · 文件 /demo/src/main.rs` |
 | P6-61 | 契约:`ListEntry.modifiedMs` + `thumb.image`/`ThumbOut` | `fm-contracts` + `plugin-sdk` + `fm-contract-dump` | 列表条目自带 mtime(目录为 null)以免浏览器逐行 `fs.stat`;新增缩略图能力与 DTO,serde 字段 camelCase | ✅ | `cargo test -p fm-contracts` 断言序列化字段集(按字母序)`["isDir","modifiedMs","name","path","size"]`/`["dataUrl","edge","mime"]` + 目录 `modifiedMs` 为 Null 往返;`pnpm -C apps/shell-ui contract:check` → `dto fields ListEntry`/`ThumbOut` 与 TS SDK 一致;SDK `node --test` 11 项 |
 | P6-62 | 真实感压力数据集 + 缩略图消费链 | `dev-mocks.ts` + `plugin-file-browser` + `plugin-layout-panes` | ~48 种格式各带真实体积区间/文本或二进制标记/是否出图,`/stress/数据集-{1千,1万,10万,50万}` + `空目录` + `读取失败`;网格卡片按可见性懒取 `thumb.image` + LRU + 负缓存 | ✅ | 实测:10 万条目头部 `9566 目录 · 90434 文件 · 295ms`、50 万 `47769 目录 · 452231 文件 · 472ms`;50 万时列表常驻 214 节点/网格 514 节点(内容高 13,000,048 / 22,369,618px),滚动 1400px/帧 p50 ≈ 26ms;图片卡片显示 `data:image/png` 真缩略图(96×72 原图 → 卡片框 207×62);二进制文件在 D 显示中文 `无法以文本读取 .m4a(二进制格式)`,`读取失败` 目录显示 `—模拟读取失败`(SDK 新增 `errorMessage` 去掉 `Error:` 前缀),`空目录` 显示中文 `空目录` |
 | P6-63 | 分栏高度不变量(容器 owner 强制) | `plugin-layout-panes` | 栅格行轨 `minmax(0,1fr)`;栏 `display:flex`+`flex-direction:column`+`min-height:0`;outlet `flex:1`+`overflow:hidden`(滚动归内容插件) | ✅ | 修前:栏 `<section>` 计算样式是 `display:block`(`display: hidden ? "none" : undefined` 被 React 当成"删除该属性"),`flex:1` 失效 → outlet 长到 260,110px → 1 万条目录**挂载 10,002 行**(无窗口化)且被 `overflow:hidden` 静默裁掉;修后实测 `paneDisplay=flex`、outlet 725px、scroller 视口 663px,挂载节点回到数百 |
 | P6-64 | 设置改为独立插件的**悬浮面板**(分页 + 启停) | `plugin-settings` + 基座 `loader`/`invoke` + SDK | 齿轮打开 Mantine `Popover` 悬浮面板(不占六区、不再是 B 视图),**面板尺寸固定**、正文各自滚动;面板分页 **软件设置 / 插件设置**;软件设置含主题与**插件启停列表**;各插件的设置页经 `settings-page:<name>` 嵌套槽进入"插件设置";关闭/开启对当前界面即时生效并持久化 | ✅ | `vite dev` @1420 实测:点齿轮 → `aria-expanded=true`、`.mantine-Popover-dropdown` 矩形 `620×560` 且**完全落在视口内**(x=55, y=577);**切换分页/子页外形与位置完全不变**(软件设置 → 插件设置 → 文本预览 → 回软件设置,四次读数都是 `620×560 @55,577`),正文滚动容器 client 477 / scroll 842 → 溢出只出内部滚动条,且滚动位置切回仍在(top 300 → 300);面板 `[role=tab]` = `软件设置`/`插件设置`(子页 `文件浏览`/`文本预览`);**14 行插件**,其中 4 行 `disabled` + `基础插件` 徽标(三容器 + 设置本身);关「文件浏览」→ C 四栏立即无地址栏/条目(`main` 只剩栏头),开回 → 4 个地址栏恢复;关「标签视图」→ A 栏 `标签` 图标消失且 `fm.plugins.disabled.v1=["plugin-view-tags"]`,**重载后仍关闭**(rail 无该图标、列表该行 `checked=false`),开回后图标回归、存储清空;ESC 关闭生效(受控 `opened` + `onChange`);全程控制台 0 错误、14 插件加载日志齐 |
-| P6-65 | 插件设置页机制 + 两个样例 | `plugin-settings` 提供 `settings-page`,file-browser / preview-text 各贡献一页 | 每页内容由贡献插件自持,写自己的 localStorage 偏好键,并经**同插件内的模块级 store**(`useSyncExternalStore`)广播 → 已渲染实例即时跟随;值域在读/写两侧 clamp | ✅ | 实测:`fm.file-browser.prefs.v1={"defaultMode":"grid","thumbnails":true}` — 改「新建栏位的显示方式」为网格 → **四栏全部转网格**(选过模式的栏仍保留自己的选择);关「显示网格缩略图」→ `/stress/数据集-1千` 滚动位置上的 `<img>` 由 7 → **0**,再开 → 7(不重载、不重挂栏);`fm.preview-text.prefs.v1` — 关「自动读取」→ D 预览变中文按钮 `读取内容` + `尚未读取`,开回即显示内容;字符上限输 `50` 回车 → 回落并存储 `1000`(下限 1000,上限 2,000,000)。**未取证**:截断效果本身不可观察——dev mock 的文本恒为 ~50 字符,远小于任何合法上限 |
-| P6-66 | Windows 系统缩略图插件 | Windows Shell `IThumbnailCache::GetThumbnail` + 系统 handlers | 新增受权限 gate 的 `shell.thumbnail.read`；支持仅读缓存/允许 Shell 提取两种策略；替换 `thumb.image` 图像解码生成和 stress canvas mock；消费者无图时回退类型图标；非 Windows 明确 unsupported | 🔵 |
-| P6-67 | 本地预览安全数据通道 | Tauri host capability + Open File Viewer 输入适配 | 只读、路径绑定、短时有效的预览句柄与 range/chunk 读取，支持取消/撤销；禁止裸 `file:`/asset 路径和大文件全量 base64；完成离线与敏感文件验证 | 🔵 |
-| P6-68 | 统一预览迁移与格式验收 | `plugin-preview` + Open File Viewer | 右侧预览区增加“缩略图 / 文件预览”切换；每个新焦点默认只显示系统缩略图，不初始化 viewer、不读正文；用户点击后才合并旧 `plugin-preview-text` 及原 Markdown/图片/PDF/媒体规划；切回或换焦点取消读取并释放资源；移除独立预览插件计划及 `media.thumb` 路线 | 🔵 |
+| P6-65 | 插件设置页机制 + 两个样例 | `plugin-settings` 提供 `settings-page`,file-browser / preview 各贡献一页 | 每页内容由贡献插件自持,写自己的 localStorage 偏好键,并经**同插件内的模块级 store**(`useSyncExternalStore`)广播 → 已渲染实例即时跟随;值域在读/写两侧 clamp | ✅ | 实测:`fm.file-browser.prefs.v1={"defaultMode":"grid","thumbnails":true}` — 改「新建栏位的显示方式」为网格 → **四栏全部转网格**(选过模式的栏仍保留自己的选择);关「显示网格缩略图」→ `/stress/数据集-1千` 滚动位置上的 `<img>` 由 7 → **0**,再开 → 7(不重载、不重挂栏);`fm.preview.prefs.v1` — 设置页只有「文本显示字符上限」与「默认适配方式」两条中文控件,上限读写两侧夹在 1 千 ~ 2,000,000、改值即落盘;截断效果实测(截图 85:全文 3.4 KB、上限 1000 时查看器只吃到截断后的前缀) |
+| P6-66 | Windows 系统缩略图能力 | Windows Shell `IThumbnailCache::GetThumbnail` + 系统 handlers | 受权限 gate 的 `shell.thumbnail.read`；`cacheOnly`/`extract` 两种策略；替换 `thumb.image` 图像解码生成和 stress canvas mock；消费者无图时回退类型图标；非 Windows 明确 unsupported | ✅ 能力与消费侧(批次 4)；真实 Shell 缓存出图 🟡。独立开关页插件 `plugin-windows-thumbnails` 仍未落 |
+| P6-67 | 本地预览安全数据通道 | Tauri host capability + Open File Viewer 输入适配 | 只读、路径绑定、短时有效的预览句柄与 range/chunk 读取，支持取消/撤销；禁止裸 `file:`/asset 路径和大文件全量 base64；完成离线与敏感文件验证 | ✅(随 P7-20 交付) |
+| P6-68 | 统一预览迁移与格式验收 | `plugin-preview` + Open File Viewer | 右侧预览区提供“缩略图 / 文件预览”切换；每个新焦点默认只显示系统缩略图，不初始化 viewer、不读正文；用户点击后才分派文本/图片/PDF/音视频/Office/压缩包；切回或换焦点取消读取并释放资源；不再有独立 Markdown/图片/PDF/媒体预览插件与 `media.thumb` 路线 | ✅（P7-20~22 交付；见批次 6 取证） |
 | P6-69 | Lore 文件历史集成可行性与版本锁定 | Lore / LoreGUI 的 `lore-vm` 核心 | 验证 Windows 构建、Rust API/许可、仓库格式、服务端依赖与当前单进程宿主兼容性；固定上游 revision；确定由宿主管理的本地服务生命周期和数据目录 | 🔵 |
 | P6-70 | 文件历史版本操作迁移到 Lore | `plugin-file-history` + `lore.*` host capabilities | 仓库显式初始化/连接；查询文件历史、工作区 dirty 状态、指定版本内容与差异；显式创建版本；恢复前检查未提交改动并确认；恢复结果形成可追踪的新变化；旧 `db.history.*` 只读兼容。版本行显示委托给 P6-71 | 🔵（依赖 P6-69） |
 | P6-71 | 历史版本展示信息插件 | `plugin-history-metadata` + `history-record:metadata` 子槽 | 订阅 Lore revision 创建生命周期（含连接同一 Lore 服务的 LoreGUI 创建通知），在版本边界采集并保存系统缩略图、文件大小/类型、图片尺寸和采集状态；独占 `db.historyMetadata.*` 与缩略图 blob；历史行按 revision 查询展示；点击切换只发请求，由 P6-70 的 Lore 适配层确认并执行；插件不得调用 Lore commit/restore | 🔵（依赖 P6-69/70） |
@@ -247,6 +251,144 @@
 
 ---
 
+## Phase 7 · 插件功能实现排期（按开发难度从易到难）
+
+> 目的:把 [09 §8](09-plugin-functional-spec.md) 的"目标行为"和 [`docs/plugin-functional/`](plugin-functional/README.md) 的逐插件缺口,排成**一条可顺序执行、每批都能独立验收**的开发路线。难度序 = 剩余功能缺口 × 是否需要新契约(Rust DTO / PluginHost API) × 是否触碰外部系统(COM / Windows Shell / Lore) × 并发与资源回收复杂度。
+>
+> 排期原则:①**纯前端补漏先行**,不引入契约变更就能收口的先做;②**契约冻结是闸门**,每个需要新能力名/新 SDK API 的批次,先冻结契约再接功能;③**外部系统依赖殿后**,Windows COM、Lore、索引引擎风险最高,放在基座与前端已稳定之后;④每批收尾都要过 `contract:check` + `pnpm -r typecheck` + `vite dev` 浏览器实测取证(无显示器环境需 GUI 的项标 🟡)。
+
+### 难度图例
+
+| 标记 | 含义 | 典型特征 |
+|---|---|---|
+| ⭐ | 收口 | 单插件内改动,无新契约,无 I/O 新增 |
+| ⭐⭐ | 小缺口 | 需 1 个新能力名或补状态机分支 |
+| ⭐⭐⭐ | 主体功能 | 跨插件行为/持久化分区/虚拟化与并发正确性 |
+| ⭐⭐⭐⭐ | 新契约 + 外部系统 | 新增 SDK API 或 Windows COM,STA 线程模型,契约须先冻结 |
+| ⭐⭐⭐⭐⭐ | 未定方案 + 外部依赖 | 选型未决(⚪)或依赖仓库外组件,存在整链无法开工的风险 |
+
+### 代码现状核对（2026-10-09，读源码所得，用于校准工作量）
+
+已实现、**不需要重做**的部分:`plugin-layout-panes` 的分隔条拖动(`colPct` clamp)+ 按 `activeTabId` 分区持久化 + 稳定 paneId 隐藏不卸载 + `slot:reconfigured` 收发;`plugin-view-file-tree` 的 react-arborist 虚拟化懒加载与失败重新展开重试;`plugin-file-browser` 的每栏独立历史栈(后退/前进/上级/刷新)、列表/网格单条虚拟流、缩略图 LRU + 负缓存;`plugin-inspector` 的 file/folder/未知 kind 模板与贡献 tab 发现;`plugin-file-details` 的目录不哈希、字段独立加载。
+
+核对确认的**真实缺口**(批次 8~10 的依据;批次 1~7 已交付的缺口不再列在这里):
+
+| 位置 | 缺口 |
+|---|---|
+| `plugin-file-history`(前后端) | 前端仍 `db.history.list`,后端**零 Lore 代码**;workspace 依赖**无 lore crate**(P7-25 决策门) |
+| `plugin-sdk` | **无命令注册 API**(P7-30 需要);`core-shared/contracts` 已有 `fs.* / hash.compute / file.kind / shell.* / sys.scan.* / watch.subscribe / db.*` 与 `host.contextMenu` |
+| 已注册插件目录 | `plugin-search`、`plugin-history-metadata`、`plugin-windows-thumbnails` 仍无目录与 manifest |
+
+### 批次 1 · 现有插件纯前端补漏（无契约变更）
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-1 | `plugin-view-favorites` 失效与去重 | ⭐ | 收藏路径不存在时保留记录并标不可用,提供移除入口;同一路径重复收藏更新名称/类型而不新增第二条;存储无法解析时空态 + 中文恢复提示;写入原子化 | ✅ |
+| P7-2 | `plugin-view-tags` 重命名与校验 | ⭐ | 重命名保持成员与展开选择一致;名 trim 非空、大小写不敏感去重;同一 `{kind,path}` 在单标签内唯一;删除标签需确认且不删文件 | ✅ |
+| P7-3 | `plugin-layout-views` 空态与回退 | ⭐ | 无任何 `nav-panel:*` 贡献时显示中文空侧栏说明;活动视图插件被停用后选有效回退项而非留残留;非活动视图保持挂载不丢局部展开 | ✅ |
+| P7-4 | `plugin-settings` 启停 busy 与回滚 | ⭐⭐ | 开关请求期间该行 disabled + loading;失败恢复原值并给原因;核心四插件锁定不可点(不得出现可点但实际关不掉的误导界面) | ✅ |
+| P7-5 | `plugin-file-details` 状态与复制路径 | ⭐⭐ | 新增并 gating `clipboard.write` 能力(小契约,Rust↔TS DTO 同步);复制成功轻提示、失败保留可选文本;`modifiedMs` 为 null/坏值不显示 NaN 日期;null 焦点与未知 kind 走通用模板 | ✅ |
+| P7-6 | `plugin-inspector` 回退与局部滚动 | ⭐⭐ | 贡献的 tab 被移除时活动 tab 回"信息"或首个有效项;窄栏下内容滚动而标题/tab 不随滚;子贡献失败只影响自身槽 | ✅ |
+
+**取证**:`.scratch/pw/run.mjs` 39/39 + `run-b.mjs` 15/15(headless dev @1420,截图 `.artifacts/shots/06..25`)。要点:失效收藏行标「路径已失效」且点击只给中文提示不改焦点;损坏存储转中文空态并提供清除入口;哈希行独立加载态(「计算中…」→结果,切焦点不回填);文件夹不哈希;复制路径写入系统剪贴板并有中文内联反馈。本批另修出两处真实缺陷并结构性收口:右键菜单自关闭(见 P7-11),以及 `PluginSlot` 用索引做 React key 导致"关另一个插件时设置面板被重挂载丢失状态"——改为注册表分配单调 `seq` 作 key,基座 owner 强制,不靠插件自查。
+
+### 批次 2 · `plugin-file-browser` 正确性收口
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-7 | 请求序号与过期响应 | ⭐⭐⭐ | 每次 `fs.list` 附本地 seq,仅 path/session/pane 全匹配时接纳;卸载与切目录丢弃迟到结果;快速切换不闪回旧数据;焦点目标离开当前目录时发 `null` | ✅ |
+| P7-8 | 错误分类与导航栈策略 | ⭐⭐⭐ | 无权限 / 目录消失 / 路径无效 / 读取失败 各给不同中文原因 + 重试;refresh 替换当前历史项不增栈;地址栏 Enter 提交、Escape 还原;重复选当前路径视为显式刷新不建重复栈项 | ✅ |
+| P7-9 | 侧栏 Ref 消费规则 | ⭐⭐ | 明确并实现认识的 `kind` 集合(目录/文件),`kind:"tag"` 在未定义 tags 查询契约前给可见的"暂不支持"反馈而非静默忽略 | ✅ |
+
+**取证**:`run.mjs` 断言「快速连续导航：旧响应不覆盖新结果」「无权限目录显示权限专属原因」「非法路径显示参数错误原因」「空目录是独立空态而非错误」「标签焦点显示「标签筛选暂未支持」」,错误面板同时提供 重试/返回上级/选择其他目录 三种恢复动作(截图 06..12)。分类依据是 Rust `CapabilityError` 的文案前缀(`permission denied:` / `not found:` / `invalid argument:`),前端只按前缀分派,不自造判断。
+
+### 批次 3 · 右键菜单框架（先冻结 SDK API，再挂动作）
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-10 | `host.contextMenu` API 与契约冻结（=P6-72 前置） | ⭐⭐⭐⭐ | SDK 定 `open(context)` / `registerItem(descriptor)`、`ContextMenuContext{surfaceId,targetKind,targetRef,selectedRefs,sessionId,paneId?,pointer,trigger}`、manifest `contextMenu` 权限段;Rust manifest 镜像 + `contract:check`;重复 id/越权拒绝有测试 | ✅ |
+| P7-11 | `plugin-context-menu` 框架实现 | ⭐⭐⭐⭐ | 应用内 Mantine 覆盖层;定位与边缘翻转/收缩、分组与 order、`when/enabled` 过滤、busy 态、ESC/方向键/Enter/Shift+F10、关闭焦点归还触发器、无可用项不弹空菜单;框架不调业务 capability、不持久化 | ✅ |
+| P7-12 | 首批贡献者接入（=P6-73） | ⭐⭐⭐ | favorites(打开/定位、移除收藏、空白区"收藏当前焦点")、tags(重命名/删除标签、成员跳转/移除)、file-browser(以 `browser.list.item`/`browser.grid.item`/`browser.empty` 稳定 surface 打开面板,不自绘菜单,动作执行归 file-ops);插件禁用后动作即刻消失 | ✅ |
+
+**取证**:`run.mjs`(菜单 14 项)+`run-b.mjs`(标签贡献 5 项)全绿,截图 13..22。已取证:ESC 关闭且焦点归还、Shift+F10 打开同一面板、小视口自动夹紧不出屏、条目 surface 无适用项时不弹空面板、右键命中已选项保留整个多选集合(命中未选项收敛为单项)、动作由贡献插件执行并落盘。服务面 `apps/shell-ui/src/contextmenu.ts` 为单一 provider:重复 item id 拒绝、`releasePlugin` 撤销在途、会话切换即关闭。本批修出的真实缺陷:菜单在打开的同一次事件里被自己的 outside-click 判定关闭——改为下一任务再挂监听(React 19 discrete event 下的结构性收口,基座 owner 承担)。
+
+### 批次 4 · Windows 系统缩略图（替换应用侧生成）
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-13 | `shell.thumbnail.read` 契约冻结（=P6-66 前置） | ⭐⭐⭐⭐ | DTO 定 `path/edge/policy(仅缓存 \| 允许 Shell 提取)` 与返回 `dataUrl/mime/edge` + 明确的 `unsupported` 类别;非 Windows 返回 unsupported;进 `contracts`↔SDK 并 `contract:check` | ✅ |
+| P7-14 | `IThumbnailCache` Rust provider | ⭐⭐⭐⭐ | `windows` crate 经 `IUnknown::cast` 取 `IThumbnailCache::GetThumbnail`;COM 调用固定在专用 STA 线程;不解析系统 cache 文件、不经应用生成;错误分类(未命中/不支持/权限) | ✅ |
+| P7-15 | 消费侧迁移并移除 `thumb.image` | ⭐⭐⭐ | `plugin-file-browser` 网格与 `plugin-inspector` 预览区改走 `shell.thumbnail.read`;未命中/失败回退类型图标;偏好关闭后停止新请求并隐藏已有图;删除 `thumb.image`、`image` 解码路径与 stress 的 canvas 生成 mock;停用/切目录取消请求并释放图像资源 | ✅ |
+
+**取证**:`cargo run -p fm-contracts --bin fm-contract-dump` → `node apps/shell-ui/scripts/contract-check.mjs` 输出 `contract OK`(9 项,新增枚举变体串校验:`ThumbnailPolicy` 的 `cacheOnly`/`extract`、`ThumbnailState` 的 9 个 kebab 变体)。消费侧 `.scratch/pw/run-c.mjs` 11/11(截图 26..28):12 次滚动后卡片拿到 `<img>`、图源全为 `data:image/png;base64,` 预置系统样例、界面 `canvas===0`(应用不再生成)、无 handler 格式(svg/heic/mkv)零图片而有类型图标、有 handler 格式(jpg/png/mp4)出图、偏好关闭后 0 张图且落盘 `{"defaultMode":"grid","thumbnails":false}`、重开恢复、控制台不再出现 `thumb.image`。`thumb.image` 与 workspace 的 `image` 解码依赖已删除,`plugin-file-browser` manifest 改声明 `shell.thumbnail.read`。P7-14 的 `core-shared/kernel/src/capabilities/shell_thumb.rs` 已写就(STA 线程 + `ISharedBitmap`→`GetDIBits`→PNG + 分状态分类 + `Mutex`/`Condvar` 并发闸门),`cargo check --workspace --all-targets` 与 `cargo test -p fm-kernel` 通过,闸门测试断言的是"许可必须全部回家"而不是时序巧合。**在真实 Windows Shell 缓存上的命中率与 handler 出图属于"已实现未验证"**:无头环境不能启动 GUI,也不能把系统缩略图缓存当作可复现的测试夹具;出图形状、缓存策略分支与未命中分类都由 dev 侧预置样例图取证(截图 26..28)。
+
+两处范围决定(记录于此,避免后续重复实现):
+- **`plugin-inspector` 预览区系统缩略图随 P7-21 一起交付**,本批只迁 `plugin-file-browser` 网格:预览区与"文件预览"切换是同一处 UI,分两次做会让同一个槽出现两种取图实现。
+- **`plugin-windows-thumbnails` 的开关页不进批次 4**:契约已含 `policy`(默认 `extract`),消费侧偏好开关已可用;把"仅读取系统已有缓存"作为独立设置页属于该插件自身的交付批次,不应在迁移批里半做。
+
+### 批次 5 · Windows 原生文件操作
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-16 | `shell.*` 能力契约冻结（=P6-2/P6-3/P6-30 前置） | ⭐⭐⭐⭐ | `shell.fileOperation`(copy/move/rename/create/delete,回收站默认)/`openPath`/`revealItemInDir`/`pickFile`/`pickDirectory` 的入参与返回 DTO;后台进度与逐项结果形状进 Rust contracts;`file.kind`(=P6-6) 同期冻结 | ✅ |
+| P7-17 | `IFileOperation` provider | ⭐⭐⭐⭐½ | STA 线程 + `SetOperationProgressUI`/`QueryUndoEventPoint` 不接管;不自写复制/移动/删除算法;跨卷 move 是否退化为 copy+delete 须报告;取消只停仍可取消的项并如实报告已完成项 | 🟡 |
+| P7-18 | `plugin-file-ops` 前端 | ⭐⭐⭐⭐ | 状态机 `idle→validating→awaiting-confirmation→queued→running(progress)→completed/partial-failure/failed/cancelled`;真实进度或不确定进度,不伪造百分比;部分成功给可复制失败清单;Mantine form/modal 仅收集新名称/目标(=P6-27);完成后经 watcher/显式刷新收敛列表 | ✅ |
+| P7-19 | 文本编码探测（=P6-8） | ⭐⭐ | `fs.readText` 非 UTF-8 经 `encoding_rs`+`chardetng` 正确解码;超限/二进制返回可区分的明确结果 | ✅ |
+
+**取证**:`.scratch/pw/run-d.mjs` **47/47**(截图 30..47),`.scratch/pw/run.mjs` 40/40、`run-b.mjs` 15/15、`run-c.mjs` 11/11 同时保持全绿。已取证的界面事实:条目 surface 一次右键得到 打开/在资源管理器中显示/重命名/复制到文件夹/移动到文件夹/移到回收站 六个由 file-ops 贡献的动作(基座只画面板);空白区右键只有 刷新目录/全选/新建文件夹,**新建的目标目录由 browser 作为 surface 自己的 `targetRef` 交出来**,基座不持有任何"当前目录"业务状态;非法名称(`a/b`、`..`)在 modal 内报错且模态不关闭;运行中的状态行是不确定进度文本,**界面全程没有百分比**;同名冲突由 dev 侧的 Shell 规则落名并在汇总里如实写"其中 1 项自动改名";跨卷移动汇总尾部显式写出"跨卷移动:Shell 按复制后删除完成";15 项批量删除返回 `部分完成：成功 13 项，失败 2 项`,详情逐项给"没有权限/找不到项目"的中文原因,复制清单同样是中文逐项文本(内部拼写如 `partial-failure` 不出现在用户可见文本里);1000 项删除运行中可取消,状态行先转"正在取消"再落"已取消：完成 7 项，取消 993 项",运行期间条目 surface 不再提供任何新动作(busy 门)。列表收敛:操作完成后浏览器按 `file:changed` 自动重读——本批把该事件的载荷口径统一为**条目路径**(与 watcher 同一说法),而不是目录,`plugin-file-browser` manifest 相应声明 `file:changed` 订阅权限。dev 侧的清单叠加层把删除记录同时作用于内置清单与会话内新建/改名的条目，因此"失败的项仍在列表、成功的项已消失"这条断言对改名出来的条目同样成立（一次刷新有两帧：清空后的空白帧再到重读结果，断言须等"消失项已消失且保留项仍在"同时成立）。P7-19 的三种文本状态在界面上各自可区分(由批次 6 的 `plugin-preview` 承载):`编码 GBK · 96 B`(非 UTF-8 报真实编码名)、`这不是文本文件（2.0 KB），无法按文本预览。`、`文本预览上限 4.0 MB，这个文件 9.0 MB。`,并断言界面任一处都不再出现 `[object Object]`(消费侧此前把 `ReadTextOut` 当字符串用,本批修掉)。Rust 侧 `cargo test -p fm-kernel` 覆盖 UTF-16 BOM 剥离、GBK 猜测解码、二进制否决(`looks_binary`)、超限返回 `too-large`。
+
+一处遗留限制(记录以免重复讨论):**`plugin-file-browser` 没有订阅 `watch.subscribe`**。`WatchHub` 目前只有 subscribe、没有 unsubscribe,按目录导航去订阅会永久累积 watcher;自动刷新因此只覆盖"本应用自己执行的操作"与已经在分发的外部变更,外部工具的实时变更需要 refresh 或下一次导航才可见。等 `watch` 补上 unsubscribe/引用计数再接。
+
+### 批次 6 · 统一预览
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-20 | 预览安全数据通道（=P6-67） | ⭐⭐⭐⭐½ | 只读、路径绑定、短时有效的资源句柄 + range/chunk 通道,支持取消与撤销;禁止裸 `file:`/asset URL、禁任意远程加载、禁大文件全量 base64 | ✅ |
+| P7-21 | `plugin-preview` 实现与 preview-text 接替（=P6-22/24/68） | ⭐⭐⭐⭐½ | Open File Viewer React SDK 接入共享单例/import map;预览区"缩略图 / 文件预览"切换,新焦点默认只显示系统缩略图、不初始化 viewer、不读正文;用户显式点击才分派;`fm.preview.prefs.v1` 只存格式偏好不存模式 | ✅ |
+| P7-22 | 格式分类验收与资源回收 | ⭐⭐⭐⭐ | 文本/代码/Markdown、图片、PDF、音视频、Office、压缩包按代表性本地样本逐类取证;不支持/损坏/加密/超限各有可恢复中文状态;切回缩略图或换焦点取消读取、撤销句柄、释放 media/worker/object URL | ✅ |
+
+**取证**:`.scratch/pw/run-f.mjs` **125/125**(截图 63..85)。通道语义 19 条逐项打在真实现上(`cargo test -p fm-kernel` 的 `capabilities::resource::tests` 6 条 + 浏览器侧 dev 镜像同一套语义):空路径与目录 → `invalid argument:`,缺失 → `not found:`,无权 → `permission denied:`;句柄不透明(不含路径/分隔符/文件名);TTL 5 分钟;**过期或已关闭的句柄再读是错误,绝不返回空字节**;1 GiB 单次请求被截到 512 KiB 并在返回里如实标记 `clamped`;`requestToken` 原样回显;2 MiB 用 4 个分片读回且字节精确;越界读是 `eof:true` + 空数据而不是异常;二次 close 返回 `false`;同时最多 16 个活跃句柄,超出即拒。界面侧的关键事实是**默认态零内容读取**:新聚焦文件停在缩略图模式时通道计数为 `{open:0, read:0, close:0, bytes:0, clamped:0, textRead:0}`,无系统图时给 `.TXT` 类型徽标,查看器节点根本不存在;预览区两种模式下几何固定 260 高。12 个代表性本地样本逐类出图(文本/代码/Markdown 走 `fs.readText` 因而带真实编码行 `编码 UTF-8 · 3.4 KB`,图片/PDF/压缩包/Office/表格/音频走字节通道):PDF 由 pdf.js 真渲染且**全程零外部源请求**,worker 以 `text/javascript` 从本地供给(拒绝 CDN 回退);docx 与 xlsx 是本批手写的合法 OOXML,正文段落被 Office 插件真的解析出来;`password-required` 用真的 R2/RC4-40 加密 PDF 触发,`corrupt` 用真损坏 PDF 触发,两者各有中文状态与出路(加密/损坏/超限/不支持 → "用 Windows 打开",不存在/无权限 → "重试"),查看器自己那张贴在视口里的 `.ofv-fallback` 卡被观察器换成本区状态;70 MB 视频只 open+close 不读正文(>64 MiB 上限),`.svg` 在 open **之前**就被类型门拒掉——这是"不宣称全格式可预览"的实测形态。取消路径:读到一半切走,关闭数与打开数一致且不残留句柄,状态如实写"已取消这次内容读取",半截内容不会被当成 `ready`。`preview:state:changed` 在调试台里成块不交错,序列含 `checking→loading→ready`,mode 只有 `thumbnail|viewer`。偏好只存格式项:`fm.preview-text.prefs.v1` 迁移为 `fm.preview.prefs.v1` 后旧 key 删除,旧 `autoLoad` 没有变成自动预览,1000 字符上限确实截掉了样例尾部。原始英文原因(带线协议前缀)只进 `title`,用户可见文案全中文。**仍未取证的部分**:真 Tauri 窗口内的可视化验证、真实 Windows Shell 缩略图字节、真实 `chardetng` 猜测结果(dev 里是编码名与图片的预置样例),这三处保持 🟡。
+
+### 批次 7 · 空间分析
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-23 | 遍历与磁盘能力（=P6-1/P6-5） | ⭐⭐⭐ | `sys.disk` + 可取消的递归大小统计(并行遍历,不阻塞文件浏览);排除/符号链接/硬链接策略定案 | ✅ |
+| P7-24 | `plugin-storage-analysis` | ⭐⭐⭐ | 选根目录→扫描进度→echarts treemap→点击下钻/返回;权限跳过不计入且可见说明;聚合缓存按路径与时间失效;扫描可取消 | ✅ |
+
+**取证**:`.scratch/pw/run-e.mjs` **47/47**(截图 50..62),Rust 侧 `cargo test -p fm-kernel` 的 `capabilities::sys::tests` 14 条。遍历策略在这里是**定案**而不是实现细节:指向目录的符号链接被如实说明并**从不跟随**(循环因此不可能发生),读不了的目录按原因归类跳过且**一个字节都不计入总量**,计数不重复、不遗漏(单测逐项断言"每个计入的条目都被报告"),工作线程数与并发扫描数各有上限且**超出即拒而不是降级**为无界排队;取消只作用于仍在跑的扫描,已终态的返回 `false`。界面侧:选根目录走 `shell.pickDirectory`(dev 答案确定,不弹真实 Shell 对话框);进度分批推进且扫描期间页面仍在出帧,证明遍历跑在时间片/后台线程而不是同步大循环;压力数据集扫完报 `扫描完成 · 81.0 MB · 30 项`,总量与条目数与清单里真实大小逐项之和一致,跳过项旁边写明"不计入总量";一个层超过 24 块时合并成"其他"并保留逐项入口,深度上限之外的层如实说明而不是默默截断;点击矩形下钻会同时改面包屑与概览文案,返回上一级两者一起回退,点进没有返回明细的目录时如实说明而不是画空图;同一根目录在有效期内复用聚合结果并写明扫描时刻,兄弟路径的缓存不牵连;`file:changed` 落在根目录下会按路径作废该缓存并写明原因,作废后重扫确实少一项;取消在时间片边界有界停下,终态写明"已取消"且统计不完整,面板尺寸在取消态仍保持不变(几何稳定规则),且取消不留下可用缓存。
+
+### 批次 8 · Lore 文件历史（决策门在前）
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-25 | **Lore 可行性 spike（=P6-69）— 决策门** | ⭐⭐⭐⭐⭐ | 验证 Windows 构建、Rust API 与许可、仓库格式、服务端依赖、与当前单进程宿主的兼容性;固定上游 revision;确定宿主管理的本地服务生命周期与数据目录。**结论未出前 P7-26/27 不开工** | ⚪ |
+| P7-26 | `plugin-file-history` 迁移到 Lore（=P6-70） | ⭐⭐⭐⭐⭐ | `lore.*` 受控能力;仓库显式初始化/连接且范围经用户确认;版本时间线分页、dirty 状态、只读查看、行级 diff(=P6-11/23)、恢复前检查未提交改动并二次确认、恢复形成可追踪的新变化;11 态状态机;请求带 `path+repositoryId+requestToken` 丢弃迟到响应;旧 `db.history.*` 只读兼容 | 🔵（依赖 P7-25） |
+| P7-27 | `plugin-history-metadata`（=P6-71） | ⭐⭐⭐⭐½ | 订阅 `lore:revision:*` 生命周期(含同一 Lore 服务的 LoreGUI 创建);采集系统缩略图/大小/类型/图片尺寸与采集状态入独占 `db.historyMetadata.*` + blob;经 `history-record:metadata` 子槽挂载历史行;只发 restore request 不拥有 Lore commit/restore 能力 | 🔵（依赖 P7-25/26） |
+
+### 批次 9 · 搜索与命令面板
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-28 | **索引引擎选型（=P6-9）— 决策门** | ⭐⭐⭐⭐⭐ | 先评估 SQLite FTS5 是否够用(零额外依赖),不足再上 tantivy;产出取舍记录进 [05](05-decisions.md);定案后 `search.query`/`search:results` schema、排序与索引状态冻结 | ⚪ |
+| P7-29 | 索引后端与查询能力 | ⭐⭐⭐⭐⭐ | 后台增量索引、可暂停/取消/返回部分结果;索引可整体重建;不额外存正文副本 | 🔵（依赖 P7-28） |
+| P7-30 | `plugin-search` + 命令注册 API（=P6-14/19） | ⭐⭐⭐⭐ | SDK 补命令注册面(当前无,不得以占位槽假称已实现)与快捷键声明;命令面板 Ctrl+Shift+P 搜索命令与文件,键盘打开,插件卸载后命令即移除,命令错误就地显示;搜索结果 pane 打开结果所在目录并聚焦文件 | 🔵 |
+
+### 批次 10 · 插件内扩展功能（依赖批次 3/5）
+
+| # | 任务 | 难度 | 完成条件 | 状态 |
+|---|---|---|---|---|
+| P7-31 | 表格视图（=P6-16） | ⭐⭐⭐ | `@tanstack/react-table` 排序/列配置/键盘选择;行模型仍归 `plugin-file-browser` 拥有,不另造插件 | 🔵 |
+| P7-32 | 标签 chips（跨插件契约） | ⭐⭐⭐⭐ | 定义受权限声明的 tags 查询/批量查询契约(禁 file-browser 读 `fm.view-tags.v1`);卡片显示关联标签并可筛选;删除文件与重复路径的处理策略定案 | 🔵 |
+| P7-33 | 拖拽（=P6-18） | ⭐⭐⭐⭐ | `@dnd-kit/core` 移动/排序,动作委托 file-ops 的系统 Shell;无障碍与键盘等价路径 | 🔵 |
+| P7-34 | 展示层统一（=P6-20/21/26） | ⭐⭐ | `lucide-react`/`@vscode/codicons` 替换 A 栏残留 emoji;`dayjs`+`pretty-bytes` 统一时间与体积格式;图标与文案走 key 白名单,不泄漏槽 id/存储 key | 🔵 |
+
+### 并行支撑项（不属于插件功能，但每批验收要用）
+
+批次 1 起即应建立:前端 lint/format(P6-31 Biome)、Rust 门禁(P6-32 clippy+fmt)、前端单测含 `PluginSlot` 错误边界(P6-33 Vitest)、CI(P6-35)、供应链审计(P6-36)、提交钩子(P6-37)。E2E(P6-39) 需显示环境,本环境仍以 `vite dev` @1420 的 DOM/console 断言 + 需 GUI 项标 🟡 的方式取证。
+
+---
+
 ## 风险登记
 
 | # | 风险 | 级别 | 影响 | 缓解 |
@@ -258,6 +400,10 @@
 | R5 | 前端插件在 WebView 内可调用 host 能力,恶意插件滥用 | 中 | 越权访问文件/DB | 权限白名单 + 能力最小化 + 插件来源限本地可信目录 + 装载校验 |
 | R6 | 多插件并发写 sqlite | 低-中 | 写冲突/锁 | 每 `store` 独立分区;WAL 模式;写串行化 |
 | R7 | 大文件哈希/目录遍历性能 | 中 | UI 卡顿、体验差 | 能力层用流式分块 + 多线程(rayon);重活留在 Rust,不进 WebView |
+| R8 | **Lore 在 Windows 上的可用性与 Rust 集成形态未证**(workspace 依赖当前无 lore crate,`plugin-file-history/backend` 186 行零 Lore 代码) | **高** | 批次 8(P7-25~27) 整条链无法开工,历史功能停留在旧 hash/DB 快照 | P7-25 作为**决策门**先做 spike(构建/API/许可/仓库格式/单进程兼容性),结论落 [05](05-decisions.md);未过门前不排 P7-26/27 |
+| R9 | 全文检索索引引擎选型未定(FTS5 vs tantivy) | 中 | 批次 9 契约(`search.query`)无法冻结,索引重建策略返工 | P7-28 先评估 FTS5 是否够用再决定是否引入 tantivy;选型当轮写进 [05](05-decisions.md) |
+| R10 | Windows Shell COM(`IThumbnailCache`/`IFileOperation`)与 Tauri 异步运行时的线程模型冲突 | 中-高 | 缩略图/文件操作卡死或崩溃宿主 | COM 调用固定走专用 STA 线程且不与 tokio 共享句柄;P7-14/17 各自先做最小 spike 再接 UI |
+| R11 | `host.contextMenu` / 命令注册 API 一旦定错会波及 5 个贡献者(favorites/tags/browser/history/search) | 中 | 契约返工带动多插件重改 | P7-10/P7-30 先只冻结 API 形状 + 权限段 + 卸载清理测试,再逐插件挂动作;框架插件不含任何业务动作 |
 
 ---
 

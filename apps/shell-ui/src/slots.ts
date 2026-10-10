@@ -36,6 +36,11 @@ export interface SlotRegistration {
   host: PluginHost;
   /** Display label from the contributor's manifest (`frontend.slots[].label`). */
   label?: string;
+  /** Registry-assigned monotonic id. Slots render with this as the React key, so
+   *  unregistering one contribution never remounts its siblings — with index-based
+   *  keys the siblings shift and lose their state (an open settings popover, a
+   *  half-typed rename) just because another plugin was switched off. */
+  seq: number;
 }
 
 class SlotRegistry {
@@ -44,6 +49,7 @@ class SlotRegistry {
   private providers = new Map<string, string>();
   private listeners = new Set<() => void>();
   private version = 0;
+  private seqCounter = 0;
 
   isBaseSlot(slotId: string): boolean {
     return (BASE_SLOT_IDS as readonly string[]).includes(slotId);
@@ -91,17 +97,18 @@ class SlotRegistry {
   }
 
   /** Add one contribution. Returns the unsubscribe used by host teardowns. */
-  add(reg: SlotRegistration): () => void {
-    const list = this.bySlot.get(reg.slotId) ?? [];
-    list.push(reg);
-    this.bySlot.set(reg.slotId, list);
+  add(reg: Omit<SlotRegistration, "seq">): () => void {
+    const stored: SlotRegistration = { ...reg, seq: ++this.seqCounter };
+    const list = this.bySlot.get(stored.slotId) ?? [];
+    list.push(stored);
+    this.bySlot.set(stored.slotId, list);
     this.bump();
     return () => {
-      const cur = this.bySlot.get(reg.slotId);
+      const cur = this.bySlot.get(stored.slotId);
       if (!cur) return;
-      const idx = cur.indexOf(reg);
+      const idx = cur.indexOf(stored);
       if (idx >= 0) cur.splice(idx, 1);
-      if (cur.length === 0) this.bySlot.delete(reg.slotId);
+      if (cur.length === 0) this.bySlot.delete(stored.slotId);
       this.bump();
     };
   }

@@ -1,11 +1,14 @@
 {
-  "name": "plugin-preview-text-frontend",
+  "name": "plugin-storage-analysis-frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "vite build",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0"
   },
   "devDependencies": {
     "@my-file-manager/plugin-sdk": "workspace:*",

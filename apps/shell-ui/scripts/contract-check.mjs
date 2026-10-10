@@ -28,6 +28,7 @@ const FRONTEND_ONLY_EVENTS = new Set([
   "sidebar:selection:changed",
   "focus:changed",
   "detail:tab:changed",
+  "preview:state:changed",
   "slot:registered",
   "slot:reconfigured",
   "slot:disposed",
@@ -66,6 +67,13 @@ function parseInterfaceFields(src, name) {
   return fields;
 }
 
+/** Parse `export type Name = "a" | "b";` (also the multi-line form) variants. */
+function parseUnion(src, name) {
+  const m = src.match(new RegExp(`export type ${name} =([\\s\\S]*?);`));
+  if (!m) throw new Error(`cannot find \`export type ${name}\` in SDK`);
+  return [...m[1].matchAll(/"([^"]+)"/g)].map((v) => v[1]);
+}
+
 const eq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 const sorted = (a) => [...a].sort();
 
@@ -87,13 +95,17 @@ const sdkCaps = Object.values(parseConstObject(src, "Capabilities"));
 
 console.log("contract check: TS SDK <-> fm-contracts (Rust)");
 check("event names", Object.keys(rust.events), sdkEvents.filter((e) => !FRONTEND_ONLY_EVENTS.has(e)));
-for (const [name, fields] of Object.entries(rust.events)) {
-  const iface = name === "file:changed" ? "FileChangedArgs" : "HistoryUpdatedArgs";
-  check(`event args ${name}`, fields, parseInterfaceFields(src, iface));
+// Each event publishes the name of its payload interface alongside its field
+// names, so a new event is covered without this script having to know about it.
+for (const [name, spec] of Object.entries(rust.events)) {
+  check(`event args ${name}`, spec.fields, parseInterfaceFields(src, spec.args));
 }
 check("capability names", rust.capabilities, sdkCaps);
 for (const [dto, fields] of Object.entries(rust.dtos)) {
   check(`dto fields ${dto}`, fields, parseInterfaceFields(src, dto));
+}
+for (const [enumName, values] of Object.entries(rust.enums ?? {})) {
+  check(`enum values ${enumName}`, values, parseUnion(src, enumName));
 }
 
 if (failures.length > 0) {

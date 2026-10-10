@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "plugin-file-browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "displayName": "文件浏览",
   "description": "浏览文件夹，切换列表或网格，查看图片缩略图；可设置默认视图与缩略图显示。",
   "author": "base",
@@ -25,13 +25,14 @@
     "capabilities": [
       "fs.home",
       "fs.list",
-      "thumb.image"
+      "shell.thumbnail.read"
     ],
     "events": {
       "subscribe": [
         "sidebar:selection:changed",
         "slot:registered",
-        "slot:disposed"
+        "slot:disposed",
+        "file:changed"
       ],
       "emit": [
         "focus:changed"
@@ -42,6 +43,14 @@
         "pane-slot:*",
         "settings-page:file-browser",
         "topbar-zone"
+      ]
+    },
+    "contextMenu": {
+      "contribute": true,
+      "open": [
+        "browser.list.item",
+        "browser.grid.item",
+        "browser.empty"
       ]
     }
   }

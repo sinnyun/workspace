@@ -16,10 +16,11 @@
 - 打开请求携带统一的 `ContextMenuContext`：`surfaceId`、`targetKind`、`targetRef`、`selectedRefs`、`sessionId`、`paneId?`、指针位置与触发方式。路径和选中对象仍以不透明 Ref 传递，不传完整文件记录/组件引用。
 - 单击右键目标时以该目标为焦点；多选时若右键目标属于已选集合，则保留多选，否则将集合收敛为该目标。空白区上下文不携带文件目标，但可携带当前目录 Ref。
 - 鼠标右键、键盘菜单键/Shift+F10、辅助技术触发进入同一面板流程；不能触发浏览器默认菜单时才阻止默认行为。
+- **空白区目录由 surface 自己声明**（批次 5 定案）：打开空白区面板时，发起 surface 把所在目录作为 `targetRef`（`kind: "folder"`）一并交出，因此"新建文件夹"这类目录级动作有目标，而基座不需要持有任何"当前目录"业务状态，也不需要新增协调事件。SDK 的 `targetRef` 文档注释写明这一约定：条目 surface 不带目录目标，空白 surface 可以。
 
 ## 插件扩展与动作执行
 
-- 规划新增 SDK 注册接口 `host.contextMenu.registerItem(descriptor)`。descriptor 包含稳定 `id`、`label`、图标白名单 key、`group`、`order`、`when(context)`、`enabled(context)` 和插件自有 `execute(context)`；注册返回卸载句柄。
+- SDK 注册接口 `host.contextMenu.registerItem(descriptor)`（已交付）。descriptor 包含稳定 `id`、`label`、图标白名单 key、`group`、`order`、`when(context)`、`enabled(context)` 和插件自有 `execute(context)`；注册返回卸载句柄。
 - 插件在启用/挂载时注册菜单项，禁用/卸载时自动移除；新贡献在运行期间注册后立即进入后续菜单，不要求重启宿主。重复 id、无效 schema 或越权贡献必须拒绝并写开发日志。
 - 框架按当前上下文筛选 `when` 为真的条目，再按 group/order 排序；隐藏空分组。每个动作由注册方执行并调用自己的 capability；框架不代替插件拼装业务参数或绕过其 ACL。
 - `execute` 获得当前上下文快照及可取消的 action token。执行期间该项显示 busy 并防止重复触发；结束后可按 descriptor 策略关闭面板或保留面板。完成/失败反馈由贡献插件提供，面板只统一显示忙碌和错误摘要。

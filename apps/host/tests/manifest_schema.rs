@@ -22,7 +22,7 @@ fn bundled_manifest_parses_and_validates() {
     let fe = m.frontend.expect("file-history ships a frontend");
     assert_eq!(fe.entry, "frontend/dist/index.js");
     let slots = fe.slots.expect("declares slots");
-    assert_eq!(slots[0].id, "file-sidebar-zone");
+    assert_eq!(slots[0].id, "detail-tab:history");
     assert_eq!(slots[0].export, "HistoryPanel");
     assert!(m.permissions.capabilities.contains(&"db.history.*".to_owned()));
 }

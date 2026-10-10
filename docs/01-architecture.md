@@ -232,7 +232,7 @@ activeSidebarView(A) → sidebarSelection(B) → focusRef(C) → activeDetailTab
 | **容器插件(提供嵌套槽)** | `plugin-layout-panes`(拥有 C 的分栏几何,提供 `pane-slot:<paneId>`)、`plugin-layout-views`(拥有 B 的视图互斥,提供 `nav-panel:<viewId>`)、`plugin-inspector`(拥有 D 的 tab 条与模板,提供 `detail-tab:<name>`/`preview-zone`/`detail-info-zone`/`file-extension-zone`)、`plugin-settings`(拥有设置悬浮面板的分页,提供 `settings-page:<name>`) |
 | **视图插件(注入 B)** | `plugin-view-file-tree` / `plugin-view-favorites` / `plugin-view-tags` … 各贡献一个 A 图标 + 一个 `nav-panel:<viewId>` 面板 |
 | **内容插件(注入 pane-slot)** | `plugin-file-browser`(每栏一个实例:独立地址栏与历史栈 / 列表 / 网格)、search 结果、storage-analysis 等 |
-| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history; Lore 版本操作/时间线)、`plugin-history-metadata`(history-record:metadata; 版本缩略图/属性的保存与展示)、`plugin-file-details`(信息表 + BLAKE3,注入 detail-info-zone)、`plugin-preview`(preview-zone,统一格式预览；迁移期间接替 `plugin-preview-text`)、`plugin-file-ops`(操作按钮) |
+| **功能插件(注入 D 的 tab/区域)** | `plugin-file-history`(detail-tab:history; Lore 版本操作/时间线)、`plugin-history-metadata`(history-record:metadata; 版本缩略图/属性的保存与展示)、`plugin-file-details`(信息表 + BLAKE3,注入 detail-info-zone)、`plugin-preview`(preview-zone,统一格式预览)、`plugin-file-ops`(操作按钮) |
 | **功能插件(注入设置面板)** | 任何插件都可贡献 `settings-page:<name>` 一页(标题写自己的 `slots[].label`):页内容只该插件认得,读写**自己的** localStorage 键,并由同插件内的模块级偏好 store 广播给已渲染的实例,使设置**即时生效**而不经基座状态 |
 
 要点:外层网格与总线**留在基座**(稳定、零业务),只把**多变的部分**插件化;提供嵌套槽的容器目前为四个——三个界面框架容器(分栏 / 视图互斥 / 详情)加设置悬浮面板容器 `plugin-settings`。`layoutMode`/`panes`(每栏 id 与比例)属 `plugin-layout-panes` **局部状态**,不上基座;`activeDetailTab` 是级联终点、住在基座元状态里(D 容器读它、用户点 tab 时发 `detail:tab:changed`)。跨区协调只走 §9.2 的不透明引用。

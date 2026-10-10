@@ -69,11 +69,11 @@ export function PluginSlot({ slotId }: Props) {
 
   return (
     <>
-      {registrations.map((reg, i) => {
+      {registrations.map((reg) => {
         const C = reg.component as ComponentType<SlotProps>;
         const slotProps: SlotProps = { host: reg.host, slotId };
         return (
-          <PluginErrorBoundary key={`${reg.plugin}-${i}`} plugin={reg.plugin}>
+          <PluginErrorBoundary key={`${reg.plugin}#${reg.seq}`} plugin={reg.plugin}>
             <C {...slotProps} />
           </PluginErrorBoundary>
         );

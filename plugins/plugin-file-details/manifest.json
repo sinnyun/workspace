@@ -1,25 +1,38 @@
 {
   "schemaVersion": 1,
   "name": "plugin-file-details",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": "文件详情",
   "description": "展示当前选中文件的属性与校验信息",
   "author": "you",
   "minHostVersion": "0.1.0",
-
   "frontend": {
     "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "detail-info-zone", "export": "DetailsPanel" }
+      {
+        "id": "detail-info-zone",
+        "export": "DetailsPanel"
+      }
     ]
   },
-
   "permissions": {
-    "capabilities": ["fs.home", "fs.stat", "fs.readText", "hash.compute"],
+    "capabilities": [
+      "fs.home",
+      "fs.stat",
+      "fs.readText",
+      "hash.compute",
+      "clipboard.write"
+    ],
     "events": {
-      "subscribe": ["selection:changed"],
+      "subscribe": [
+        "selection:changed"
+      ],
       "emit": []
     },
-    "slots": { "contribute": ["detail-info-zone"] }
+    "slots": {
+      "contribute": [
+        "detail-info-zone"
+      ]
+    }
   }
 }

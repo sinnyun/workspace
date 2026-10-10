@@ -36,8 +36,37 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 notify = "7"
 notify-debouncer-full = "0.4"
 parking_lot = "0.12"
-# image decoding + downscaling for the `thumb.image` capability (docs/06 §4)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
+# Text encoding detection + decoding for `fs.readText` (roadmap P7-19). This is
+# the pair Firefox ships, so GBK/Shift-JIS/windows-1252 are somebody else's
+# tables rather than a heuristic written here.
+chardetng = "0.1"
+encoding_rs = "0.8"
+# Windows Shell thumbnails (`shell.thumbnail.read`, docs/plugin-functional/
+# plugin-windows-thumbnails.md). `windows` 0.62 is already resolved in Cargo.lock
+# by the tauri tree, so reusing it adds no second copy of the bindings.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    # `IFileOperation` and the `IFileDialog` family are described under
+    # Shell.Common in the metadata, separate from `Win32_UI_Shell` itself.
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    # `ShellExecuteExW`/`SHELLEXECUTEINFOW` are metadata-gated under this feature
+    # (they carry an `HKEY` field); `shell.openPath`/`shell.revealItemInDir` are
+    # the users. Proven by compilation, not guessed.
+    "Win32_System_Registry",
+] }
+# The `#[implement]` macro expands into `windows_core::…` paths, so a COM sink
+# (IFileOperationProgressSink) needs the core crate visible as a direct dependency.
+windows-core = "0.62"
+# PNG encoding of the Shell-returned bitmap (transport serialisation only — the
+# app never decodes or downscales the original file).
+png = "0.18"
 base64 = "0.22"
 # natural (1 < 2 < 10) case-insensitive name ordering for directory listings
 natord = "1"

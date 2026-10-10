@@ -42,6 +42,7 @@ import {
 import { createHost, type LoadedPluginHandle } from "./host";
 import { slotRegistry } from "./slots";
 import { invokeCapability, registerBaseCapability } from "./invoke";
+import { contextMenuService } from "./contextmenu";
 
 export interface LoadedPlugin extends LoadedPluginHandle {
   manifest: PluginManifest;
@@ -172,6 +173,7 @@ async function loadOne(manifest: PluginManifest): Promise<void> {
         // Belt and braces: drop anything this plugin still holds in the runtime
         // (including nested slots whose outlet React never got to unmount).
         slotRegistry.releasePlugin(manifest.name);
+        contextMenuService.releasePlugin(manifest.name);
         slotsChanged();
       },
     };

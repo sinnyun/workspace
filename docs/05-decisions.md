@@ -234,7 +234,7 @@
 
 **理由**:同一插件的 bundle 天然共享模块作用域,所以"设置页改一次、已在渲染的每一栏立刻跟随"不需要新契约、不需要事件、也不需要基座解释这个偏好的含义。**反例实测**:只让 `Thumb` 的取图 `useEffect` 早退而不让渲染读开关,已加载的缩略图会因缓存的 data URL 仍在 state 里而**关不掉**(实测 `<img>` 恒为 7)——"即时生效"必须同时覆盖取数与渲染两条路径。
 
-**代价**:偏好按插件分散在各自己的键里(现为 `fm.file-browser.prefs.v1`、`fm.preview-text.prefs.v1`),没有全局导出/导入;等出现"备份配置"需求时再统一(可能落 `db.settings.*`)。
+**代价**:偏好按插件分散在各自己的键里(现为 `fm.file-browser.prefs.v1`、`fm.preview.prefs.v1`),没有全局导出/导入;等出现"备份配置"需求时再统一(可能落 `db.settings.*`)。
 
 **复核触发**:若两个插件需要共享同一设置(例如主题色影响预览渲染),那说明它已经是跨插件契约,应提升进能力/事件面而不是各自读同一键。
 
@@ -302,6 +302,16 @@
 
 **边界**：框架不实现具体文件/收藏/标签/Lore 动作，也不代替贡献插件调用 capability；上下文只含不透明 Ref、surface、栏/会话和锚点信息，不持久化。右键面板是应用内浮层，不采用 Tauri 原生菜单作为插件扩展界面。初始贡献者包括 file-ops、file-history、favorites/tags 和 file-browser。
 
+---
+
+## D20 · 类型识别与卷信息用内核单表 + 直接 Win32，不引 `infer`/`mime_guess`/`sysinfo`
+
+**决定**：`file.kind` 由 `core-shared/kernel/src/capabilities/file_kind.rs` 的一张扩展名→`(类别, MIME)` 表回答，**只按扩展名、从不嗅探内容**；`sys.disk.list` 直接调 Win32(`GetDiskFreeSpaceExW`/`GetVolumeInformationW`/`GetLogicalDrives`)，遍历用自有有界线程池。Phase 6 原选的 `infer`(魔数)、`mime_guess`、`sysinfo` 都不引入。
+
+**理由**：同一个类别问题有三屏要问(图标列、预览分派、右键"打开方式")，各自维护清单必然漂移，漂移的表现为把位图交给解不开它的代码路径；所以事实源必须是一张表，而这张表要能和线协议枚举一起被 `contract:check` 守住。嗅探要求为列表里每一行 open 一次文件，而列表可能有十万行，且 Windows Shell 本身也按扩展名决定怎么处理文件——无扩展名就如实报 `unknown`，而不是猜。卷信息与遍历都只有两三个调用点，`windows` crate 已因 Shell COM 在依赖里，再叠一层 `sysinfo` 抽象不换来什么。
+
+**代价**：新增格式要改表(改表即改契约枚举的覆盖范围，有单测逐行守住)；MIME 只在确有惯用媒体类型时给出，没有就留 `None`，界面不能把缺省读成"未知格式"。dev 侧镜像表与内核表逐行对齐，两侧不同步会被契约测试拦住。
+
 ## 决策速查
 
 | 维度 | 决定 |
@@ -319,6 +329,7 @@
 | 图片预览 | 统一 `plugin-preview` + Open File Viewer；本地文件经受权预览句柄读取，图片缩略图另经 Windows Shell `shell.thumbnail.read`(见 D8) |
 | 文件版本历史 | Lore 是版本与操作事实来源；`plugin-history-metadata` 保存 revision 绑定的展示快照(见 D16/D17) |
 | 压缩包浏览/解压 | 独立 `plugin-archive` 已取消；预览器的只读格式支持另行评估(见 D18) |
+| 类型识别/卷信息 | `file.kind` = 内核单一扩展名表(不嗅探)；`sys.disk` = 直接 Win32；不引 `infer`/`mime_guess`/`sysinfo`(见 D20) |
 | 右键菜单 | `plugin-context-menu` 管框架；业务插件注册自有动作并自行执行(见 D19) |
 | 列表顺序/mtime | provider 在 `fs.list` 里排好(自然序)并带 `modifiedMs`,浏览器不排序(见 D9) |
 | 分栏几何不变量 | 容器 owner 保证"栏高有界 + outlet 不滚动",内容插件只写 `height:100%`(见 D10) |

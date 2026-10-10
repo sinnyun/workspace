@@ -30,9 +30,18 @@ sha2 = { workspace = true }
 rusqlite = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-full = { workspace = true }
-image = { workspace = true }
-base64 = { workspace = true }
 natord = { workspace = true }
+chardetng = { workspace = true }
+encoding_rs = { workspace = true }
+
+# Windows-only host APIs: the Shell thumbnail provider is the sole user (docs/06 §5).
+# Kept behind cfg(windows) so a non-Windows build never links shell32/thumbcache and
+# never pulls an image codec — the app has no decoder of its own any more.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+windows-core = { workspace = true }
+png = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "fs"] }

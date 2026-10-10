@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "plugin-view-favorites",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "收藏视图",
   "description": "收藏文件和文件夹，快速访问主页及常用位置。",
   "author": "base",
@@ -14,13 +14,17 @@
     ]
   },
   "permissions": {
-    "capabilities": ["fs.home"],
+    "capabilities": ["fs.home", "fs.stat"],
     "events": {
       "subscribe": [],
       "emit": ["sidebar:view:changed", "sidebar:selection:changed"]
     },
     "slots": {
       "contribute": ["activity-rail-zone", "nav-panel:favorites"]
+    },
+    "contextMenu": {
+      "contribute": true,
+      "open": ["favorites.item", "favorites.empty"]
     }
   }
 }

@@ -20,6 +20,7 @@ import { metaSnapshot, useMeta } from "./state";
 import { invokeCapability } from "./invoke";
 import { slotRegistry } from "./slots";
 import { makeSlotOutlet } from "./PluginSlot";
+import { createContextMenuHost } from "./contextmenu";
 
 export interface LoadedPluginHandle {
   manifest: PluginManifest;
@@ -159,6 +160,11 @@ export function createHost(
       return off;
     },
   };
+
+  // Only present when the manifest grants a context-menu permission, so a plugin
+  // without one cannot reach the service at all.
+  const contextMenu = createContextMenuHost(manifest, teardowns, deny);
+  if (contextMenu) host.contextMenu = contextMenu;
 
   return { host, teardowns };
 }

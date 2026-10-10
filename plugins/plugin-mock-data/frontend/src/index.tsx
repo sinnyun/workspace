@@ -1,7 +1,7 @@
 /**
  * mock-data dev plugin entry (docs/02 §4). Dev-only: served through the browser
  * mock index (dev-mocks.ts); the dataset itself comes from the ordinary
- * `fs.list` / `thumb.image` capabilities, so nothing here is a special data path.
+ * `fs.list` / `shell.thumbnail.read` capabilities, so nothing here is a special data path.
  *
  * Two named exports: `StressIcon` (A activity rail, selects the "stress" sidebar
  * view) and `MockDatasetView` (nav-panel:stress, i.e. region B's content behind

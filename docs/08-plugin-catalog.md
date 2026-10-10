@@ -50,8 +50,8 @@
 | `nav-panel:<viewId>`(`file-tree`/`favorites`/`tags`/`stress`) | `plugin-layout-views` | 对应视图插件的 B 面板;图标由同一插件的 `activity-rail-zone` 贡献 |
 | `detail-tab:<name>` | `plugin-inspector` | `file-history`(`detail-tab:history`,manifest `label:"历史"`)、未来详情类插件——tab 标题取自贡献者自己的 `label`(02 §4.5) |
 | `history-record:metadata` | `plugin-file-history`(每条版本记录内提供子槽) | `plugin-history-metadata` 的缩略图、大小、尺寸等只读版本信息卡片 |
-| `settings-page:<name>` | `plugin-settings`(在悬浮面板的"插件设置"页内) | 任何插件的一页自有设置(`file-browser` 已交付；统一 `preview` 与 Windows thumbnail 规划);页标题取贡献者 `label`,内容只该插件认得,写自己的偏好键(05 D13) |
-| `preview-zone` | `plugin-inspector`(在"信息"tab 内) | `plugin-windows-thumbnails` 默认缩略图 + `plugin-preview` 的“缩略图/文件预览”切换；显式点击才启动统一预览，迁移接替已注册的 `plugin-preview-text` |
+| `settings-page:<name>` | `plugin-settings`(在悬浮面板的"插件设置"页内) | 任何插件的一页自有设置(`file-browser`、`preview` 已交付；Windows thumbnail 插件规划);页标题取贡献者 `label`,内容只该插件认得,写自己的偏好键(05 D13) |
+| `preview-zone` | `plugin-inspector`(在"信息"tab 内) | `plugin-preview` 的两模式：默认显示 `shell.thumbnail.read` 的系统缩略图，用户显式点击才启动统一查看器读正文 |
 | `detail-info-zone` | `plugin-inspector`(在"信息"tab 内) | `file-details`(属性/校验,已交付)、file-ops(操作按钮) |
 | `file-extension-zone` | `plugin-inspector`(在"信息"tab 内,占位文案 `插件预留`) | 任意针对焦点文件的扩展插件 |
 | 应用级右键面板（`host.contextMenu` 注册 API，非 React 插槽） | `plugin-context-menu` | `plugin-file-ops`、file-history、favorites/tags、file-browser 等按目标类型注册动作项 |
@@ -82,8 +82,8 @@
 | `shell.openPath` / `shell.revealItemInDir` / `shell.pick*` | 已注册 `tauri-plugin-opener` / `tauri-plugin-dialog` | `plugin-file-ops` | P6-30 |
 | 自然排序 `natord` | `natord` | file-browser | P6-4 |
 | `sys.disk` | `sysinfo` | storage-analysis、details、statusbar | P6-5 |
-| `file.kind`(MIME) | `infer` + `mime_guess` | plugin-preview、details、browser 图标 | P6-6 |
-| `shell.thumbnail.read` | Windows Shell `IThumbnailCache` + registered thumbnail handlers | `plugin-windows-thumbnails`; file-browser 网格、plugin-preview | P6-7（替换当前生成实现） |
+| `file.kind`(MIME) | 内核单一扩展名表,不嗅探内容(见 05 D20) | plugin-preview、details、browser 图标、右键 | ✅ P7-16 |
+| `shell.thumbnail.read` | Windows Shell `IThumbnailCache` + registered thumbnail handlers | file-browser 网格、plugin-preview(默认缩略图模式) | ✅ P7-13/14(真机出图待取证) |
 | `hash.compute` | `blake3`/`sha2` | file-details、去重(未来) | ✅ |
 | `lore.repository.*`、`lore.workspace.status`、`lore.file.history/readRevision`、`lore.diff`、`lore.change.stage/commit`、`lore.file.restore`（拟议） | Lore Rust 核心/适配层；必要时由宿主管理 `loreserver` | file-history；用户确认的仓库范围内版本管理 | P6-69/70（契约待冻结） |
 | `lore:revision:creating/created/create-failed`（拟议内部领域事件） | Lore 适配层在创建前后发出 | history-metadata；提供 revision 绑定上下文以捕获对应版本属性，不授予版本管理权 | P6-71（契约待冻结） |
@@ -92,7 +92,7 @@
 | `db.<store>.*` | `rusqlite`(+ `refinery` 迁移 / `r2d2_sqlite` 池) | search 索引(规划)、插件元数据 | P6-12；不再作为文件版本内容来源 |
 | `search.query`(索引) | `tantivy` **或** SQLite FTS5 | search | P6-9(⚪ 先评估 FTS5) |
 | `fs.chunks`(内容定义分块) | `fastcdc` | 仅在未来非 Lore 场景确有块级存储需求时复核 | P6-13（Lore 接管版本内容，原计划暂缓） |
-| `preview.open/readRange/revoke`（拟议） | host 只读、路径绑定、短时资源句柄 | `plugin-preview` / Open File Viewer | P6 统一预览（契约待冻结） |
+| `fs.openResource`/`fs.readResource`/`fs.closeResource` | host 只读、路径绑定、短时资源句柄(512 KiB 分片、64 MiB 预览上限、≤16 活跃句柄、TTL 5 分钟) | `plugin-preview` / Open File Viewer | ✅ P7-20 |
 
 ---
 
@@ -109,7 +109,7 @@
 | `plugin-layout-views` | 前端 | B 侧栏 | `nav-zone` | `nav-panel:<viewId>` | 无(读 `meta.activeSidebarView`) | 视图互斥容器:只渲染活动视图对应出口可见,其余 `display:none`;**互斥是容器职责**,视图插件不写 self-hide | ✅ |
 | `plugin-file-browser` | 前端 | C 内容 | (运行时注入 `pane-slot:*`);贡献 `settings-page:file-browser` | — | 每栏 `fm.file-browser.v1`(`会话\|槽id` → `{cwd,mode}`)+ 插件偏好 `fm.file-browser.prefs.v1`(`{defaultMode,thumbnails}`) | 每栏独立地址栏/历史栈、列表或网格虚拟流、文件夹/文件分组、类型图标、大小与 `modifiedMs`；网格按可见性懒取 `shell.thumbnail.read`，无结果回退类型图标；禁止应用生成缩略图。设置页控制显示方式与缩略图开关 | ✅ 浏览器现状；缩略图能力迁移待做 |
 | `plugin-settings` | 前端 | 悬浮层(不占六区) | `activity-rail-zone`(底部齿轮) | `settings-page:<name>` | `fm.plugins.disabled.v1`(启停列表,由基座 loader 读写) | **设置面板容器**:齿轮点击开 Mantine `Popover`(受控 `opened`:开合由齿轮自己翻、`onChange` 收 ESC/外点)。外层分页 **软件设置**(主题三态 + 插件启停列表)与 **插件设置**(逐个 `settings-page:<name>` 出口,标题取贡献者 `label`,全挂载、隐藏非活动)。启停经基座前端能力 `plugins.list`/`plugins.setEnabled`,**核心插件(三容器 + 设置自己)显示 `基础插件` 且开关禁用**。**面板尺寸固定**(`620×560`,不随分页重算),正文各自 `overflow-y:auto`,子页 tab 条 `sticky`(00 §4.26) | ✅ |
-| `plugin-context-menu` | 前端 | 应用级浮层 | `ContextMenuLayer`(Mantine overlay) | `host.contextMenu.registerItem` 注册接口 | 当前右键上下文(短时内存) | 右键框架:统一定位、上下文、聚合/排序/键盘操作和插件回调派发；业务菜单项由其他插件注册 | 🔵 |
+| `plugin-context-menu` | 前端 | 应用级浮层 | `ContextMenuLayer`(Mantine overlay,挂在 `statusbar-zone`) | `host.contextMenu.registerItem` 注册接口 | 当前右键上下文(短时内存) | 右键框架:统一定位、上下文、分组/排序/键盘操作和插件回调派发；业务菜单项由其他插件注册 | ✅ |
 | `plugin-view-file-tree` | 前端 | A+B | `activity-rail-zone`(图标)、`nav-panel:file-tree` | — | 展开态与已加载目录在组件内(ref),不持久化 | 侧栏视图:目录树(react-arborist,自写懒加载) | ✅ |
 | `plugin-view-favorites` | 前端 | A+B | `activity-rail-zone`、`nav-panel:favorites` | — | `fm.view-favorites.v1` 收藏列表 | 侧栏视图:主页 + 收藏/书签;选中发 `sidebar:selection:changed` | ✅ |
 | `plugin-view-tags` | 前端 | A+B | `activity-rail-zone`、`nav-panel:tags` | — | `fm.view-tags.v1` 标签与成员 | 侧栏视图:标签/集合;点标签发 `{kind:"tag"}` 选择,点成员发 `focus:changed` | ✅ |
@@ -128,13 +128,13 @@
 | 插件 | 形态 | 目的 | 前端库(E/D 落位) | 依赖能力(B) | 主要 slot | 关键事件 | 优先级 / 归属 P6 | 状态 |
 |---|---|---|---|---|---|---|---|---|
 | `plugin-file-browser` | 前端 | 列表/网格/标签浏览与导航(目录树见 `view-file-tree`) | 现有:`@tanstack/react-virtual`(列表与网格共用一条虚拟化流)、`lucide-react` 类型图标、自写 `formatSize`;规划 `@tanstack/react-table`、`dayjs`、`pretty-bytes` | `fs.home`、`fs.list`、`shell.thumbnail.read`（规划替换） | `pane-slot:*`(运行时按 outlet 自动注入,每栏独立实例) | 发 `focus:changed`;订 `sidebar:selection:changed`、`slot:registered`/`slot:disposed` | 高 | P6-16/19/21 剩余 | ✅ 列表·网格虚拟滚动 / 🔵 改用 Windows 系统缩略图、标签 chips、表格视图 |
-| `plugin-file-ops` | **全栈；Windows 原生 provider** | 系统默认打开/资源管理器定位、复制/移动/回收站删除/重命名/新建 | Tauri opener/dialog；Rust Windows COM `IFileOperation`；Mantine 仅用于收集操作参数 | `shell.fileOperation`、`shell.openPath`、`shell.revealItemInDir`、`shell.pickFile`、`shell.pickDirectory`（拟议 host capabilities） | `topbar-zone`、`statusbar-zone`、`detail-info-zone` 操作区 | 订 `file:changed`;拟议 `file:operation:progress/complete` | 高 | P6-2/3/27/30 | 🔵 |
+| `plugin-file-ops` | **全栈；Windows 原生 provider** | 系统默认打开/资源管理器定位、复制/移动/回收站删除/重命名/新建 | Rust Windows COM `IFileOperation`(STA 专用线程)；`tauri-plugin-opener`/`dialog`；Mantine 仅用于收集新名称/目标 | `shell.fileOperation`、`shell.cancelFileOperation`、`shell.openPath`、`shell.revealItemInDir`、`shell.pickDirectory`、`clipboard.write` | `statusbar-zone`(操作状态行)；经 `host.contextMenu` 贡献条目/空白区动作 | 订 `shell:operation:progress`/`shell:operation:done`;发 `file:changed` | 高 | P7-16~19 | ✅(真机 Shell 行为 🟡) |
 | `plugin-file-history` | **全栈** | Lore 仓库内版本历史查询、dirty 状态、用户创建版本、只读查看、diff 与安全恢复；不保存版本展示元数据 | Mantine `detail-tab:history` 时间线；文本差异按需接 `react-diff-view`；版本行提供 `history-record:metadata` 子槽 | 拟议 `lore.*` 权限契约；旧 `db.history.*` 仅只读兼容 | `detail-tab:history` | 订 `file:changed` 作失效提示；发/订 `history:updated`；消费 `history:revision:restore-requested` 并执行 Lore 恢复 | 高 | P6-69/70 | ✅ 旧式基础元数据快照 / 🔵 Lore 迁移 |
 | `plugin-history-metadata` | **全栈辅助** | 按 Lore revision 保存创建时的系统缩略图、文件大小、类型、图片尺寸和采集状态；为历史版本行提供信息卡片；不管理 Lore 版本 | Mantine 子组件注入 `history-record:metadata`；缩略图仅读 Windows Shell 系统缓存/handler | `shell.thumbnail.read`、`file.metadata.read`、独占 `db.historyMetadata.*`；禁止 `lore.change.commit`/`lore.file.restore` | `history-record:metadata` | 订 Lore revision 生命周期事件；发 `history:metadata:updated`；只发 restore-request，不执行恢复 | 高 | P6-71 | 🔵 |
 | `plugin-search` | **全栈** | 文件名 + 内容检索 | 复用 `@mantine/spotlight`(D 共享)+ 结果列表 | `search.query`、`fs.list`(建索引) | `command-palette`、`pane-slot:*`(结果) | 发 `search:results`;订 `file:changed`(增量索引) | 中 | P6-9/14 | 🔵(引擎  待评估) |
-| `plugin-preview` | 前端 | 预览区默认展示系统缩略图；用户点击切换后再用同一个 viewer 统一预览文本/Markdown、图片、PDF、音视频、Office、压缩包等；整合旧预览插件 | ★ Open File Viewer React SDK（MIT；按格式验收后按需打包） | `file.kind`、拟议 `preview.open/readRange/revoke`；默认缩略图走 `shell.thumbnail.read` | `preview-zone`;贡献 `settings-page:preview` | 随 `focusRef` 刷新；拟议 `preview:state:changed` | 高 | P6-22/24 重整 | 🔵 |
+| `plugin-preview` | 前端 | 预览区默认展示系统缩略图；用户点击切换后再用同一个 viewer 统一预览文本/代码/Markdown、图片、PDF、音视频、Office、压缩包；表外格式在申请句柄前如实拒绝 | ★ Open File Viewer React SDK + core（MIT；`officePlugin` 覆盖 docx/xlsx/pptx；pdf 资产本地化） | `file.kind`、`fs.readText`、`fs.openResource`/`fs.readResource`/`fs.closeResource`、`shell.thumbnail.read`、`shell.openPath` | `preview-zone`;贡献 `settings-page:preview` | 随 `focusRef` 刷新；发 `preview:state:changed` | 高 | P7-20~22 | ✅(真窗口/真 Shell 图 🟡) |
 | `plugin-windows-thumbnails` | 前端策略 + host Windows capability | 读取 Windows Shell 缩略图及系统缓存；不生成、不解析缓存文件 | Windows Shell `IThumbnailCache` / 已注册系统 handlers | `shell.thumbnail.read`（拟议） | 自有设置页 `settings-page:windows-thumbnails`；被授权消费者调用 | 拟议 `thumbnail:state:changed`（仅状态元数据） | 高 | P6-7 | 🔵 |
-| `plugin-storage-analysis` | 前端 | 磁盘占用 treemap / 空间分析 | `echarts`(`echarts-for-react`) | `sys.disk`、`fs.list`(聚合) | `pane-slot:*`(treemap 占一栏) | 订 `selection:changed` | 低 | P6-25 | 🔵 |
+| `plugin-storage-analysis` | 前端 | 磁盘占用 treemap / 空间分析（固定 560×640 浮层，下钻/合并明细/取消/缓存） | `echarts`(`echarts/core` + `TreemapChart` + `CanvasRenderer`) | `shell.pickDirectory`、`sys.disk.list`、`sys.scan.start`、`sys.scan.cancel` | `topbar-zone`(按钮 + 自有浮层) | 订 `scan:progress`/`scan:done`/`file:changed` | 低 | P7-23/24 | ✅ |
 | `plugin-details`(检查器)→ 现为 `plugin-file-details` | 前端 | 选中项属性/校验面板 | `pretty-bytes`/`dayjs` 规划;现为自写格式化 | `fs.stat`、`hash.compute`、`fs.home`、`fs.readText` | `detail-info-zone` | 订 `selection:changed`;随 `focusRef` 刷新 | 中 | P6-6/20/21 | ✅ 基础(属性+BLAKE3)/ 🔵 元数据扩展 |
 
 > **前端 drop-in 复用要点**:file-browser / search 结果都消费"虚拟列表"能力,故 `@tanstack/react-virtual` 虽被多插件用,但它**无 React hooks 之外的单例约束**——可选方案:(a) 打进各插件 dist,(b) 若发现重复体积显著,再升入 D 共享集。默认 (a),保持共享集只含框架+Mantine。
@@ -196,7 +196,7 @@
 
 ## 7. manifest 草案(格式对 file-browser / file-ops / search)
 
-沿用 02 §2 schema(`schemaVersion=1`,camelCase,`crate` 键)。`plugin-layout-panes` 与 `plugin-file-browser` 是**落地清单**(与仓库一致);`plugin-file-ops`/`plugin-search` 仅示例**分布**,代码未写。
+沿用 02 §2 schema(`schemaVersion=1`,camelCase,`crate` 键)。`plugin-layout-panes`、`plugin-file-browser`、`plugin-context-menu`、`plugin-file-ops`、`plugin-preview`、`plugin-storage-analysis` 都是**落地清单**(与仓库一致);`plugin-search` 仅示例**分布**,代码未写。
 
 ```jsonc
 // plugins/plugin-layout-panes/manifest.json  (框架容器:占用 main-view-zone,向下提供 pane-slot:<paneId>)
@@ -221,35 +221,67 @@
   "displayName": "文件浏览", "minHostVersion": "0.1.0",
   "frontend": {
     "entry": "frontend/dist/index.js",
-    "slots": [],                                  // 无固定外层槽;activate() 里 providedSlots("pane-slot") 扫已有栏 + 订 slot:registered/disposed,逐栏 contributeToSlot('pane-slot:<id>', Browser)
+    "slots": [                                    // 固定槽只有两个;栏内实例经 activate() 里 providedSlots("pane-slot")
+      { "id": "topbar-zone", "export": "FileBrowserToolbar" },   // 扫已有栏 + 订 slot:registered/disposed 后
+      { "id": "settings-page:file-browser", "export": "SettingsPage", "label": "文件浏览" }  // 逐栏 contributeToSlot
+    ],
     "provides": []
   },
   "permissions": {
-    "capabilities": ["fs.home", "fs.list"],       // 规划增强:fs.stat、file.kind、shell.thumbnail.read
-    "events": { "subscribe": ["sidebar:selection:changed", "slot:registered", "slot:disposed"], "emit": ["focus:changed"] },
-    "slots": { "contribute": ["pane-slot:*"] }
+    "capabilities": ["fs.home", "fs.list", "shell.thumbnail.read"],
+    "events": {
+      "subscribe": ["sidebar:selection:changed", "slot:registered", "slot:disposed", "file:changed"],
+      "emit": ["focus:changed"]
+    },
+    "slots": { "contribute": ["pane-slot:*", "settings-page:file-browser", "topbar-zone"] },
+    "contextMenu": { "contribute": true, "open": ["browser.list.item", "browser.grid.item", "browser.empty"] }
   }
 }
 ```
 
 ```jsonc
-// plugins/plugin-file-ops/manifest.json  (规划:将写操作委托 Windows IFileOperation,open/reveal 走 Tauri opener)
+// plugins/plugin-file-ops/manifest.json  (写操作委托 Windows IFileOperation;open/reveal 走 Tauri opener)
 {
-  "schemaVersion": 1, "name": "plugin-file-ops", "version": "0.1.0",
-  "displayName": "系统文件操作", "minHostVersion": "0.1.0",
-  "backend": { "crate": "plugin-file-ops-backend", "enabledByDefault": true },
+  "name": "plugin-file-ops",
+  "frontend": { "slots": [{ "id": "statusbar-zone", "export": "OperationStatus" }] },
+  "permissions": {
+    "capabilities": ["shell.fileOperation", "shell.cancelFileOperation", "shell.openPath",
+                     "shell.revealItemInDir", "shell.pickDirectory", "clipboard.write"],
+    "events": { "subscribe": ["shell:operation:progress", "shell:operation:done"], "emit": ["file:changed"] },
+    "slots": { "contribute": ["statusbar-zone"] },
+    "contextMenu": { "contribute": true }         // 条目/空白区动作经 host.contextMenu.registerItem
+  }
+}
+```
+
+```jsonc
+// plugins/plugin-preview/manifest.json  (唯一预览:两模式 + 受限资源句柄)
+{
+  "name": "plugin-preview",
   "frontend": {
-    "entry": "frontend/dist/index.js",
     "slots": [
-      { "id": "topbar-zone",   "export": "OpsButtons" },
-      { "id": "statusbar-zone","export": "OpsProgress" }
-    ],
-    "provides": []
+      { "id": "preview-zone", "export": "PreviewPanel" },
+      { "id": "settings-page:preview", "export": "SettingsPage", "label": "文件预览" }
+    ]
   },
   "permissions": {
-    "capabilities": ["shell.fileOperation", "shell.openPath", "shell.revealItemInDir", "shell.pickFile", "shell.pickDirectory"],
-    "events": { "subscribe": ["file:changed"], "emit": ["file:operation:progress", "file:operation:complete"] },
-    "slots": { "contribute": ["detail-info-zone"] }   // 操作按钮经运行时注入 inspector 的 detail-info-zone
+    "capabilities": ["shell.thumbnail.read", "file.kind", "fs.readText",
+                     "fs.openResource", "fs.readResource", "fs.closeResource", "shell.openPath"],
+    "events": { "subscribe": [], "emit": ["preview:state:changed"] },
+    "slots": { "contribute": ["preview-zone", "settings-page:preview"] }
+  }
+}
+```
+
+```jsonc
+// plugins/plugin-storage-analysis/manifest.json  (顶栏按钮 → 自有固定尺寸浮层)
+{
+  "name": "plugin-storage-analysis",
+  "frontend": { "slots": [{ "id": "topbar-zone", "export": "StorageAnalysisToolbar", "label": "空间分析" }] },
+  "permissions": {
+    "capabilities": ["shell.pickDirectory", "sys.disk.list", "sys.scan.start", "sys.scan.cancel"],
+    "events": { "subscribe": ["scan:progress", "scan:done", "file:changed"], "emit": [] },
+    "slots": { "contribute": ["topbar-zone"] }
   }
 }
 ```
@@ -285,9 +317,9 @@
 
 **建议实现顺序**(每步都产出可 dogfood 的新插件并验证架构):
 0. **框架/布局先行(P6-43~48/54/55,已交付)**:基座补外层区域网格 + 顶部会话容器 + 嵌套槽运行时(provide/contribute + `slot:*` 生命周期 + 稳定 paneId 迁移),再落 `plugin-layout-panes`(C 分栏)、`plugin-inspector`(D tab 容器)、`plugin-layout-views`(B 视图互斥),并把最小浏览能力拆成 `plugin-file-browser`(每栏实例)与 `view-*` 侧栏视图。**先立外壳与级联状态,后续业务插件才有稳定的挂载点**——现在挂载点已稳定,基座内零业务状态。
-1. **file-browser 与 Windows 缩略图迁移**(✅ 每栏独立地址栏+历史前进后退、列表/网格统一虚拟滚动、mtime 日期列、**插件自有设置页**已交付；下一步移除 `thumb.image` 的自制生成链并接 `plugin-windows-thumbnails`/`shell.thumbnail.read`；剩余标签 chips 与表格视图)。
-2. **file-ops**(首个新增后端能力 + 进度事件 → 验证能力层扩展 + 契约两侧同步 + 错误隔离在写操作上的表现)。
+1. **file-browser 与 Windows 缩略图迁移**(✅ 每栏独立地址栏+历史前进后退、列表/网格统一虚拟滚动、mtime 日期列、**插件自有设置页**、`shell.thumbnail.read` 替换应用自制生成链均已交付；剩余标签 chips 与表格视图；`plugin-windows-thumbnails` 的独立开关页仍未落)。
+2. **file-ops**(✅ 批次 5：首个新增后端能力 + 进度事件,验证了能力层扩展、契约两侧同步与错误隔离在写操作上的表现)。
 3. **search**(验证重能力/索引 + spotlight 命令注册)。
-4. **统一 preview**(现有 `plugin-preview-text` 纯文本能力并入唯一 `plugin-preview`；接入 Open File Viewer React SDK 与受限本地资源句柄，逐类验证后启用格式；不再拆分 Markdown/图片/PDF/媒体应用插件)。
+4. **统一 preview**(✅ 批次 6：纯文本与其余格式同在唯一 `plugin-preview` 内；Open File Viewer React SDK + 受限本地资源句柄，逐类真实样本取证；不拆分 Markdown/图片/PDF/媒体应用插件)。
 5. **file-history 增强(diff)**:复用 preview 的 diff-view 与 `text.diff` 能力。
-6. 视需要:storage-analysis / media。
+6. 视需要:media(缩略图独立开关页)、表格视图。storage-analysis 已随批次 7 交付。

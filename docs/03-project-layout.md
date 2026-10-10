@@ -78,15 +78,18 @@ my-file-manager/
 │   ├── plugin-view-favorites/     # ✅ A+B 侧栏视图:主页 + 收藏
 │   ├── plugin-view-tags/          # ✅ A+B 侧栏视图:标签与成员
 │   ├── plugin-file-details/       # ✅ 基础信息:属性 + BLAKE3,注入 detail-info-zone
+│   ├── plugin-context-menu/       # ✅ 右键菜单框架:统一面板 + 业务插件贡献动作(host.contextMenu)
+│   ├── plugin-file-ops/           # ✅ Windows 原生文件操作:经 Shell 复制/移动/重命名/新建/回收站,状态栏进度与逐项结果
+│   ├── plugin-preview/            # ✅ 统一预览:preview-zone 的"缩略图/文件预览"两模式 + settings-page:preview(Open File Viewer)
+│   ├── plugin-storage-analysis/   # ✅ 空间分析:topbar-zone 按钮 → 固定浮层面板,echarts treemap 下钻/取消/缓存
 │   ├── plugin-settings/           # ✅ 设置插件:A 栏齿轮 → **悬浮面板**(软件设置/插件设置分页)。软件设置含主题三态 + 插件启停列表;提供嵌套槽 settings-page:<name> 给各插件放自己的设置页
-│   ├── plugin-preview-text/       # ✅ 当前旧实现:纯文本预览；后续并入统一 plugin-preview 并移除独立入口
 │   ├── plugin-mock-data/          # ✅ 开发期:`/stress` 压力数据集的 B 区入口(activity-rail + nav-panel:stress)
 │   ├── plugin-devtools-log/       # ✅ 开发期:性能/错误/级联与槽事件捕获面板(bottom-drawer)
 │   ├── plugin-dev-slot-harness/   # ✅ 开发期:嵌套槽运行时验证夹具(bottom-drawer + 提供 dev-pane:<n>,含越权拒绝取证)
 │   │   # 除 file-history 外均为纯前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │   │   # 最后三个是开发期演示/调试插件,只在浏览器 dev 的模拟索引里装载(见 08 §5.3)
-│   └── (规划,见 08)业务:plugin-file-ops / search / plugin-preview /
-│       plugin-context-menu / plugin-windows-thumbnails / storage-analysis
+│   └── (规划,见 08)业务:plugin-search / plugin-windows-thumbnails /
+│       plugin-history-metadata
 │       # 每个前端插件:manifest.json + frontend/(vite lib build → dist/index.js)
 │       # 全栈插件再加 backend/(cargo 成员,只依赖 fm-contracts + cordis,经能力契约)
 │

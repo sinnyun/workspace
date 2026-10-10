@@ -37,3 +37,49 @@ pub struct HistoryUpdatedArgs {
     /// The file whose history gained an entry.
     pub path: String,
 }
+
+/// Emitted while a `shell.fileOperation` runs. The payload states plainly
+/// whether progress is trustworthy, so the UI can be indeterminate rather than
+/// invent a percentage (docs/09 §9.4, roadmap P7-18).
+pub struct ShellOperationProgress;
+
+impl Event for ShellOperationProgress {
+    const NAME: &'static str = "shell:operation:progress";
+    type Args = crate::capability::FileOperationProgress;
+    type Output = ();
+}
+
+/// Emitted once, with the per-item truth, when an operation reaches a terminal
+/// state. Deliberately a separate event from progress: `partial-failure` must not
+/// be inferable from the absence of a further progress tick.
+pub struct ShellOperationDone;
+
+impl Event for ShellOperationDone {
+    const NAME: &'static str = "shell:operation:done";
+    type Args = crate::capability::FileOperationResult;
+    type Output = ();
+}
+
+/// Emitted while a `sys.scan.start` job walks the tree. Throttled by the
+/// provider and deliberately *counter-only*: an entry ceiling means the total is
+/// unknown up front, so a percentage would be a fabrication
+/// (docs/plugin-functional/plugin-storage-analysis.md, roadmap P7-23).
+pub struct ScanProgressEvent;
+
+impl Event for ScanProgressEvent {
+    const NAME: &'static str = "scan:progress";
+    type Args = crate::capability::ScanProgress;
+    type Output = ();
+}
+
+/// Emitted once when a scan reaches a terminal state, carrying the aggregate
+/// tree, the skipped list and whether the result is partial. Separate from
+/// progress for the same reason `shell:operation:done` is: a cancelled scan must
+/// not have to be inferred from a missing tick.
+pub struct ScanDoneEvent;
+
+impl Event for ScanDoneEvent {
+    const NAME: &'static str = "scan:done";
+    type Args = crate::capability::ScanDone;
+    type Output = ();
+}

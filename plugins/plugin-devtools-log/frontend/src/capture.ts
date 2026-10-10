@@ -103,6 +103,8 @@ const TRACED_EVENTS: readonly string[] = [
   Events.sidebarSelectionChanged,
   Events.focusChanged,
   Events.detailTabChanged,
+  // 预览区的状态是 D 面板唯一的"现在是什么状态"事实源，取证时必须能看见它。
+  Events.previewStateChanged,
   Events.slotRegistered,
   Events.slotReconfigured,
   Events.slotDisposed,

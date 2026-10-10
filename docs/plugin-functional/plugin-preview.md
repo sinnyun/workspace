@@ -1,57 +1,55 @@
 # `plugin-preview` · 统一文件预览
 
-**状态：规划（整合现有 `plugin-preview-text` 与原计划的 Markdown、图片、PDF、媒体预览）。** 在 `plugin-inspector` 的 `preview-zone` 中承载唯一的文件预览入口；默认显示 Windows 系统缩略图，只有用户点击“文件预览”切换按钮后，才调用 Open File Viewer 按文件类型加载内容；不再为文本、Markdown、图片、PDF、音视频分别提供应用级预览插件。
+**状态：已交付（P7-20/21/22，2026-10-10 取证）。** 在 `plugin-inspector` 的 `preview-zone` 中承载唯一的文件预览入口，并向设置面板贡献 `settings-page:preview` 一页。默认只显示 Windows 系统缩略图；只有用户点击"文件预览"切换按钮后，才申请受限资源句柄并按文件类型交给 Open File Viewer 渲染。文本、Markdown、图片、PDF、音视频、Office、压缩包没有各自的应用级预览插件。
+
+三处事实需要真机才能取证，保持"已实现未验证"：真 Tauri 窗口内的渲染、真实 Windows Shell 缩略图字节、真实 `chardetng` 编码猜测结果（浏览器 dev 里分别由预置样例图与 mock 通道镜像同一套语义）。
 
 ## 方案选择与职责边界
 
-- 基准开源库：[Open File Viewer](https://github.com/xushanpei/open-file-viewer)，采用 MIT 许可的 React 集成与核心 viewer；按发布包实际支持和构建验证结果选择所需格式模块，避免把全部可选格式依赖一股脑打入首屏。
-- 该库提供可嵌入 React 的统一容器、本地 `File`/`Blob`/URL/`ArrayBuffer` 输入、格式插件、loading/error/unsupported/download fallback、工具栏、多文件切换与主题能力，适合作为应用内预览引擎。格式覆盖与大文件限制须以依赖锁定版本和本应用验收为准。
-- 不选 kkFileView 作为主方案：其官方定位是 Spring Boot 在线文件预览项目，需要额外 Java 服务及 Office 转换组件运行。若未来确实需要服务端转换，应作为独立架构决策、经过离线/隐私/资源与安全评估后再接入，不属于本插件默认数据路径。
-- Open File Viewer 是单个应用级预览插件内的格式渲染引擎；其内部格式插件不等于本应用继续拆分多个预览插件。预览 UI、类型分派、焦点联动、偏好、错误状态和权限仍由 `plugin-preview` 统一负责。
-- 本插件只读，不负责文件管理、编辑、系统默认程序打开、缩略图生成、索引或永久缓存。缩略图统一由 `plugin-windows-thumbnails` 提供。
+- 渲染引擎：[Open File Viewer](https://github.com/xushanpei/open-file-viewer)（MIT），使用其 React 集成 `@open-file-viewer/react` 与 `@open-file-viewer/core` 的格式插件。注册的插件集合是显式常量，不是"全量依赖"：`imagePlugin / textPlugin / pdfPlugin / audioPlugin / videoPlugin / archivePlugin / officePlugin`（office 覆盖 docx、xlsx、pptx）。
+- 本插件只读。文件管理、编辑、系统打开、缩略图生成、索引、永久缓存都不在这里；系统打开一律经 `shell.openPath`，不自 exec。
+- 类型分派的唯一事实源是宿主可信的 `file.kind`，扩展名只是其副产物。本插件自己维护一张"查看器确实能尝试的类别"表，表外的类别在**申请句柄之前**就被拒绝，并给出准确的能力边界文案——不宣称全格式可预览。
 
-## 用户入口、展示与交互
+## 用户入口、两种模式与几何
 
-- 入口位于详情容器 `preview-zone`；根据当前 `focusRef` 显示文件名、类型、查看器工具栏与内容。无文件焦点时显示空态；文件夹由目录浏览器处理，不作为可预览文档。
-- 预览区顶部提供一个紧凑的切换按钮。默认缩略图状态的按钮动作为“打开文件预览”；进入 viewer 后按钮变为“返回缩略图”，并用选中/按下语义和无障碍名称表达当前模式。每个新聚焦的普通文件都默认处于“缩略图”；该模式只调用 `plugin-windows-thumbnails`，取得 Windows 系统缩略图后直接显示，无缩略图时显示文件类型图标。此时不得创建 viewer、读取文件内容、取首屏预览页或启动格式解析。
-- 用户明确点击“打开文件预览”后才启用 Open File Viewer，随后按需申请受限预览句柄并读取内容。点击“返回缩略图”立即中止读取、撤销句柄、销毁 viewer 并释放 Worker、媒体解码器和临时 URL。切换按钮在文件焦点存在时显示；无焦点/目录焦点时隐藏或禁用。
-- 模式是当前焦点文件的临时 UI 状态，不写入偏好或会话存储。切换到另一文件时重置为“缩略图”，防止一次预览操作意外触发后续大型文件的内容读取；用户在当前文件重新点击后可再预览。
-- 类型分派读取可信的 `file.kind`/MIME 与扩展名，并由 Open File Viewer 的注册格式插件判定支持能力。顺序为：已支持的格式 viewer → 明确的“不支持预览”状态与“使用 Windows 打开”动作；不允许多个本应用插件同时争抢同一焦点文件。
-- 预览工具栏按格式能力显示：缩放/适配、页码、搜索、播放控制、全屏、下载/打开等。不可用动作隐藏或禁用并提供短说明；媒体播放由用户手势启动，焦点离开时暂停并释放。
-- 显示状态包括 `idle`、`checking`、`loading`、`ready`、`unsupported`、`too-large`、`permission-denied`、`not-found`、`corrupt`、`password-required`、`cancelled`、`error`。每种状态提供中文说明及适当的重试、读取、下载或系统打开动作。
-- 文件切换时保留预览区域尺寸和滚动框架，替换内容时先显示加载状态；完成后按格式恢复合理默认缩放/页码，防止上一文件状态污染。仅对状态切换做短淡入；不额外堆叠卡片或重复工具条。
-- 文本/代码/Markdown 只读显示，保留行换行、搜索、复制与截断提示；禁止执行 Markdown 原始 HTML/脚本。图片支持适配/原尺寸与缩放，音视频支持播放/暂停、时间轴及音量，PDF 支持页码/缩放/搜索。Office、压缩包、邮件、CAD/3D/GIS 等高级类别按 viewer 版本能力逐步启用，未通过真实样本验收前必须显示准确的受限状态。
+- 无焦点时显示"选中一个文件后可预览"的空态；文件夹焦点不进入预览（那是目录浏览器的业务）。
+- **缩略图模式**（每个新聚焦文件的默认）：只发一次 `shell.thumbnail.read`（edge 256）取 Windows 系统自己的图，外加一次 `file.kind` 拿扩展名用于类型徽标；取不到系统图时显示 `.TXT` 之类的徽标。此模式**不创建 viewer、不读一个正文字节**，通道计数恒为 `{open:0, read:0, close:0, bytes:0}`。
+- **文件预览模式**：用户显式点击"打开文件预览"才开始；按钮随后变成"返回缩略图"，用 `aria-pressed` 表达当前模式。
+- 模式不持久化。切换焦点即回到缩略图并清空一切，防止一次误点导致后续大文件被自动拉取。
+- 预览区在两种模式下高度固定 260，切换不会移动下方面板（与所有浮层面板同一几何规则）。
 
-## 文件数据处理与权限通道
+## 数据通道
 
-- 仅在用户主动切换到“文件预览”后，插件才通过授权的 host capability 获取一个只读、路径绑定、短时有效的预览句柄/URL；Open File Viewer 从该资源读取。句柄不得暴露任意本地路径，必须限制到获准文件、只读、过期时间、会话/插件调用身份，并支持关闭或切回缩略图时撤销。
-- 小文件可按限制读为 `Blob`/`File` 交给 viewer；大文件必须通过受控的 range/chunk 数据通道读取，禁止未经大小限制一次性 `readChunk`/base64 全量复制。超出格式或资源上限时进入 `too-large` 或“用系统打开”，不得静默卡死。
-- 禁止把裸 `file:` URL、未经 ACL 的 `asset:` URL、绝对路径或原始文件字节放到事件总线、localStorage、插件日志。外链/远程内容按默认拒绝或用户明确操作，并须由权限策略校验。
-- 文件类型识别优先使用宿主可信元数据；扩展名只作为补充。压缩包内嵌文件预览必须继承原文件权限、限制展开深度/条目数/解压体积，防止路径穿越与资源耗尽。
-- 插件提供的系统打开动作调用统一 `plugin-file-ops` Windows Shell 能力，而非 viewer 自己执行任意命令。
+- 文本类（`text`/`code`/`markdown`）走 `fs.readText`：编码由宿主 `chardetng` + `encoding_rs` 判定，交给查看器的永远是已解码的 UTF-8 正文，界面上用一行 `编码 GBK · 96 B` 报出真实编码与体积。`too-large` 与 `binary` 是两种可区分的中文状态，不是乱码。
+- 其余类别走只读资源句柄通道：`fs.openResource` → 循环 `fs.readResource`（单次请求 512 KiB，宿主侧强制裁剪并如实标记）→ `fs.closeResource`，拼成 `Blob` 交给 viewer，边读边显示百分比进度。
+- 上限：单文件预览 64 MiB（超出即 `too-large`，句柄照样关闭），文本读取 4 MiB，同时最多 16 个活跃句柄，句柄 TTL 5 分钟。
+- 不存在把裸 `file:`/`asset:` URL、绝对路径或原始字节交给 WebView 或写入 `localStorage`/事件总线的路径；`preview:state:changed` 只带不透明引用、模式、状态、格式与进度。
+- pdf.js 的 worker、CJK cmap 与标准字体在构建时由 `scripts/prepare-pdf-assets.mjs` 复制到插件产物旁，运行时用 `import.meta.url` 解析，并显式禁用 CDN 回退——本地预览不产生任何外部源请求。viewer 样式以 `?inline` 随 bundle 走，激活时挂成一个 `<style id="ofv-viewer-style">`（运行时 ESM 插件没有宿主可以 link 的独立样式文件）。
 
-## 状态、事件与生命周期
+## 状态机与失败恢复
 
-- 订阅 inspector 当前文件焦点与必要的文件元数据；聚焦文件后仅启动缩略图读取。只有显式切换至“文件预览”才中止/升级为内容读取。焦点改变即恢复默认缩略图模式、中止旧读取、撤销旧预览句柄、停止媒体播放/Worker 并清理临时 URL。请求序号保证迟到响应不能盖过新文件。
-- 发出轻量 `preview:state:changed`（opaque file ref、模式 `thumbnail|viewer`、状态、格式、进度）；不在事件中传文件内容、Blob 或本地路径。预览进度仅对当前文件显示，切文件后重置。
-- 加载失败可重试；权限、加密、格式不支持和文件损坏使用不同错误状态，避免把所有错误归为“无法预览”。关闭详情区或插件停用时释放 viewer、worker、media decoder、object URL 和监听器。
-- 预览自身状态为临时会话状态；不持久化文件字节、页图、媒体帧或访问令牌。用户偏好可保存默认适配模式、最大文本字符数等版本化配置；旧 `fm.preview-text.prefs.v1` 在迁移时只映射仍存在的选项，迁移成功后停止双写。
+十二个状态各自有中文文案与出路：`idle / checking / loading / ready / unsupported / too-large / not-found / permission-denied / corrupt / password-required / cancelled / error`。
 
-## 与其他插件的数据协作
+- 失败分类先看线协议前缀（`not found:`、`permission denied:`、`invalid argument:`），再看内容/异常签名；路径本身可能就叫"损坏文件"，所以前缀判断必须在关键词之前。
+- Open File Viewer 解析失败时会在视口内渲染它自己的 `.ofv-fallback` 卡片且**不调用 `onError`**，所以"viewer 已挂载"不等于 `ready`。本区用 `MutationObserver` 监视该节点，把卡片文本换成自己的状态（`.ofv-encrypted` 单独映射为 `password-required`），并把英文原文只放进 `title` 供排查。
+- `unsupported / too-large / corrupt / password-required` 提供"用 Windows 打开"；`not-found / permission-denied / corrupt / error` 提供"重试"。红字状态与中性状态由集合并集决定，新增状态不会漏配。
 
-- `plugin-file-browser` 只发 `focus:changed` 中的不透明文件引用及来源；统一预览插件自行向 host 请求权限内元数据/预览资源。
-- `plugin-windows-thumbnails` 负责文件列表和预览区域默认状态所需的 Windows 缩略图；缩略图作为独立受限 capability 响应，不能触发统一 viewer。viewer 的完整内容渲染不调用应用图像生成管线。
-- `plugin-file-details` 可共享同一个焦点引用，但各自独立读取属性；任一读取失败不阻断其他插件。
-- `plugin-file-ops` 提供 Windows 系统打开动作；预览插件只请求受限“打开此焦点文件”能力，不能调用任意程序或路径。
-- 格式库仅在本插件构建产物内引用。插件间不直接 import viewer 或内部格式插件；其他区域若将来需要预览，应发起受权限约束的统一预览请求或进入既有预览容器。
+## 取消与资源回收
 
-## 持久化与验收
+请求序号 `seqRef` 是所有 await 的守门人：任何晚到的响应若序号已变，一律丢弃、绝不绘制。
 
-- 配置示例 `fm.preview.prefs.v1`：`{maxTextChars, defaultFit}`；设置页由统一预览插件贡献。数值读写两侧校验，损坏时回默认。预览模式不持久化：每个新焦点默认缩略图，避免自动读取；当前焦点、页码、播放位置、令牌与缓存不跨会话保存。旧 `autoLoad` 偏好不迁移为自动预览。
-- 验收覆盖：新选文件默认只显示系统缩略图；打开大型文件但不点击“文件预览”时，只发生缩略图请求且没有内容读取/Viewer 初始化；点击后才开始预览；切回缩略图或切换焦点会取消读取并释放句柄及解码资源。另覆盖文本/代码/Markdown、图片、PDF、Office、音频、视频和压缩包的代表性文件、空焦点、中文/超长路径、超大文件、密码保护、损坏文件、无权限、关闭详情区、插件停用、主题/容器尺寸变化、系统打开回退与资源释放。
-- 每种格式须验证本地离线工作、无意外网络请求、依赖许可和 worker/WASM 资源可打包；对未支持类别要显示实际能力边界，不得宣称全格式可预览。
-- 合并迁移验收：现有 `plugin-preview-text` 的纯文本读取/偏好语义并入本插件；清除原计划的 `plugin-preview-markdown`、`plugin-preview-image`、`plugin-preview-pdf`、`plugin-media` 独立插件条目和 `media.thumb`/FFmpeg 缩略图路线；单独的系统缩略图一律走 `plugin-windows-thumbnails`。
+- 返回缩略图：递增序号、中止分片循环、`fs.closeResource` 撤销句柄、销毁 viewer；若中断发生在读取过程中，状态如实记为 `cancelled`（缩略图区附一句"已取消上一次的内容读取"），而不是假装从未请求。
+- 换焦点、关闭详情区、插件停用/卸载：同样递增序号并关闭句柄，句柄不会活过面板。取证形态是**关闭数与打开数一致**，且半截内容不会被当作预览展示。
 
-## 实现依据
+## 与其他插件的关系
 
-[Open File Viewer README（中文）](https://github.com/xushanpei/open-file-viewer/blob/main/README.zh-CN.md)说明其 React 接入、本地 `File`/`Blob`/URL/`ArrayBuffer`、统一容器和多种格式插件，并标注 MIT 许可。数据桥接、打包体积、真实格式兼容、安全边界与离线行为仍需在本项目逐项验证。
+- `plugin-file-browser` 只交出不透明焦点引用；本插件自行向宿主请求元数据与资源，不读取其他插件的内部状态。
+- 缩略图模式复用 `shell.thumbnail.read`（与网格同一能力），viewer 的完整渲染不调用该通道。
+- 系统打开使用 `plugin-file-ops` 同一条 `shell.openPath` 能力，只针对当前焦点文件。
+- 格式库只出现在本插件产物内；其他区域若需要预览，应进入本预览容器而不是另起一个 viewer。
+
+## 偏好与验收
+
+- `fm.preview.prefs.v1`：`{maxTextChars, defaultFit}`（`maxTextChars` 夹在 1 千 ~ 200 万，`defaultFit` ∈ `contain|width|actual`）。设置页只有这两条中文控件，不泄漏槽 id。**模式、页码、播放位置、句柄与缓存都不入库。** 读取旧 `fm.preview-text.prefs.v1` 时只映射仍然存在的 `maxChars`，迁移后删除旧 key、不双写；旧 `autoLoad` 不迁移成"自动预览"。
+- 文本超过 `maxTextChars` 时在交给 viewer 之前截断。
+- 取证：`.scratch/pw/run-f.mjs` **125/125**（截图 63..85）覆盖通道 19 项语义、默认态零内容读取、12 个代表性本地样本逐类出图（含真实 OOXML docx/xlsx、真 R2/RC4-40 加密 PDF、真损坏 PDF、70 MiB 超限视频、`.svg` 型别前置拒绝）、零外部源请求、中途取消的句柄收支、事件序列与偏好迁移。文本三种状态另由 `.scratch/pw/run-d.mjs` 47/47 取证。

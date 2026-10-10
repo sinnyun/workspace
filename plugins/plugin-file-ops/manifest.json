@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-file-ops",
+  "version": "0.1.0",
+  "displayName": "文件操作",
+  "description": "打开、重命名、复制、移动、新建文件夹和移到回收站；实际执行全部交给 Windows Shell。",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "statusbar-zone", "export": "OperationStatus" }
+    ]
+  },
+  "permissions": {
+    "capabilities": [
+      "shell.fileOperation",
+      "shell.cancelFileOperation",
+      "shell.openPath",
+      "shell.revealItemInDir",
+      "shell.pickDirectory",
+      "clipboard.write"
+    ],
+    "events": {
+      "subscribe": ["shell:operation:progress", "shell:operation:done"],
+      "emit": ["file:changed"]
+    },
+    "slots": {
+      "contribute": ["statusbar-zone"]
+    },
+    "contextMenu": {
+      "contribute": true
+    }
+  }
+}

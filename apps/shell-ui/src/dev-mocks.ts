@@ -6,12 +6,52 @@
  *
  * The stress dataset here is deliberately **realistic** — per-format size
  * distributions (KB screenshots up to 8 GB images), believable names, mtimes
- * spread over two years, and real generated thumbnails for images — and it is
- * served through the same `fs.list` path the file browser uses, so the center
- * grid and its virtualization are what actually render it (docs/02 §4).
+ * spread over two years, and preset sample thumbnails standing in for the Windows
+ * Shell's answers — and it is served through the same `fs.list` path the file
+ * browser uses, so the center grid and its virtualization are what actually
+ * render it (docs/02 §4).
  */
 import { registerMock } from "./invoke";
-import type { ListEntry, PluginManifest, StatOut, ThumbOut } from "@my-file-manager/plugin-sdk";
+import { bus } from "./eventbus";
+import {
+  decodeResourceChunk,
+  Events,
+  MAX_RESOURCE_CHUNK_BYTES,
+  MAX_TEXT_READ_BYTES,
+  RESOURCE_TTL_MS,
+  SCAN_MAX_ENTRIES,
+  SCAN_PROGRESS_INTERVAL_MS,
+  SCAN_TREE_DEPTH,
+} from "@my-file-manager/plugin-sdk";
+import type {
+  FileFailureReason,
+  FileItemOutcome,
+  FileKind,
+  FileKindOut,
+  FileOperationIn,
+  FileOperationItem,
+  FileOperationOut,
+  FileOperationProgress,
+  FileOperationResult,
+  FileOperationState,
+  ListEntry,
+  PickIn,
+  PickOut,
+  PluginManifest,
+  DiskListOut,
+  ReadResourceOut,
+  ReadTextOut,
+  ResourceOut,
+  ScanAck,
+  ScanDonePayload,
+  ScanNode,
+  ScanProgressPayload,
+  ScanSkipReason,
+  ScanState,
+  ShellThumbnailOut,
+  StatOut,
+  ThumbnailState,
+} from "@my-file-manager/plugin-sdk";
 
 import fileHistoryManifest from "../../../plugins/plugin-file-history/manifest.json";
 import devtoolsLogManifest from "../../../plugins/plugin-devtools-log/manifest.json";
@@ -19,14 +59,18 @@ import fileDetailsManifest from "../../../plugins/plugin-file-details/manifest.j
 import layoutPanesManifest from "../../../plugins/plugin-layout-panes/manifest.json";
 import layoutViewsManifest from "../../../plugins/plugin-layout-views/manifest.json";
 import inspectorManifest from "../../../plugins/plugin-inspector/manifest.json";
+import contextMenuManifest from "../../../plugins/plugin-context-menu/manifest.json";
 import fileBrowserManifest from "../../../plugins/plugin-file-browser/manifest.json";
 import viewFileTreeManifest from "../../../plugins/plugin-view-file-tree/manifest.json";
 import viewFavoritesManifest from "../../../plugins/plugin-view-favorites/manifest.json";
 import viewTagsManifest from "../../../plugins/plugin-view-tags/manifest.json";
+import fileOpsManifest from "../../../plugins/plugin-file-ops/manifest.json";
+import storageAnalysisManifest from "../../../plugins/plugin-storage-analysis/manifest.json";
 import settingsManifest from "../../../plugins/plugin-settings/manifest.json";
-import previewTextManifest from "../../../plugins/plugin-preview-text/manifest.json";
+import pluginPreviewManifest from "../../../plugins/plugin-preview/manifest.json";
 import mockDataManifest from "../../../plugins/plugin-mock-data/manifest.json";
 import slotHarnessManifest from "../../../plugins/plugin-dev-slot-harness/manifest.json";
+import { FIXTURE_B64, FIXTURE_SIZES } from "./dev-fixtures";
 
 const MIB = 1024 * 1024;
 const KIB = 1024;
@@ -34,6 +78,29 @@ const GIB = 1024 * MIB;
 
 /** Root of the synthetic dataset. `<ROOT>/<volume>` lists that many entries. */
 const STRESS_ROOT = "/stress";
+
+/** Folder that holds the real preview bytes (roadmap P7-22). */
+const FIXTURE_DIR = "/demo/预览样例";
+
+/**
+ * 每一种被预览的格式都需要**真字节**：浏览器没有盘，所以 .scratch/gen-preview-fixtures.mjs
+ * 在构建期把 png / pdf / zip / wav / txt / md / rs / svg / 损坏 pdf 的二进制写进
+ * `dev-fixtures.ts`，这里解码一次当作 `fs.readResource` 要切片的那段内容。
+ * 查看器解析失败因此在 dev 与宿主里是同一种失败。
+ */
+const FIXTURE_BYTES = new Map<string, Uint8Array>(
+  Object.entries(FIXTURE_B64).map(([path, base64]) => [path, decodeResourceChunk(base64)]),
+);
+
+/** 清单 = 真字节文件（长度取解码结果）+ 只有大小、没有内容的大文件。 */
+const FIXTURE_LISTING: ListEntry[] = [
+  ...Object.keys(FIXTURE_B64).map((path, i) =>
+    entry(nameOf(path), path, false, FIXTURE_BYTES.get(path)?.length ?? 0, daysAgo(i + 1)),
+  ),
+  ...Object.entries(FIXTURE_SIZES).map(([path, size], i) =>
+    entry(nameOf(path), path, false, size, daysAgo(10 + i)),
+  ),
+].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
 /** One synthetic dataset volume, listed under `<ROOT>` as a directory. */
 const VOLUMES = [
@@ -50,12 +117,48 @@ const fakeTree: Record<string, ListEntry[]> = {
     entry("empty", "/demo/empty", true, null, null),
     entry("broken", "/demo/broken", true, null, null),
     entry("src", "/demo/src", true, null, null),
+    // Failure fixtures: listed like anything else, then refused by the provider,
+    // so a panel's error state is reproducible without touching a real disk.
+    entry("无权限目录", "/demo/无权限目录", true, null, null),
+    entry("消失目录", "/demo/消失目录", true, null, null),
+    entry("坏路径", "/demo/坏路径", true, null, null),
+    entry("已失效文件.txt", "/demo/已失效文件.txt", false, 12, daysAgo(1)),
+    entry("无权限文件.txt", "/demo/无权限文件.txt", false, 34, daysAgo(2)),
+    // 非 UTF-8 文本：宿主经 chardetng + encoding_rs 解码，dev 直接给出解码后的
+    // 正文与真实编码名，界面才能显示"GBK"这类编码标记（P7-19）。
+    entry("中文GBK.txt", "/demo/中文GBK.txt", false, 96, daysAgo(5)),
+    // 文本预览的三种状态（ok / too-large / binary）都要能定点复现，所以演示目录
+    // 里各留一个：真实大小写进清单，readText 按同一张格式表回答状态（P7-19）。
+    entry("超大日志.log", "/demo/超大日志.log", false, 9 * 1024 * 1024, daysAgo(6)),
+    entry("照片.jpg", "/demo/照片.jpg", false, 2 * 1024 * 1024, daysAgo(7)),
+    // 扩展名是文本、内容是二进制：宿主的 chardetng 会否决并回 `binary` 状态，
+    // dev 用这个路径把第三种文本状态固定复现到接替后的预览区（P7-19）。
+    entry("伪文本.txt", "/demo/伪文本.txt", false, 2048, daysAgo(8)),
+    // 预览通道的格式样例（真字节）：P7-22 要求每种受支持格式都能实际渲染一次。
+    entry("预览样例", FIXTURE_DIR, true, null, null),
   ],
   "/demo/empty": [],
+  [FIXTURE_DIR]: FIXTURE_LISTING,
   "/demo/src": [
     entry("main.rs", "/demo/src/main.rs", false, 2048, daysAgo(41)),
     entry("lib.rs", "/demo/src/lib.rs", false, 900, daysAgo(40)),
   ],
+};
+
+/** Paths whose provider fails. Messages keep the Rust `CapabilityError` prefixes
+ *  (`not found:` / `permission denied:` / `invalid argument:`) so the frontend's
+ *  error classification is exercised against the same vocabulary as the host. */
+const LIST_ERRORS: Record<string, string> = {
+  "/demo/broken": "模拟读取失败",
+  [`${STRESS_ROOT}/读取失败`]: "模拟读取失败",
+  "/demo/无权限目录": "permission denied: /demo/无权限目录",
+  "/demo/消失目录": "not found: /demo/消失目录",
+  "/demo/坏路径": "invalid argument: /demo/坏路径",
+};
+
+const STAT_ERRORS: Record<string, string> = {
+  "/demo/已失效文件.txt": "not found: /demo/已失效文件.txt",
+  "/demo/无权限文件.txt": "permission denied: /demo/无权限文件.txt",
 };
 
 function entry(
@@ -87,7 +190,7 @@ interface FormatSpec {
   /** Relative frequency, in permille-ish weights across the dataset. */
   weight: number;
   content: ContentKind;
-  /** `thumb.image` can decode it — false for formats `image` does not support. */
+  /** Windows Shell 有缩略图 handler 的格式（`shell.thumbnail.read` 才可能出图）。 */
   thumbnail: boolean;
 }
 
@@ -103,9 +206,9 @@ const FORMATS: FormatSpec[] = [
   { stems: ["HEIC", "iPhone照片"], ext: "heic", group: "图片", min: 800 * KIB, max: 6 * MIB, weight: 10, content: "binary", thumbnail: false },
   { stems: ["RAW", "CR2底片"], ext: "cr2", group: "图片", min: 18 * MIB, max: 45 * MIB, weight: 6, content: "binary", thumbnail: false },
   // 视频
-  { stems: ["VID", "录屏", "camera"], ext: "mp4", group: "视频", min: 4 * MIB, max: 1200 * MIB, weight: 40, content: "binary", thumbnail: false },
+  { stems: ["VID", "录屏", "camera"], ext: "mp4", group: "视频", min: 4 * MIB, max: 1200 * MIB, weight: 40, content: "binary", thumbnail: true },
   { stems: ["电影", "mkv"], ext: "mkv", group: "视频", min: 20 * MIB, max: 3 * GIB, weight: 20, content: "binary", thumbnail: false },
-  { stems: ["mov", "手机视频"], ext: "mov", group: "视频", min: 8 * MIB, max: 800 * MIB, weight: 15, content: "binary", thumbnail: false },
+  { stems: ["mov", "手机视频"], ext: "mov", group: "视频", min: 8 * MIB, max: 800 * MIB, weight: 15, content: "binary", thumbnail: true },
   { stems: ["webm", "直播回放"], ext: "webm", group: "视频", min: 2 * MIB, max: 300 * MIB, weight: 8, content: "binary", thumbnail: false },
   // 音频
   { stems: ["track", "播客"], ext: "mp3", group: "音频", min: 2 * MIB, max: 12 * MIB, weight: 25, content: "binary", thumbnail: false },
@@ -153,6 +256,18 @@ const FORMATS: FormatSpec[] = [
 
 /** Directory names, mixed like a real home folder. */
 const DIR_STEMS = ["项目", "photos", "备份", "datasets", "docs", "素材", "downloads", "2026-Q3", "archive", "临时"];
+
+/** The same format table decides a hand-written `/demo` file's content class too,
+ *  so there is only one place that says which extensions are binary. */
+const BINARY_EXT = new Set(FORMATS.filter((f) => f.content === "binary").map((f) => f.ext));
+
+/** 名字像文本、内容像二进制的定点样例：`fs.readText` 对它回 `binary` 状态，
+ *  界面那条"这不是文本文件"的分支因此在 dev 里也能取证。 */
+const BINARY_TEXT_PATHS = new Set(["/demo/伪文本.txt"]);
+const extOf = (path: string): string => {
+  const dot = path.lastIndexOf(".");
+  return dot < 0 ? "" : path.slice(dot + 1).toLowerCase();
+};
 
 /** ~8% of entries are subdirectories, so grouping and drill-in get exercised. */
 const DIR_WEIGHT = 95;
@@ -294,54 +409,742 @@ function volumeListing(): ListEntry[] {
 
 const isStressPath = (path: string): boolean => path === STRESS_ROOT || path.startsWith(`${STRESS_ROOT}/`);
 
-// ───────────────────────────── thumbnails ─────────────────────────────
+// ───────────────────────────── 系统缩略图（浏览器替身） ─────────────────────────────
 
 /**
- * A real downscaled PNG, painted on a canvas: gradient background + a coarse
- * noise pattern from the path hash + the file name, then scaled to `edge`.
- * Returning a PNG (not an SVG) matches what the kernel `thumb.image` sends, so
- * the grid renders the same bytes shape in dev and in Tauri.
+ * `shell.thumbnail.read` 的 dev 替身。真实宿主调用 Windows Shell 的
+ * `IThumbnailCache`，浏览器里拿不到它，所以这里**只返回预置样例图**，并按格式与
+ * 缓存策略给出可区分的状态；绝不按文件内容绘制或生成缩略图——那是宿主要清掉的
+ * 红线（docs/plugin-functional/plugin-windows-thumbnails.md）。
+ * 四张样例图是构建期写死的小 PNG，与任何被"浏览"的文件都无关。
  */
-function syntheticThumb(path: string, edge: number): ThumbOut {
-  const canvas = document.createElement("canvas");
-  canvas.width = 96;
-  canvas.height = 72;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("dev mock: canvas unavailable");
+const PRESET_THUMBS = {
+  photo: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAACLklEQVR42u3S7WsNcBjG8euv8cqf4F+SJDnPz8/PjzMzx8zMzIyZmZklSZIkSUmSJEmSJEnq0nlxyoslT+Occ10vPi9+7373fX/BrQBNF75eC9B04ctmgKYLn68GabrwaSNI04WPV0I0XfiwHqLpwvvLIZouvFsL03Th7aUwTRferEZouvD6YoSmC69WojRdeHkhStOFF+ejNF14vhyj6cKzczGaLjxditN04cnZOE0XHi/Gabrw6EyCpgsPFxI0XXhwOknThfvzSZou3DuVounC3bkUTRfunEzRdOH2bJqmC7dOpGm6cHMmQ9OFG8czNF243svQdGGrl6XpwuaxLE0XNqZzNF1YP5qj6cLaVJ6mC6tH8jRdWJnM03Rh+XCBpgtLEwWaLix2izRdWOgUabow3y7SdGGuVaLpwmyzRNOFmUaZpgu9epmmC9O1Ck0XpqoVmi5MVio0XZgoV2m60ClVabrQKtZoutAo1Gi6UMvXaLpQydVpulDK1mm6kM80aLqQTTdoupBONWm6kEw2aboQTzRpuhCNt2i6sGv3HobjLfsN/d2NOnz/CMba9hPG4fDbBtB3KNq2Hxin428bwMDBSPu/+pOhhu0/IxlA34Fw55/Z6UGH8U9DH8DA/lBnRygseCwCGNgX7P4VXvyIBjCwN9D9JV70mAVgDsAcgDkAcwDmAMwBmAMwB2AOwByAOQBzAOYAzAGYAzAHYA7AHIA5AHMA5gDMAZgDsKHwDfRkLVH7rwVOAAAAAElFTkSuQmCC",
+  art: "data:image/png;base64,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",
+  frame: "data:image/png;base64,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",
+  shot: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAABgCAYAAADVenpJAAABIklEQVR42u3coQ2AMBRF0Y7GBMzAkAyBZAJSiSIoQkiTMkJloT3iLvBy1Bc/DOOU1W/BCAAYAgABIAAEgAAQAAJAAAgAASAA1DCA/bjyF7qfpAoBAAAAAAAAAAAAAAAAAAD8AMC8xO4DAAAAAAAAAAAAAAAAAAAAAAAAAHAJFAACQAAIAAEgANQagHU7VQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMCXMF/CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAqNkLjolt36KERU8AAAAASUVORK5CYII=",
+} as const;
 
-  const h = hashPath(path);
-  const hue = h % 360;
-  const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  grad.addColorStop(0, `hsl(${hue} 70% 55%)`);
-  grad.addColorStop(1, `hsl(${(hue + 90) % 360} 65% 30%)`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+type PresetThumb = keyof typeof PRESET_THUMBS;
 
-  // Deterministic speckle so neighbouring images do not look cloned.
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  for (let i = 0; i < 40; i++) {
-    const x = Math.floor(prng(h + i * 13) * canvas.width);
-    const y = Math.floor(prng(h + i * 29) * canvas.height);
-    ctx.fillRect(x, y, 2, 2);
-  }
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  ctx.fillRect(0, canvas.height - 14, canvas.width, 14);
-  ctx.fillStyle = "#fff";
-  ctx.font = "9px sans-serif";
-  ctx.fillText((path.split("/").pop() ?? "").slice(0, 12), 3, canvas.height - 4);
+/** Which preset stands in for a format family. */
+const THUMB_FAMILY: Record<string, PresetThumb[]> = {
+  图片: ["photo", "art"],
+  视频: ["frame"],
+  文档: ["shot"],
+};
 
-  const out = document.createElement("canvas");
-  out.width = edge;
-  out.height = Math.max(1, Math.round((edge * canvas.height) / canvas.width));
-  const outCtx = out.getContext("2d");
-  if (!outCtx) throw new Error("dev mock: canvas unavailable");
-  outCtx.imageSmoothingEnabled = true;
-  outCtx.drawImage(canvas, 0, 0, out.width, out.height);
+/**
+ * `cacheOnly` 时有多少比例的文件"系统里还没有缓存"。用来在 dev 里稳定地复现
+ * `cache-miss` 这条正常分支，而不是让每个网格都全绿。
+ */
+const COLD_CACHE_EVERY = 4;
 
-  return { dataUrl: out.toDataURL("image/png"), mime: "image/png", edge };
+function shellThumbnail(path: string, edge: number, policy: string): ShellThumbnailOut {
+  const miss = (state: ThumbnailState): ShellThumbnailOut => ({
+    state,
+    dataUrl: null,
+    mime: null,
+    edge: 0,
+    fromCache: false,
+  });
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const ext = (name.split(".").pop() ?? "").toLowerCase();
+  const resolved = resolveStressPath(path);
+  if (resolved?.isDir) return miss("unsupported-type");
+  // 有 Shell handler 的格式才可能有系统缩略图；其余是 unsupported-type。
+  const hasHandler = resolved
+    ? resolved.spec.thumbnail
+    : ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "mp4", "mov"].includes(ext);
+  if (!hasHandler) return miss("unsupported-type");  if (policy === "cacheOnly" && hashPath(name) % COLD_CACHE_EVERY === 0) return miss("cache-miss");
+  const family = THUMB_FAMILY[resolved ? resolved.spec.group : ext === "mp4" || ext === "mov" ? "视频" : "图片"] ?? ["shot"];
+  const preset = family[hashPath(path) % family.length];
+  return {
+    state: "ready",
+    dataUrl: PRESET_THUMBS[preset],
+    mime: "image/png",
+    edge,
+    fromCache: policy !== "cacheOnly",
+  };
 }
 
-// ───────────────────────────── registration ─────────────────────────────
+// ──────────────── 预览资源通道（浏览器替身，P7-20） ────────────────
+
+/**
+ * `fs.openResource` / `fs.readResource` / `fs.closeResource` 的 dev 替身，语义逐条对着
+ * `core-shared/kernel/src/capabilities/resource.rs` 写：句柄不透明、绑定单个普通文件、
+ * 目录给 `invalid argument:`、消失或无权访问给原有前缀、读过期句柄是**错误而不是空字节**、
+ * 请求长度超上限时截断而非拒绝、`eof/total` 只描述真正读到的字节。
+ * 界面在 dev 里走的因此就是宿主那条受限通道的形状，而不是一次 `fetch` 全文。
+ */
+
+/** 与宿主同一个上限：预览一次只看得见一个文件，忘了关也只会撑到这张表。 */
+const MAX_LIVE_RESOURCES = 16;
+
+interface LiveResource {
+  path: string;
+  byteLength: number;
+  /** 每次成功读取都续期；宿主用单调时钟，浏览器只有 `Date.now()`。 */
+  deadline: number;
+}
+
+const liveResources = new Map<string, LiveResource>();
+let resourceSeq = 0;
+
+/** 只给无界面取证用：证明"默认态一个内容字节都没读"、"返回缩略图时句柄已释放"。
+ *  计数在替身内部累加，所以无论调用来自预览面板还是 harness 都算得对。
+ *  `textRead` 记的是 `fs.readText`（文本类正文走这条路，不占分片句柄），
+ *  这样"点了重试确实再读一次"在两种路由上都拿得出证据。 */
+const devResourceCalls = { open: 0, read: 0, close: 0, bytes: 0, clamped: 0, textRead: 0 };
+
+/** 每次分片读取的模拟耗时。默认 10ms；harness 会调大它，好让"读到一半就切走"
+ *  这条分支在毫秒级 UI 里稳定可复现（与 `hash.compute` 的 900ms 同一手法）。 */
+let devReadDelayMs = 10;
+
+/** 把句柄表标记为全部过期，让 TTL 分支在几毫秒内可复现（宿主由真实时钟决定）。 */
+function expireAllResources(): void {
+  for (const entry of liveResources.values()) entry.deadline = Date.now() - 1;
+}
+
+function sweepResources(now: number): void {
+  for (const [id, entry] of liveResources) {
+    if (entry.deadline <= now) liveResources.delete(id);
+  }
+}
+
+/** dev 侧的"文件存在性"：样例清单、合成数据集、失败路径三处事实源合一。 */
+function devResourceSize(path: string): { byteLength: number } | null {
+  const real = FIXTURE_BYTES.get(path);
+  if (real) return { byteLength: real.length };
+  const sized = FIXTURE_SIZES[path];
+  if (sized !== undefined) return { byteLength: sized };
+  const resolved = resolveStressPath(path);
+  if (resolved) return resolved.isDir ? null : { byteLength: sizeFor(resolved.index) };
+  const ent = currentListing(parentOf(path)).find((e) => e.path === path);
+  return ent && !ent.isDir ? { byteLength: ent.size ?? 0 } : null;
+}
+
+/** dev 只有样例文件带真字节；其余合成条目按 (路径, 下标) 派生确定内容，
+ *  于是分块、`eof`、`total` 这些**通道账目**是真的，而格式解析正确性只由
+ *  `/demo/预览样例` 取证。文本类给可读行，二进制类给稳定字节。 */
+const TEXTUAL_KINDS: ReadonlySet<FileKind> = new Set<FileKind>(["text", "code", "markdown"]);
+
+function devBytes(path: string, offset: number, length: number): Uint8Array {
+  const real = FIXTURE_BYTES.get(path);
+  if (real) return real.subarray(offset, offset + length);
+  const out = new Uint8Array(length);
+  const seed = hashPath(path);
+  if (TEXTUAL_KINDS.has(fileKindOf(path, false).kind)) {
+    const line = `dev 合成文本 · ${nameOf(path)} · `;
+    for (let i = 0; i < length; i += 1) {
+      out[i] = i % 60 === 59 ? 0x0a : line.charCodeAt((i + seed) % line.length);
+    }
+  } else {
+    for (let i = 0; i < length; i += 1) out[i] = ((offset + i) * 31 + seed) & 0xff;
+  }
+  return out;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  // btoa 只吃二进制串；512 KiB 一块直接转字符串会把调用栈撑爆，所以分小段。
+  const parts: string[] = [];
+  const step = 8192;
+  for (let i = 0; i < bytes.length; i += step) {
+    parts.push(String.fromCharCode(...bytes.subarray(i, i + step)));
+  }
+  return btoa(parts.join(""));
+}
+
+/** 一次受限分片真正允许返回的字节数：既不超上限，也不越过关联大小。 */
+function clampReadLength(requested: number, offset: number, total: number): number {
+  const remaining = Math.max(0, total - offset);
+  return Math.min(Math.max(0, requested), remaining, MAX_RESOURCE_CHUNK_BYTES);
+}
+
+function openResource(args: Record<string, unknown>): ResourceOut {
+  devResourceCalls.open += 1;
+  const path = String(args.path ?? "").trim();
+  if (!path) throw new Error("invalid argument: path 为空");
+  if (opOverlay.removed.has(path)) throw new Error(`not found: ${path}`);
+  const forced = STAT_ERRORS[path];
+  if (forced) throw new Error(forced);
+  if (isDirectoryPath(path)) throw new Error(`invalid argument: not a regular file: ${path}`);
+  const sized = devResourceSize(path);
+  if (!sized) throw new Error(`not found: ${path}`);
+
+  const now = Date.now();
+  sweepResources(now);
+  if (liveResources.size >= MAX_LIVE_RESOURCES) {
+    throw new Error(
+      `invalid argument: too many open previews: at most ${MAX_LIVE_RESOURCES} resources may be live`,
+    );
+  }
+  resourceSeq += 1;
+  const handle = `res-${resourceSeq.toString(16)}-${now.toString(16)}`;
+  liveResources.set(handle, { path, byteLength: sized.byteLength, deadline: now + RESOURCE_TTL_MS });
+  return {
+    handle,
+    path,
+    byteLength: sized.byteLength,
+    mime: fileKindOf(path, false).mime,
+    expiresMs: now + RESOURCE_TTL_MS,
+  };
+}
+
+function readResource(args: Record<string, unknown>): ReadResourceOut {
+  devResourceCalls.read += 1;
+  const handle = String(args.handle ?? "");
+  const live = liveResources.get(handle);
+  const now = Date.now();
+  if (!live) {
+    sweepResources(now);
+    throw new Error(`not found: unknown or expired resource handle ${handle}`);
+  }
+  if (live.deadline <= now) {
+    liveResources.delete(handle);
+    throw new Error(`not found: resource handle ${handle} has expired`);
+  }
+  // 正在被看的文件不该被自己的读取行为过期掉：先续期，再干活。
+  live.deadline = now + RESOURCE_TTL_MS;
+
+  const offset = Math.max(0, Math.floor(Number(args.offset ?? 0)));
+  const requested = Math.max(0, Math.floor(Number(args.length ?? 0)));
+  const length = clampReadLength(requested, offset, live.byteLength);
+  if (requested > MAX_RESOURCE_CHUNK_BYTES) devResourceCalls.clamped += 1;
+  const slice = devBytes(live.path, offset, length);
+  devResourceCalls.bytes += slice.length;
+  return {
+    handle,
+    offset,
+    data: toBase64(slice),
+    total: live.byteLength,
+    eof: offset + slice.length >= live.byteLength,
+    requestToken: (args.requestToken as string | null | undefined) ?? null,
+  };
+}
+
+/** 关两次是一次竞争而不是失败：答案里给 `false`，不抛错。 */
+function closeResource(args: Record<string, unknown>): boolean {
+  devResourceCalls.close += 1;
+  return liveResources.delete(String(args.handle ?? ""));
+}
+
+/** 目录不是"可预览的字节"，但 dev 得先认得出它。 */
+function isDirectoryPath(path: string): boolean {
+  if (fakeTree[path] !== undefined) return true;
+  if (isStressDirPath(path)) return true;
+  return currentListing(parentOf(path)).some((e) => e.path === path && e.isDir);
+}
+
+// ──────────────── 文件操作 / 类型识别（浏览器替身） ────────────────
+
+/**
+ * dev 覆盖层。合成数据集本身是按需生成的，所以复制/移动/改名/新建/删除的结果
+ * 记在这里，`fs.list` 与 `fs.stat` 都遵守它——列表因此能真的收敛（P7-18 要求
+ * "完成后经刷新一致"），而不是只弹一条成功提示。
+ */
+const opOverlay = {
+  removed: new Set<string>(),
+  added: new Map<string, ListEntry[]>(),
+};
+
+/** 模块加载期就要用到（预览样例清单是模块级常量），所以写成函数声明而非箭头常量。 */
+function parentOf(path: string): string {
+  return path.slice(0, path.lastIndexOf("/"));
+}
+
+function nameOf(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** Apply the overlay to any listing so mutations are observable. */
+function withOverlay(path: string, list: ListEntry[]): ListEntry[] {
+  const kept = opOverlay.removed.has(path) ? [] : list.filter((e) => !opOverlay.removed.has(e.path));
+  // 本次会话里新建/改名出来的条目同样能被删除，所以 `removed` 也要过一遍 `extra`。
+  const extra = (opOverlay.added.get(path) ?? []).filter((e) => !opOverlay.removed.has(e.path));
+  if (extra.length === 0) return kept;
+  return [...kept, ...extra].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+function overlayEntry(dir: string, ent: ListEntry): void {
+  const list = opOverlay.added.get(dir) ?? [];
+  list.push(ent);
+  opOverlay.added.set(dir, list);
+}
+
+/** A short synthetic delay per item: enough for busy / cancel / partial states
+ *  to be observable headless, short enough that a test does not stall. */
+const ITEM_MS = 120;
+
+/** `shell.fileOperation` 的 dev 替身：与宿主一样，调用只排队，进度与逐项结果经
+ *  `shell:operation:progress` / `shell:operation:done` 事件回来；进度是
+ *  **不确定**的（`indeterminate: true`、`processed: 0`），因为真实宿主的
+ *  `IFileOperation` 也给我们一个可信百分比——界面必须显示不确定进度。 */
+interface DevOp {
+  cancelled: boolean;
+  /** Kept so a cancel can re-state the running total in its progress event. */
+  total: number;
+  requestToken: string | null;
+}
+const devOps = new Map<string, DevOp>();
+let opSeq = 0;
+
+function itemOf(
+  source: string,
+  outcome: FileItemOutcome,
+  destination: string | null = null,
+  reason: FileFailureReason | null = null,
+  message: string | null = null,
+): FileOperationItem {
+  return { source, destination, outcome, reason, message };
+}
+
+/** Why the dev provider refuses this path, in the same categories as the host. */
+function refusalOf(path: string): FileFailureReason | null {
+  const statErr = STAT_ERRORS[path];
+  if (statErr) return statErr.startsWith("permission denied") ? "denied" : "not-found";
+  if (opOverlay.removed.has(path)) return "not-found";
+  return null;
+}
+
+/** The listing a dev directory currently shows (overlay included), so collision
+ *  checks behave like a real filesystem rather than against the generated seed. */
+function currentListing(dir: string): ListEntry[] {
+  const base = dir === STRESS_ROOT ? volumeListing() : isStressPath(dir) ? stressListing(dir) : (fakeTree[dir] ?? []);
+  return withOverlay(dir, base);
+}
+
+function statSize(path: string): { isDir: boolean; size: number | null; modifiedMs: number | null } {
+  const resolved = resolveStressPath(path);
+  if (resolved) {
+    return {
+      isDir: resolved.isDir,
+      size: resolved.isDir ? null : sizeFor(resolved.index),
+      modifiedMs: resolved.isDir ? null : modifiedFor(resolved.index),
+    };
+  }
+  const ent = currentListing(parentOf(path)).find((e) => e.path === path);
+  return { isDir: ent?.isDir ?? false, size: ent?.size ?? null, modifiedMs: ent?.modifiedMs ?? null };
+}
+
+/** Resolve one item, mutating the overlay on success. */
+function runItem(op: FileOperationIn, source: string): FileOperationItem {
+  const refused = refusalOf(source);
+  if (refused) {
+    return itemOf(source, "failed", null, refused, refused === "denied" ? "模拟：账户无权访问" : "模拟：文件已不存在");
+  }
+  if (op.op === "delete") {
+    opOverlay.removed.add(source);
+    return itemOf(source, "completed");
+  }
+
+  const destDir = op.destination ?? parentOf(source);
+  const targetName = op.op === "rename" || op.op === "create" ? (op.newName ?? "") : nameOf(source);
+  if (!targetName.trim() || targetName.includes("/")) {
+    return itemOf(source, "failed", null, "other", "模拟：名称不合法");
+  }
+  const targetPath = `${destDir}/${targetName}`;
+  const same = targetPath === source;
+  const clash = currentListing(destDir).find((e) => e.name === targetName && e.path !== source);
+
+  if (op.op === "create") {
+    if (clash) {
+      return itemOf(source, "failed", null, "exists", `模拟：${targetName} 已存在`);
+    }
+    overlayEntry(destDir, entry(targetName, targetPath, true, null, null));
+    return itemOf(targetPath, "completed", targetPath);
+  }
+  if (same) {
+    return itemOf(source, "completed", targetPath);
+  }
+  let autoRenamed = false;
+  let landingName = targetName;
+  if (clash) {
+    if (op.conflict === "fail") {
+      return itemOf(source, "failed", null, "exists", `模拟：目标已有 ${targetName}`);
+    }
+    if (op.conflict === "rename") {
+      // What the Shell's own collision rule produces: 同名 + " - 副本".
+      landingName = `${targetName.replace(/(\.[^.]*)?$/, "")} - 副本${targetName.match(/\.[^.]*$/)?.[0] ?? ""}`;
+      autoRenamed = true;
+    } else {
+      // overwrite: the existing target loses its place in the listing.
+      opOverlay.removed.add(clash.path);
+    }
+  }
+  const landingPath = `${destDir}/${landingName}`;
+  const shape = statSize(source);
+  if (op.op !== "copy") opOverlay.removed.add(source);
+  overlayEntry(destDir, entry(landingName, landingPath, shape.isDir, shape.size, shape.modifiedMs));
+  return itemOf(source, autoRenamed ? "renamed" : "completed", landingPath);
+}
+
+async function driveDevOperation(id: string, op: FileOperationIn, total: number): Promise<void> {
+  const handle = devOps.get(id);
+  if (!handle) return;
+  const token = op.requestToken ?? null;
+  const sources = op.op === "create" ? [`${op.destination ?? ""}/${op.newName ?? ""}`] : op.sources;
+  const items: FileOperationItem[] = [];
+  bus.emit(Events.shellOperationProgress, {
+    operationId: id,
+    state: "running",
+    requestToken: token,
+    processed: 0,
+    total,
+    indeterminate: true,
+    currentName: null,
+  } satisfies FileOperationProgress);
+
+  for (const source of sources) {
+    await delay(ITEM_MS);
+    if (handle.cancelled) {
+      items.push(itemOf(source, "cancelled", null, "cancelled-by-shell", "模拟：用户取消"));
+      for (const rest of sources.slice(items.length)) {
+        items.push(itemOf(rest, "cancelled", null, "cancelled-by-shell", "模拟：操作已取消"));
+      }
+      break;
+    }
+    items.push(runItem(op, source));
+    bus.emit(Events.shellOperationProgress, {
+      operationId: id,
+      state: handle.cancelled ? "cancelling" : "running",
+      requestToken: token,
+      processed: 0,
+      total,
+      indeterminate: true,
+      currentName: nameOf(source),
+    } satisfies FileOperationProgress);
+  }
+
+  const failed = items.filter((i) => i.outcome === "failed").length;
+  const cancelled = items.filter((i) => i.outcome === "cancelled").length;
+  const state: FileOperationState = handle.cancelled
+    ? cancelled > 0
+      ? "cancelled"
+      : "failed"
+    : failed === items.length
+      ? "failed"
+      : failed > 0
+        ? "partial-failure"
+        : "completed";
+  // dev 只有一个虚拟盘：跨根目录的 move 视为跨卷，如实报告给界面。
+  const crossVolumeMove =
+    op.op === "move" &&
+    sources.some((s) => parentOf(s).split("/")[1] !== (op.destination ?? "").split("/")[1]);
+  devOps.delete(id);
+  bus.emit(Events.shellOperationDone, {
+    operationId: id,
+    state,
+    requestToken: token,
+    items,
+    crossVolumeMove,
+  } satisfies FileOperationResult);
+}
+
+// ─────────────────────── 类型识别 / 打开 / 选择器 ───────────────────────
+
+/**
+ * `file.kind` 的 dev 替身：扩展名 → 类别的映射与宿主那张表**同一份事实源**
+ * （docs/plugin-functional/plugin-file-ops.md）。宿主用 `mime_guess` 得到 MIME，
+ * 这里只给数据集里出现过的格式，其余返回 null。
+ */
+const KIND_BY_EXT: Record<string, FileKind> = {
+  txt: "text", log: "text", ini: "text",
+  rs: "code", ts: "code", tsx: "code", js: "code", jsx: "code", py: "code", go: "code",
+  json: "code", toml: "code", yaml: "code", yml: "code", css: "code", html: "code",
+  md: "markdown", markdown: "markdown",
+  jpg: "image", jpeg: "image", png: "image", gif: "image", bmp: "image", webp: "image",
+  tiff: "image", tif: "image", heic: "image", cr2: "image", nef: "image",
+  svg: "vector", ico: "vector",
+  mp4: "video", mov: "video", webm: "video",
+  mkv: "container", avi: "container",
+  mp3: "audio", flac: "audio", wav: "audio", m4a: "audio", aac: "audio",
+  pdf: "pdf",
+  doc: "document", docx: "document", odt: "document",
+  xls: "sheet", xlsx: "sheet", ods: "sheet", csv: "sheet",
+  ppt: "presentation", pptx: "presentation", odp: "presentation",
+  zip: "archive", "7z": "archive", gz: "archive", rar: "archive", iso: "archive", tar: "archive",
+  ttf: "font", otf: "font", woff: "font", woff2: "font",
+  exe: "executable", dll: "executable", msi: "executable", bat: "executable", cmd: "executable",
+  blend: "model", dwg: "model", step: "model", glb: "model",
+};
+
+function fileKindOf(path: string, isDirHint: boolean | null): FileKindOut {
+  const isDir = isDirHint ?? currentListing(parentOf(path)).some((e) => e.path === path && e.isDir);
+  const ext = isDir ? "" : (nameOf(path).split(".").pop() ?? "").toLowerCase();
+  const hasExt = !isDir && ext !== "" && nameOf(path).toLowerCase().endsWith(`.${ext}`);
+  return {
+    path,
+    kind: isDir ? "directory" : hasExt ? (KIND_BY_EXT[ext] ?? "unknown") : "unknown",
+    extension: hasExt ? ext : "",
+    mime: hasExt ? (MIME_BY_EXT[ext] ?? null) : null,
+  };
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  txt: "text/plain", md: "text/markdown", json: "application/json", csv: "text/csv",
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+  webp: "image/webp", svg: "image/svg+xml", heic: "image/heic",
+  mp4: "video/mp4", mov: "video/quicktime", mkv: "video/x-matroska",
+  mp3: "audio/mpeg", m4a: "audio/mp4", flac: "audio/flac", wav: "audio/wav",
+  pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  zip: "application/zip", iso: "application/x-iso9660-image", exe: "application/x-msdownload",
+};
+
+// ──────────────── 空间分析扫描 / 卷信息（P7-23 的浏览器替身） ────────────────
+
+/**
+ * `sys.scan.start` 的 dev 替身：调用只排队，进度与聚合树经 `scan:progress` /
+ * `scan:done` 回来 —— 与 `shell.fileOperation` 同一套形状，界面不必为 dev 写第二套
+ * 状态机。数据全部来自本文件既有的压力数据集（`fs.list` 用的同一张表），所以体积是
+ * 真实压力数字而不是玩具数字。
+ *
+ * 遍历必须是**时间片循环**：一次扫描要过几万个目录，同步跑会把 UI 线程钉死，进度
+ * 也就永远看不见（取消同样会失效）。
+ */
+const SCAN_LISTINGS_PER_SLICE = 6;
+const SCAN_SLICE_MS = 12;
+/** 进度节流与展开深度、条目预算全部取自 SDK，dev 与宿主因此受同一套上限约束。 */
+const SCAN_PROGRESS_MS = SCAN_PROGRESS_INTERVAL_MS;
+
+interface ScanSkip {
+  path: string;
+  reason: ScanSkipReason;
+}
+
+/** 内部遍历节点：带 parent，好把文件字节沿祖先链累加成聚合量。 */
+interface ScanNodeInner {
+  name: string;
+  path: string;
+  isDir: boolean;
+  bytes: number;
+  children: ScanNodeInner[];
+  kinds: Record<string, number>;
+  depth: number;
+  parent: ScanNodeInner | null;
+}
+
+interface DevScan {
+  id: string;
+  root: string;
+  rootInner: ScanNodeInner;
+  queue: ScanNodeInner[];
+  cancelled: boolean;
+  finished: boolean;
+  startedAt: number;
+  visited: number;
+  skipped: ScanSkip[];
+  /** 遍历因条目预算停下时，剩下的目录就是这个原因（不是权限问题）。 */
+  budgetStop: boolean;
+}
+
+const devScans = new Map<string, DevScan>();
+let scanSeq = 0;
+
+/** dev 只有一个虚拟卷：数字由根路径稳定推导，同一个根每次问都一样。 */
+const DEV_VOLUME_TOTAL_BYTES = 1_000_000_000_000;
+
+function scanSkipReason(raw: string): ScanSkipReason {
+  if (/^permission denied/i.test(raw)) return "denied";
+  if (/^not found/i.test(raw)) return "not-found";
+  if (/^invalid argument/i.test(raw)) return "invalid-argument";
+  return "read-failed";
+}
+
+/** 扫描读的就是界面在列的那份清单（含同一批强制失败点），所以跳过项与目录列表
+ *  是同一份事实，不会出现「界面看得见、扫描说读不了」。 */
+function listingForScan(dir: string): ListEntry[] {
+  const forced = LIST_ERRORS[dir];
+  if (forced) throw new Error(forced);
+  return currentListing(dir);
+}
+
+function innerNode(
+  name: string,
+  path: string,
+  isDir: boolean,
+  depth: number,
+  parent: ScanNodeInner | null,
+): ScanNodeInner {
+  return { name, path, isDir, bytes: 0, children: [], kinds: {}, depth, parent };
+}
+
+/** dev 知道哪些目录存在：不存在的根目录必须在**调用**上就被拒，和宿主回
+ *  `not found:` 是同一条路径，不能让界面以为排队成功了。 */
+function isKnownScanRoot(path: string): boolean {
+  if (!path.trim()) return false;
+  if (path === STRESS_ROOT || isStressDirPath(path)) return true;
+  // 数据集卷名（`/stress/数据集-1千`）的名字里没有条目索引，resolveStressPath 认不出，
+  // 但它和 `fs.stat` 一样是个存在的目录，必须能当扫描根。
+  if (VOLUMES.some((v) => path === `${STRESS_ROOT}/${v.name}`)) return true;
+  if (path in LIST_ERRORS) return true;
+  if (fakeTree[path] !== undefined) return true;
+  for (const list of opOverlay.added.values()) {
+    if (list.some((e) => e.path === path && e.isDir)) return true;
+  }
+  return false;
+}
+
+/** 字节沿祖先链累加进每个父目录：节点的 `bytes` 就是子树总量，不用再算第二遍。 */
+function addFileBytes(file: ScanNodeInner, bytes: number, ext: string): void {
+  for (let p: ScanNodeInner | null = file.parent; p; p = p.parent) {
+    p.bytes += bytes;
+    if (ext) p.kinds[ext] = (p.kinds[ext] ?? 0) + bytes;
+  }
+}
+
+/** 把一份清单挂到它的目录节点上：目录进队列等下一片，文件当场把体积交上去。
+ *  两种都要留在 `children` 里，否则矩形图只剩目录、文件体积在界面上凭空消失。 */
+function attachListing(scan: DevScan, node: ScanNodeInner, entries: ListEntry[]): number {
+  const children: ScanNodeInner[] = [];
+  for (const e of entries) {
+    const child = innerNode(e.name, e.path, e.isDir, node.depth + 1, node);
+    if (e.isDir) {
+      scan.queue.push(child);
+    } else {
+      child.bytes = e.size ?? 0;
+      const ext = extOf(e.name);
+      if (ext) child.kinds[ext] = child.bytes;
+      addFileBytes(child, child.bytes, ext);
+    }
+    children.push(child);
+  }
+  node.children = children;
+  return entries.length;
+}
+
+/** 把内部遍历树裁成交付的 DTO：只向下展开到 `SCAN_TREE_DEPTH`，更深的目录留
+ *  `childCount`。`cut.depth` 记录是否真的裁过，界面才知道要说"只展开到第几层"。 */
+function toScanDto(node: ScanNodeInner, cut: { depth: number | null }): ScanNode {
+  const dto: ScanNode = {
+    name: node.name,
+    path: node.path,
+    isDir: node.isDir,
+    bytes: node.bytes,
+    kinds: node.kinds,
+  };
+  if (!node.isDir) return dto;
+  if (node.depth >= SCAN_TREE_DEPTH) {
+    if (node.children.length > 0) cut.depth = SCAN_TREE_DEPTH;
+    dto.childCount = node.children.length;
+    return dto;
+  }
+  dto.children = node.children.map((c) => toScanDto(c, cut));
+  return dto;
+}
+
+function emitScanProgress(scan: DevScan, state: ScanState, currentPath: string): void {
+  const payload: ScanProgressPayload = {
+    scanId: scan.id,
+    path: currentPath,
+    entries: scan.visited,
+    bytes: scan.rootInner.bytes,
+    skipped: scan.skipped,
+    state,
+  };
+  bus.emit("scan:progress", payload);
+}
+
+function finishDevScan(scan: DevScan, cancelled: boolean): void {
+  if (scan.finished) return;
+  scan.finished = true;
+  scan.budgetStop = scan.cancelled ? false : scan.budgetStop;
+  const cut = { depth: null as number | null };
+  // 取消与预算截断都交付「扫到哪算哪」的部分聚合；两者都写进 skipped / cancelled，
+  // 界面据此才不会把半截结果当成完整结果展示。
+  if (scan.budgetStop) {
+    const dropped = new Set<ScanNodeInner>();
+    const parents = new Set<ScanNodeInner>();
+    for (const rest of scan.queue) {
+      scan.skipped.push({ path: rest.path, reason: "budget-exceeded" });
+      // 没扫过的目录要从父级清单里摘掉：留着 0 字节的块就等于把它当成"扫过但是空的"。
+      // 摘除按父级一次做完，逐条 filter 在几十万条目的父目录上是平方复杂度。
+      rest.bytes = 0;
+      dropped.add(rest);
+      if (rest.parent) parents.add(rest.parent);
+    }
+    for (const parent of parents) {
+      parent.children = parent.children.filter((c) => !dropped.has(c));
+    }
+    scan.queue = [];
+  }
+  const done: ScanDonePayload = {
+    scanId: scan.id,
+    tree: toScanDto(scan.rootInner, cut),
+    skipped: scan.skipped,
+    cancelled,
+    truncatedAtDepth: cut.depth,
+    elapsedMs: Math.max(0, Math.round(Date.now() - scan.startedAt)),
+    // 深度上限之外的条目不在树里，条目总数只能由扫描侧给出，界面才不用估算。
+    entries: scan.visited,
+  };
+  bus.emit("scan:done", done);
+  devScans.delete(scan.id);
+}
+
+async function driveDevScan(scan: DevScan): Promise<void> {
+  let lastEmit = 0;
+  let current = scan.root;
+  try {
+    const entries = listingForScan(scan.root);
+    current = scan.root;
+    scan.visited = attachListing(scan, scan.rootInner, entries);
+  } catch (err) {
+    // 根目录本身就读不了：没有可聚合的东西，如实报告原因后直接结束。
+    scan.skipped.push({ path: scan.root, reason: scanSkipReason(errorMessageOf(err)) });
+    finishDevScan(scan, false);
+    return;
+  }
+
+  while (!scan.finished) {
+    await delay(SCAN_SLICE_MS);
+    if (scan.cancelled) {
+      finishDevScan(scan, true);
+      return;
+    }
+    if (scan.visited >= SCAN_MAX_ENTRIES) {
+      scan.budgetStop = true;
+      finishDevScan(scan, false);
+      return;
+    }
+    let listed = 0;
+    while (listed < SCAN_LISTINGS_PER_SLICE && scan.queue.length > 0 && !scan.cancelled) {
+      const node = scan.queue.shift()!;
+      current = node.path;
+      try {
+        scan.visited += attachListing(scan, node, listingForScan(node.path));
+      } catch (err) {
+        scan.skipped.push({ path: node.path, reason: scanSkipReason(errorMessageOf(err)) });
+        // 读不了的目录没被扫过：从父级清单里摘掉，聚合量因此不包含它。
+        node.bytes = 0;
+        const parent = node.parent;
+        if (parent) parent.children = parent.children.filter((c) => c !== node);
+      }
+      listed++;
+    }
+    if (scan.cancelled) {
+      finishDevScan(scan, true);
+      return;
+    }
+    if (scan.queue.length === 0) {
+      finishDevScan(scan, false);
+      return;
+    }
+    if (Date.now() - lastEmit >= SCAN_PROGRESS_MS) {
+      lastEmit = Date.now();
+      emitScanProgress(scan, "running", current);
+    }
+  }
+}
+
+/** `Error(String(err))` 会带上 `Error: ` 前缀，分类只看 provider 给的那段文本。 */
+function errorMessageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// ─────────────────────── registration ───────────────────────
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -364,16 +1167,18 @@ export function registerMocks(): void {
     // Listing is async and takes real time; make the wait visible so the grid's
     // "载入中…" state and the measured fetch time mean something.
     await delay(30);
-    if (path.startsWith("/demo/broken") || path === `${STRESS_ROOT}/读取失败`) {
-      throw new Error("模拟读取失败");
-    }
-    if (path === `${STRESS_ROOT}/空目录`) return [];
-    if (isStressPath(path)) return stressListing(path);
-    return fakeTree[path] ?? [];
+    const forced = LIST_ERRORS[path];
+    if (forced) throw new Error(forced);
+    if (path === `${STRESS_ROOT}/空目录`) return withOverlay(path, []);
+    if (isStressPath(path)) return withOverlay(path, stressListing(path));
+    return withOverlay(path, fakeTree[path] ?? []);
   });
 
   registerMock("fs.stat", (args): StatOut => {
     const path = String(args.path ?? "");
+    if (opOverlay.removed.has(path)) throw new Error(`not found: ${path}`);
+    const forced = STAT_ERRORS[path];
+    if (forced) throw new Error(forced);
     if (isStressPath(path)) {
       const resolved = resolveStressPath(path);
       if (resolved) {
@@ -392,47 +1197,266 @@ export function registerMocks(): void {
         modifiedMs: daysAgo(hashPath(path) % 400),
       };
     }
-    const ent = Object.values(fakeTree).flat().find((e) => e.path === path);
+    const ent = [...Object.values(fakeTree).flat(), ...[...opOverlay.added.values()].flat()].find(
+      (e) => e.path === path,
+    );
     return {
       path,
-      isDir: ent?.isDir ?? false,
+      isDir: opOverlay.added.get(parentOf(path))?.some((e) => e.path === path) ? true : (ent?.isDir ?? false),
       size: ent?.size ?? 0,
       modifiedMs: ent?.modifiedMs ?? null,
     };
   });
 
-  registerMock("fs.readText", async (args) => {
+  // `fs.readText` 的答案是**状态 + 正文**，不是一个裸字符串：超限与二进制必须能被
+  // 界面区分开（P7-19）。dev 用数据集的格式表决定状态。
+  registerMock("fs.readText", async (args): Promise<ReadTextOut> => {
+    devResourceCalls.textRead += 1;
     const path = String(args.path ?? "");
     await delay(10);
+    const base = (state: ReadTextOut["state"], extra: Partial<ReadTextOut> = {}): ReadTextOut => ({
+      path,
+      state,
+      text: null,
+      encoding: null,
+      byteLength: 0,
+      ...extra,
+    });
+    if (opOverlay.removed.has(path)) throw new Error(`not found: ${path}`);
+    const forced = STAT_ERRORS[path];
+    if (forced) throw new Error(forced);
     const resolved = resolveStressPath(path);
-    if (resolved && !resolved.isDir && resolved.spec.content === "binary") {
-      // Binary formats must not look like text: this drives the D region's
-      // "unsupported" state with a real reason instead of a blank panel.
-      throw new Error(`无法以文本读取 .${resolved.spec.ext}（二进制格式）`);
+    const size = resolved ? sizeFor(resolved.index) : (statSize(path).size ?? 96);
+    const isBinary = BINARY_TEXT_PATHS.has(path)
+      ? true
+      : resolved
+        ? !resolved.isDir && resolved.spec.content === "binary"
+        : BINARY_EXT.has(extOf(path));
+    if (isBinary) {
+      // 二进制格式绝不能看起来像文本：界面据此给出可区分的中文原因（P7-19）。
+      return base("binary", { byteLength: size });
     }
-    if (path.startsWith("/demo/notes.txt")) {
-      return "mock content of /demo/notes.txt\n第二行中文内容。";
+    if (size > MAX_TEXT_READ_BYTES) {
+      return base("too-large", { byteLength: size });
     }
-    return `模拟文本内容 of ${path}\n\n这是用于压力测试的假数据，共 ${
-      resolved ? sizeFor(resolved.index).toLocaleString() : 0
-    } 字节。`;
+    if (path === "/demo/中文GBK.txt") {
+      return base("ok", {
+        text: "中文 GBK 文本：宿主用 chardetng 猜测、encoding_rs 解码。\n第二行也是中文。",
+        encoding: "GBK",
+        byteLength: 96,
+      });
+    }
+    // 预览样例目录里的文本是**真字节**，readText 就把同一份字节按 UTF-8 解码回来：
+    // 两条通道对同一个文件必须说同一句话（样例目录是事实源，P7-19 与 P7-22 共用）。
+    const fixture = FIXTURE_BYTES.get(path);
+    if (fixture) {
+      return base("ok", {
+        text: new TextDecoder("utf-8").decode(fixture),
+        encoding: "UTF-8",
+        byteLength: fixture.length,
+      });
+    }
+    return base("ok", {
+      text:
+        path === "/demo/notes.txt"
+          ? "mock content of /demo/notes.txt\n第二行中文内容。"
+          : `模拟文本内容 of ${path}\n\n这是用于压力测试的假数据，共 ${size.toLocaleString()} 字节。`,
+      encoding: "UTF-8",
+      byteLength: size,
+    });
   });
 
-  registerMock("hash.compute", (args) =>
-    `mockhash-${String(args.path ?? "").length}-${String(args.algo ?? "blake3")}`,
+  // 预览通道三条能力一起注册。分片读取默认带 10ms 延迟，只为了让"读取中 + 百分比"
+  // 这一帧在界面上停留得住；语义本身（上限、续期、死句柄报错）全部同步。
+  registerMock("fs.openResource", openResource);
+  registerMock(
+    "fs.readResource",
+    (args): Promise<ReadResourceOut> => delay(devReadDelayMs).then(() => readResource(args)),
   );
+  registerMock("fs.closeResource", closeResource);
 
-  registerMock("thumb.image", async (args) => {
+  // Harness 取证入口：内容读了几个字节、句柄表还剩谁、以及把 TTL 提前拉满。
+  (window as unknown as Record<string, unknown>).__fmResource = {
+    calls: devResourceCalls,
+    live: () => [...liveResources.keys()],
+    expire: expireAllResources,
+    slow: (ms: number): void => {
+      devReadDelayMs = ms;
+    },
+    open: openResource,
+    read: readResource,
+    close: closeResource,
+    reset: () => {
+      liveResources.clear();
+      devResourceCalls.open = 0;
+      devResourceCalls.read = 0;
+      devResourceCalls.close = 0;
+      devResourceCalls.bytes = 0;
+      devResourceCalls.clamped = 0;
+      devResourceCalls.textRead = 0;
+    },
+  };
+
+  // Hashing is a real background task: it resolves long after a click, which is
+  // what makes the details panel's "计算中…" state and its stale-answer guard
+  // observable in the browser (P7-5).
+  registerMock("hash.compute", async (args) => {
+    await delay(900);
+    return `mockhash-${String(args.path ?? "").length}-${String(args.algo ?? "blake3")}`;
+  });
+
+  // 浏览器里没有 Windows Shell，所以这条能力返回预置样例图或明确的
+  // unsupported 状态；140ms 的延迟让占位、取消与过期回填在 dev 里可观察。
+  registerMock("shell.thumbnail.read", async (args) => {
     const path = String(args.path ?? "");
     const edge = Math.min(512, Math.max(16, Number(args.edge ?? 128)));
-    await delay(6);
-    const resolved = resolveStressPath(path);
-    const ext = (path.split(".").pop() ?? "").toLowerCase();
-    const decodable = resolved ? resolved.spec.thumbnail : ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff"].includes(ext);
-    if (!decodable) {
-      throw new Error(`不支持的图片格式: ${ext || "(无扩展名)"}`);
+    await delay(140);
+    return shellThumbnail(path, edge, String(args.policy ?? "extract"));
+  });
+
+  // 浏览器里没有 Shell 文件操作引擎：排队 + 事件回报的**形状**与宿主完全一致，
+  // 逐项结果写进 opOverlay，所以文件操作插件能在此跑到 completed / partial /
+  // cancelled 各分支，且列表真的变化。
+  registerMock("shell.fileOperation", (args): FileOperationOut => {
+    const req = args as unknown as FileOperationIn;
+    const invalid = (why: string): never => {
+      throw new Error(`invalid argument: ${why}`);
+    };
+    const sources = req.sources ?? [];
+    if (req.op === "create") {
+      if (!req.destination || !req.newName?.trim()) invalid("新建需要目标目录与名称");
+    } else if (sources.length === 0) {
+      invalid("没有选中的条目");
     }
-    return syntheticThumb(path, edge);
+    if ((req.op === "rename" || req.op === "create") && sources.length > 1) {
+      invalid("重命名/新建一次只能处理一项");
+    }
+    if ((req.op === "copy" || req.op === "move") && !req.destination) {
+      invalid("复制/移动需要目标目录");
+    }
+    const id = `dev-op-${++opSeq}`;
+    const total = req.op === "create" ? 1 : sources.length;
+    devOps.set(id, { cancelled: false, total, requestToken: req.requestToken ?? null });
+    void driveDevOperation(id, req, total);
+    return { operationId: id, state: "queued", total, indeterminate: true };
+  });
+
+  registerMock("shell.cancelFileOperation", (args): boolean => {
+    const id = String(args.operationId ?? "");
+    const handle = devOps.get(id);
+    if (!handle) return false;
+    handle.cancelled = true;
+    // 宿主在取消被接受后也会先把"正在取消"播出去（QueryCancel 到 Shell 真正停下
+    // 之间还有一段路），界面必须能显示这个中间态。
+    const total = handle.total;
+    bus.emit(Events.shellOperationProgress, {
+      operationId: id,
+      state: "cancelling",
+      requestToken: handle.requestToken,
+      processed: 0,
+      total,
+      indeterminate: true,
+      currentName: null,
+    } satisfies FileOperationProgress);
+    return true;
+  });
+
+  registerMock("shell.openPath", (args): boolean => {
+    const path = String(args.path ?? "");
+    if (!path.trim()) throw new Error("invalid argument: path 为空");
+    if (opOverlay.removed.has(path) || STAT_ERRORS[path]?.startsWith("not found")) {
+      throw new Error(`not found: ${path}`);
+    }
+    if (STAT_ERRORS[path]?.startsWith("permission denied")) {
+      throw new Error(`permission denied: ${path}`);
+    }
+    return true;
+  });
+
+  registerMock("shell.revealItemInDir", (args): boolean => {
+    const path = String(args.path ?? "");
+    if (!path.trim()) throw new Error("invalid argument: path 为空");
+    return true;
+  });
+
+  // 原生对话框在浏览器里不存在：给定一个**确定**的答案，让依赖选择器的流程
+  // （新建/复制到/存储分析选根目录）在无头测试里可以走完整条路径。
+  registerMock("shell.pickFile", async (args): Promise<PickOut> => {
+    await delay(30);
+    const req = args as unknown as PickIn;
+    return {
+      paths: [req.multiple ? "/demo/notes.txt" : "/demo/报告.docx"],
+      cancelled: false,
+    };
+  });
+
+  registerMock("shell.pickDirectory", async (): Promise<PickOut> => {
+    await delay(30);
+    return { paths: ["/demo/src"], cancelled: false };
+  });
+
+  registerMock("file.kind", (args): FileKindOut => {
+    const hint = args.isDir;
+    return fileKindOf(
+      String(args.path ?? ""),
+      hint === undefined || hint === null ? null : Boolean(hint),
+    );
+  });
+
+  // `sys.disk.list` 的 dev 替身：浏览器里没有卷枚举，所以给一个稳定的虚拟卷，
+  // 字段与规划中的宿主 DTO 同名（真实数字只能在 Tauri 里取证）。
+  registerMock("sys.disk.list", async (args): Promise<DiskListOut> => {
+    const path = String(args.path ?? "");
+    await delay(20);
+    if (!path.trim()) throw new Error("invalid argument: 需要先选择根目录");
+    const usedRatio = 0.45 + (hashPath(path.slice(0, 1)) % 400) / 1000;
+    const usedBytes = Math.round(DEV_VOLUME_TOTAL_BYTES * usedRatio);
+    return {
+      path,
+      volumes: [
+        {
+          rootPath: path.slice(0, 1) === "/" ? "/" : "C:",
+          label: "模拟卷",
+          filesystem: "NTFS",
+          totalBytes: DEV_VOLUME_TOTAL_BYTES,
+          usedBytes,
+          freeBytes: DEV_VOLUME_TOTAL_BYTES - usedBytes,
+        },
+      ],
+    };
+  });
+
+  // `sys.scan.start` 只排队；进度与聚合树走 scan:progress / scan:done，与
+  // `shell.fileOperation` 的「确认 + 事件」分工完全一致（P7-23）。
+  registerMock("sys.scan.start", (args): ScanAck => {
+    const rootPath = String(args.rootPath ?? "");
+    if (!rootPath.trim()) throw new Error("invalid argument: 需要先选择根目录");
+    if (!isKnownScanRoot(rootPath)) throw new Error(`not found: ${rootPath}`);
+    const id = `dev-scan-${++scanSeq}`;
+    const scan: DevScan = {
+      id,
+      root: rootPath,
+      rootInner: innerNode(nameOf(rootPath) || rootPath, rootPath, true, 0, null),
+      queue: [],
+      cancelled: false,
+      finished: false,
+      startedAt: Date.now(),
+      visited: 0,
+      skipped: [],
+      budgetStop: false,
+    };
+    devScans.set(id, scan);
+    void driveDevScan(scan);
+    return { scanId: id, state: "queued", rootPath };
+  });
+
+  registerMock("sys.scan.cancel", (args): boolean => {
+    const scan = devScans.get(String(args.scanId ?? ""));
+    if (!scan || scan.finished) return false;
+    scan.cancelled = true;
+    // 只置标记，不发中间态：`ScanState` 没有 cancelling，真正停下由时间片边界决定，
+    // 终态一定带 `cancelled: true`（与宿主 `sys.scan.cancel` 同一行为）。
+    return true;
   });
 
   // A tiny in-memory db.history store so the file-history panel has data in dev.
@@ -474,21 +1498,26 @@ export function registerMocks(): void {
   //  2. container plugins next — they own the nested slot prefixes that the
   //     content plugins inject into, and mount their outlets during first render.
   //  3. content/view plugins after their containers.
-  //  4. `plugin-settings` second-to-last: its gear pins itself to the bottom of the
+  //  4. context-menu before the views: it claims the panel provider on mount, so it
+  //     must be in the tree when the contributors register their items.
+  //  5. `plugin-settings` second-to-last: its gear pins itself to the bottom of the
   //     activity rail, so it must register after every other rail icon.
-  //  5. slot-harness LAST: its deliberate permission violations must land in devtools-log.
+  //  6. slot-harness LAST: its deliberate permission violations must land in devtools-log.
   const devPlugins: PluginManifest[] = [
     devtoolsLogManifest,
     layoutPanesManifest,
     layoutViewsManifest,
     inspectorManifest,
+    contextMenuManifest,
     fileBrowserManifest,
     viewFileTreeManifest,
     viewFavoritesManifest,
     viewTagsManifest,
+    fileOpsManifest,
+    storageAnalysisManifest,
     fileDetailsManifest,
     fileHistoryManifest,
-    previewTextManifest,
+    pluginPreviewManifest,
     mockDataManifest,
     settingsManifest,
     slotHarnessManifest,

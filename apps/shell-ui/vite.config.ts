@@ -131,6 +131,21 @@ function devImportMap(): Plugin {
 // ../../plugins/<name>/frontend/dist/<relpath>. This lets `vite dev` exercise the
 // real runtime-ESM plugin loading path in a plain browser (no Tauri), where the
 // `plugin://` scheme doesn't exist. Production/Tauri uses `plugin://` instead.
+/**
+ * The same table as the host's `guess_mime` (apps/host/src/lib.rs): a plugin asset
+ * must arrive with the MIME it would get over `plugin://`, or dev passes/fails where
+ * the shipped app does the opposite. `.mjs` is the case that matters — pdf.js loads
+ * its worker as a module script, and a stream MIME makes the browser refuse it.
+ */
+function pluginContentType(file: string): string {
+  if (file.endsWith(".js") || file.endsWith(".mjs")) return "text/javascript";
+  if (file.endsWith(".json")) return "application/json";
+  if (file.endsWith(".css")) return "text/css";
+  if (file.endsWith(".svg")) return "image/svg+xml";
+  if (file.endsWith(".wasm")) return "application/wasm";
+  return "application/octet-stream";
+}
+
 function devPluginServer(): Plugin {
   return {
     name: "dev-plugin-server",
@@ -154,10 +169,7 @@ function devPluginServer(): Plugin {
         }
         try {
           const data = readFileSync(file);
-          res.setHeader(
-            "Content-Type",
-            file.endsWith(".js") ? "text/javascript" : "application/octet-stream",
-          );
+          res.setHeader("Content-Type", pluginContentType(file));
           res.setHeader("Access-Control-Allow-Origin", "*");
           res.setHeader("Cache-Control", "no-store");
           res.end(data);

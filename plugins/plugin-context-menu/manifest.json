@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-context-menu",
+  "version": "0.1.0",
+  "displayName": "右键菜单",
+  "description": "统一呈现右键面板；具体操作由各个插件自己提供。",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [{ "id": "statusbar-zone", "export": "MenuLayer", "label": "右键菜单面板" }]
+  },
+  "permissions": {
+    "capabilities": [],
+    "events": {
+      "subscribe": [],
+      "emit": []
+    },
+    "slots": {
+      "contribute": ["statusbar-zone"]
+    },
+    "contextMenu": {
+      "provide": true
+    }
+  }
+}

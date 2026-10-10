@@ -26,6 +26,7 @@
         "sidebar:selection:changed",
         "focus:changed",
         "detail:tab:changed",
+        "preview:state:changed",
         "slot:registered",
         "slot:reconfigured",
         "slot:disposed"

@@ -16,5 +16,8 @@
   "peerDependencies": {
     "@mantine/core": "^7.17.8",
     "react": "^19.0.0"
+  },
+  "dependencies": {
+    "lucide-react": "^1.52.0"
   }
 }

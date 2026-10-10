@@ -20,12 +20,13 @@
  * 浮层自适应，每次切换都会重算高度并让 floating-ui 重新定位 → 面板既变形又挪位。
  * 因此外层与内层 tab 条固定不缩，正文区自己出滚动条。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   ActionIcon,
   Badge,
   Group,
+  Loader,
   Popover,
   SegmentedControl,
   Stack,
@@ -61,6 +62,13 @@ export function SettingsEntry({ host }: SlotProps) {
   const [page, setPage] = useState<string | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  // 逐行状态：请求在途的插件（busy）、该行乐观显示的临时开关值（pending 期间生效）、
+  // 该行上次的失败原因。三者都以插件 name 为键，只影响对应行，其它行照常可操作。
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const [optimistic, setOptimistic] = useState<Record<string, boolean>>({});
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  // busy 的同步镜像：请求返回前挡住同一行的重复触发，不依赖可能滞后的 state。
+  const busyRef = useRef<Set<string>>(new Set());
   const [, bump] = useState(0);
 
   // 插件被停用/启用时它的设置页贡献会消失或出现，tab 条要跟着重算。
@@ -79,16 +87,42 @@ export function SettingsEntry({ host }: SlotProps) {
     refresh();
   }, [open, refresh]);
 
-  const toggle = (name: string, enabled: boolean): void => {
-    setNotice(null);
-    host
-      .invoke<PluginInfo[]>(
-        FrontendCapabilities.pluginsSetEnabled,
-        { name, enabled } satisfies PluginSetEnabledArgs,
-      )
-      .then(setPlugins)
-      .catch((err) => setNotice(errorMessage(err)));
-  };
+  const toggle = useCallback(
+    (name: string, enabled: boolean): void => {
+      // 同行请求返回前不得重复触发。
+      if (busyRef.current.has(name)) return;
+      busyRef.current.add(name);
+      setBusy(new Set(busyRef.current));
+      setOptimistic((o) => ({ ...o, [name]: enabled }));
+      setRowErrors((e) => {
+        if (!(name in e)) return e;
+        const next = { ...e };
+        delete next[name];
+        return next;
+      });
+      const settle = (): void => {
+        busyRef.current.delete(name);
+        setBusy(new Set(busyRef.current));
+        // 撤掉乐观值：成功时列表已是真实值，失败时开关回弹到原状态。
+        setOptimistic((o) => {
+          const next = { ...o };
+          delete next[name];
+          return next;
+        });
+      };
+      host
+        .invoke<PluginInfo[]>(
+          FrontendCapabilities.pluginsSetEnabled,
+          { name, enabled } satisfies PluginSetEnabledArgs,
+        )
+        // 成功以基座返回的 plugins.list 真实 enabled 为准刷新，而不是保留本地乐观值。
+        .then((list) => setPlugins(list))
+        // 失败：记下行级中文原因；settle 撤销乐观值后开关回弹到原值。
+        .catch((err) => setRowErrors((e) => ({ ...e, [name]: errorMessage(err) })))
+        .finally(settle);
+    },
+    [host],
+  );
 
   const pages = host.contributedSlots(SETTINGS_PREFIX);
   const activePage = page && pages.includes(page) ? page : pages[0];
@@ -103,6 +137,7 @@ export function SettingsEntry({ host }: SlotProps) {
       arrowPosition="center"
       width={PANEL_WIDTH}
       shadow="md"
+      returnFocus
       middlewares={{ flip: true, shift: { padding: 8, crossAxis: true } }}
       styles={{ dropdown: dropdownStyle }}
     >
@@ -159,7 +194,14 @@ export function SettingsEntry({ host }: SlotProps) {
             另一页的插件组件。 */}
         <div style={bodyStyle}>
           <div style={sectionStyle(section === "app")}>
-            <SoftwareSettings plugins={plugins} notice={notice} onToggle={toggle} />
+            <SoftwareSettings
+              plugins={plugins}
+              notice={notice}
+              busy={busy}
+              optimistic={optimistic}
+              rowErrors={rowErrors}
+              onToggle={toggle}
+            />
           </div>
           <div style={sectionStyle(section === "plugins")}>
             <PluginPages
@@ -179,10 +221,16 @@ export function SettingsEntry({ host }: SlotProps) {
 function SoftwareSettings({
   plugins,
   notice,
+  busy,
+  optimistic,
+  rowErrors,
   onToggle,
 }: {
   plugins: PluginInfo[];
   notice: string | null;
+  busy: ReadonlySet<string>;
+  optimistic: Record<string, boolean>;
+  rowErrors: Record<string, string>;
   onToggle: (name: string, enabled: boolean) => void;
 }) {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
@@ -213,7 +261,14 @@ function SoftwareSettings({
         )}
         <Stack gap={4}>
           {plugins.map((info) => (
-            <PluginRow key={info.name} info={info} onToggle={onToggle} />
+            <PluginRow
+              key={info.name}
+              info={info}
+              loading={busy.has(info.name)}
+              checked={optimistic[info.name] ?? info.enabled}
+              error={rowErrors[info.name]}
+              onToggle={onToggle}
+            />
           ))}
         </Stack>
       </Block>
@@ -223,38 +278,69 @@ function SoftwareSettings({
 
 function PluginRow({
   info,
+  loading,
+  checked,
+  error,
   onToggle,
 }: {
   info: PluginInfo;
+  loading: boolean;
+  checked: boolean;
+  error: string | undefined;
   onToggle: (name: string, enabled: boolean) => void;
 }) {
+  // 请求在途期间禁用并显示 loading，避免重复触发；核心（protected）插件永远不可点击，
+  // 因此界面不会出现「看着能点、点了没反应」的误导。
+  const switchDisabled = info.protected || loading;
   return (
-    <Group className="fm-plugin-row" gap={10} wrap="nowrap" style={rowStyle}>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <Group gap={6} wrap="nowrap">
-          <Text size="sm" fw={600} truncate>
-            {info.displayName}
+    <div className="fm-plugin-row" style={rowStyle}>
+      <Group gap={10} wrap="nowrap">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <Group gap={6} wrap="nowrap">
+            <Text size="sm" fw={600} truncate>
+              {info.displayName}
+            </Text>
+            {info.protected && (
+              <Badge size="xs" variant="light" color="gray" title="基础插件保持开启，保证界面正常使用">
+                基础插件
+              </Badge>
+            )}
+          </Group>
+          <Text size="xs" c="dimmed" truncate title={`${info.name} · v${info.version}`}>
+            {info.description ?? info.name}
           </Text>
-          {info.protected && (
-            <Badge size="xs" variant="light" color="gray" title="基础插件保持开启，保证界面正常使用">
-              基础插件
-            </Badge>
+        </div>
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <Switch
+            size="xs"
+            checked={checked}
+            disabled={switchDisabled}
+            aria-label={`启用${info.displayName}`}
+            title={
+              info.protected
+                ? "基础插件不可关闭"
+                : loading
+                  ? "正在处理…"
+                  : checked
+                    ? "点击关闭该插件"
+                    : "点击开启该插件"
+            }
+            onChange={(e) => onToggle(info.name, e.currentTarget.checked)}
+          />
+          {loading && (
+            // 请求在途：开关已禁用，这里盖一层不确定态加载指示，直观表示该行正在处理。
+            <div style={spinnerOverlayStyle}>
+              <Loader size={12} />
+            </div>
           )}
-        </Group>
-        <Text size="xs" c="dimmed" truncate title={`${info.name} · v${info.version}`}>
-          {info.description ?? info.name}
+        </div>
+      </Group>
+      {error && (
+        <Text size="xs" c="red" mt={6}>
+          {error}
         </Text>
-      </div>
-      <Switch
-        size="xs"
-        checked={info.enabled}
-        disabled={info.protected}
-        aria-label={`启用${info.displayName}`}
-        title={info.protected ? "基础插件不可关闭" : info.enabled ? "点击关闭该插件" : "点击开启该插件"}
-        onChange={(e) => onToggle(info.name, e.currentTarget.checked)}
-        style={{ flexShrink: 0 }}
-      />
-    </Group>
+      )}
+    </div>
   );
 }
 
@@ -396,4 +482,15 @@ const rowStyle: CSSProperties = {
   padding: "10px 12px",
   borderRadius: "var(--mantine-radius-sm)",
   border: "1px solid var(--mantine-color-default-border)",
+};
+
+/** 加载指示盖在禁用开关上：不改变行尺寸，只叠加一个居中小转圈。 */
+const spinnerOverlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "var(--mantine-color-body)",
+  opacity: 0.75,
 };

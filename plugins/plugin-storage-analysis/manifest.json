@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-storage-analysis",
+  "version": "0.1.0",
+  "displayName": "空间分析",
+  "description": "选定根目录扫描磁盘占用，用矩形图看出哪些目录最大，可下钻、可取消。",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "topbar-zone", "export": "StorageAnalysisToolbar", "label": "空间分析" }
+    ]
+  },
+  "permissions": {
+    "capabilities": [
+      "shell.pickDirectory",
+      "sys.disk.list",
+      "sys.scan.start",
+      "sys.scan.cancel"
+    ],
+    "events": {
+      "subscribe": ["scan:progress", "scan:done", "file:changed"],
+      "emit": []
+    },
+    "slots": {
+      "contribute": ["topbar-zone"]
+    }
+  }
+}

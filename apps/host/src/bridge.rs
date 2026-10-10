@@ -11,7 +11,11 @@ use std::convert::Infallible;
 
 use cordis_core::event::{ListenerRegistrationError, observer};
 use cordis_core::{Context, Event, Plugin};
-use fm_contracts::events::{FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs};
+use fm_contracts::capability::{FileOperationProgress, FileOperationResult, ScanDone, ScanProgress};
+use fm_contracts::events::{
+    FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs, ScanDoneEvent,
+    ScanProgressEvent, ShellOperationDone, ShellOperationProgress,
+};
 use tauri::{AppHandle, Emitter, Runtime};
 
 /// Fiber that mirrors cordis domain events onto the Tauri event bus.
@@ -58,6 +62,62 @@ impl<R: Runtime> Plugin for EventBridge<R> {
                 let app = app_hu.clone();
                 async move {
                     let _ = app.emit(HistoryUpdated::NAME, args);
+                    Ok::<_, Infallible>(())
+                }
+            },
+        ))?;
+
+        // Shell file operations are reported only through events (the ack says
+        // "queued", nothing else), so these two forwards are the whole UI feed:
+        // progress cards, the cancel button's enabled state and the per-item truth
+        // after a partial failure. They are forwarded verbatim — a renamed or
+        // reshaped event here would silently break every plugin listening for the
+        // frozen `shell:operation:*` names.
+        let app_op = self.app.clone();
+        let _op = ctx.on::<ShellOperationProgress, _>(observer(
+            move |_ctx: Context, args: FileOperationProgress| {
+                let app = app_op.clone();
+                async move {
+                    let _ = app.emit(ShellOperationProgress::NAME, args);
+                    Ok::<_, Infallible>(())
+                }
+            },
+        ))?;
+
+        // Separate listener, separate name: `partial-failure` must not have to be
+        // inferred from the absence of a further progress tick (contract).
+        let app_done = self.app.clone();
+        let _done = ctx.on::<ShellOperationDone, _>(observer(
+            move |_ctx: Context, args: FileOperationResult| {
+                let app = app_done.clone();
+                async move {
+                    let _ = app.emit(ShellOperationDone::NAME, args);
+                    Ok::<_, Infallible>(())
+                }
+            },
+        ))?;
+
+        // Recursive scans are the other long-running job the kernel owns and the
+        // WebView only ever sees through events: `sys.scan.start` returns an id and
+        // nothing else. Forwarded verbatim for the same reason as above — a reshape
+        // here would break the space-analysis panel that listens for these names.
+        let app_scan_progress = self.app.clone();
+        let _scan_progress = ctx.on::<ScanProgressEvent, _>(observer(
+            move |_ctx: Context, args: ScanProgress| {
+                let app = app_scan_progress.clone();
+                async move {
+                    let _ = app.emit(ScanProgressEvent::NAME, args);
+                    Ok::<_, Infallible>(())
+                }
+            },
+        ))?;
+
+        let app_scan_done = self.app.clone();
+        let _scan_done = ctx.on::<ScanDoneEvent, _>(observer(
+            move |_ctx: Context, args: ScanDone| {
+                let app = app_scan_done.clone();
+                async move {
+                    let _ = app.emit(ScanDoneEvent::NAME, args);
                     Ok::<_, Infallible>(())
                 }
             },

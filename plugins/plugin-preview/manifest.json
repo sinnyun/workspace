@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "plugin-preview",
+  "version": "0.1.0",
+  "displayName": "文件预览",
+  "description": "预览区默认显示 Windows 系统缩略图，显式点击后按格式用统一查看器读取内容",
+  "author": "base",
+  "minHostVersion": "0.1.0",
+  "frontend": {
+    "entry": "frontend/dist/index.js",
+    "slots": [
+      { "id": "preview-zone", "export": "PreviewPanel" },
+      { "id": "settings-page:preview", "export": "SettingsPage", "label": "文件预览" }
+    ]
+  },
+  "permissions": {
+    "capabilities": [
+      "shell.thumbnail.read",
+      "file.kind",
+      "fs.readText",
+      "fs.openResource",
+      "fs.readResource",
+      "fs.closeResource",
+      "shell.openPath"
+    ],
+    "events": {
+      "subscribe": [],
+      "emit": ["preview:state:changed"]
+    },
+    "slots": { "contribute": ["preview-zone", "settings-page:preview"] }
+  }
+}

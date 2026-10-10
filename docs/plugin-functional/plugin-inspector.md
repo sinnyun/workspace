@@ -13,7 +13,7 @@
 
 - 输入基座当前会话的 `focusRef`、`activeDetailTab` 和动态 slot 列表；不调用文件系统能力，不解释焦点路径内容。
 - 用户切 tab 时发 `detail:tab:changed {tabId}`；`host.onStateChange` 恢复会话的 tab。通过 `contributedSlots`/`slotLabel` 发现其它插件提供的详情页面。
-- 子区由 `provideSlot` 渲染；属性由 `plugin-file-details` 提供，`preview-zone` 默认呈现 `plugin-windows-thumbnails` 返回的 Windows 系统缩略图，并由 `plugin-preview` 提供“缩略图 / 文件预览”切换与显式启动的 Open File Viewer；历史由 `plugin-file-history` 的独立详情 tab 提供。任何子插件失败只影响自身槽。迁移期间已注册的 `plugin-preview-text` 将由统一预览插件接替。
+- 子区由 `provideSlot` 渲染；属性由 `plugin-file-details` 提供，`preview-zone` 由 `plugin-preview` 承载：默认显示它自己经 `shell.thumbnail.read` 取到的 Windows 系统缩略图，用户显式点击才启动 Open File Viewer 读正文；历史由 `plugin-file-history` 的独立详情 tab 提供。任何子插件失败只影响自身槽。
 
 ## 状态与验收
 

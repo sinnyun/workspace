@@ -17,9 +17,9 @@ pub mod capability;
 pub mod events;
 pub mod manifest;
 
-pub use capability::{
-    CapabilityError, DbApi, DbCapability, FsApi, FsCapability, HashApi, HashCapability, HashAlgo,
-    ListEntry, ReadChunkOut, StatOut, ThumbApi, ThumbCapability, ThumbOut,
-};
-pub use events::{FileChanged, FileChangedArgs, HistoryUpdated, HistoryUpdatedArgs};
+/// Glob re-exports on purpose: every contract type is reachable at the crate root
+/// the moment it exists, so a new DTO cannot silently skip the cross-language
+/// check the way an explicit list would (the dump reads these paths).
+pub use capability::*;
+pub use events::*;
 pub use manifest::PluginManifest;

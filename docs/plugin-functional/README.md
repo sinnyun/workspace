@@ -28,21 +28,21 @@
 | [plugin-view-tags.md](plugin-view-tags.md) | `plugin-view-tags` 标签视图 | 现有 |
 | [plugin-file-details.md](plugin-file-details.md) | `plugin-file-details` 文件属性 | 现有 |
 | [plugin-file-history.md](plugin-file-history.md) | `plugin-file-history` Lore 文件历史与版本操作 | 现有基础快照；目标迁移 Lore |
-| [plugin-preview.md](plugin-preview.md) | `plugin-preview` 统一预览 | 规划（整合现有 `plugin-preview-text`） |
+| [plugin-preview.md](plugin-preview.md) | `plugin-preview` 统一预览 | 已交付（批次 6） |
 | [plugin-mock-data.md](plugin-mock-data.md) | `plugin-mock-data` 压力数据入口 | 现有（开发期） |
 | [plugin-devtools-log.md](plugin-devtools-log.md) | `plugin-devtools-log` 开发调试台 | 现有（开发期） |
 | [plugin-dev-slot-harness.md](plugin-dev-slot-harness.md) | `plugin-dev-slot-harness` 插槽自检夹具 | 现有（开发期） |
 
-## 插件目录中已规划的功能插件
+## 插件目录中的功能插件（落地状态）
 
 | 插件文档 | 插件 | 状态 |
 |---|---|---|
-| [plugin-file-ops.md](plugin-file-ops.md) | `plugin-file-ops` Windows 原生文件操作 | 规划（改由系统 Shell 执行） |
-| [plugin-windows-thumbnails.md](plugin-windows-thumbnails.md) | `plugin-windows-thumbnails` Windows 系统缩略图 | 规划（Shell 原生读取与缓存） |
+| [plugin-file-ops.md](plugin-file-ops.md) | `plugin-file-ops` Windows 原生文件操作 | 已交付（批次 5；经系统 Shell 执行） |
+| [plugin-windows-thumbnails.md](plugin-windows-thumbnails.md) | `plugin-windows-thumbnails` Windows 系统缩略图 | 能力已交付为 `shell.thumbnail.read`（批次 4）；独立设置页插件仍未落 |
 | [plugin-search.md](plugin-search.md) | `plugin-search` 搜索 | 规划，索引引擎待选 |
-| [plugin-storage-analysis.md](plugin-storage-analysis.md) | `plugin-storage-analysis` 空间分析 | 规划 |
+| [plugin-storage-analysis.md](plugin-storage-analysis.md) | `plugin-storage-analysis` 空间分析 | 已交付（批次 7） |
 | [plugin-history-metadata.md](plugin-history-metadata.md) | `plugin-history-metadata` 历史版本信息 | 规划（保存并展示 Lore revision 对应的缩略图和文件属性） |
-| [plugin-context-menu.md](plugin-context-menu.md) | `plugin-context-menu` 右键菜单框架 | 规划（统一面板；业务插件自动注册动作） |
+| [plugin-context-menu.md](plugin-context-menu.md) | `plugin-context-menu` 右键菜单框架 | 已交付（批次 3；统一面板，业务插件贡献动作） |
 
 ## 已取消的规划
 
@@ -50,6 +50,6 @@
 |---|---|---|
 | [plugin-archive.md](plugin-archive.md) | 压缩包内只读浏览与安全解压 | 已取消，不纳入当前开发路线；保留文档作为决策记录 |
 
-仓库当前 manifest 中仍注册着旧 `plugin-preview-text`；它是待整合的过渡实现，不属于目标插件清单。旧 Markdown、图片、PDF、媒体独立预览文档已并入 `plugin-preview.md`，不再作为独立应用插件规划。
+纯文本读取与预览偏好都由 `plugin-preview` 承载，仓库里没有独立的文本预览插件。注意宿主端插件发现是**扫描 `plugins/` 目录**（无 allowlist）：目录存在就会被真机装载，所以插件目录的新增与删除都要显式确认，dev 注册表不能当作隔离手段。
 
 命令面板当前是基座预留槽，不是已注册插件；SDK 尚无插件命令注册 API。全局命令功能见 [09 插件功能规格与交互数据契约](../09-plugin-functional-spec.md)，在 API 单独设计前，不给业务插件伪造命令接口。

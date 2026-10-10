@@ -1,13 +1,13 @@
 # `plugin-file-ops` · Windows 原生文件操作
 
-**状态：规划，全栈；这是唯一的应用内文件写操作入口。** 前端插件组织操作入口和参数，Windows 后端适配器把实际读写委托给 Windows Shell；不另写文件复制/移动/删除算法。插件挂载 `topbar-zone`、`statusbar-zone` 和 inspector 的 `detail-info-zone` 操作区。
+**状态：已交付（批次 5）；这是唯一的应用内文件写操作入口。** 前端插件组织操作入口和参数，Windows 后端适配器把实际读写委托给 Windows Shell；不另写文件复制/移动/删除算法。插件挂载 `statusbar-zone`（运行中/结果一行状态），条目动作经 `plugin-context-menu` 贡献到浏览器的三个 surface。
 
 ## 功能范围
 
 - 打开文件：调用 Tauri opener 的系统默认关联程序；打开目录/在资源管理器中显示项目：调用系统 Explorer reveal。只使用系统默认 `open` 行为，不自行拼可执行命令、参数或提权 verb。
 - 复制、移动、重命名、新建文件夹、删除：Windows 使用 Shell `IFileOperation` 对系统 Shell item 执行。文件夹递归、跨卷行为、系统冲突提示和进度窗口均交由 Windows 处理。
 - 删除默认移入回收站，使用 `FOFX_RECYCLEONDELETE`；不提供静默永久删除。若需永久删除，作为显式的二次产品决策，不得把它混入普通“删除”。
-- 用户入口包括顶栏新建/粘贴入口（如剪贴板文件操作后续实现）、详情区单项操作、键盘快捷操作，以及通过 `plugin-context-menu` 注册到文件/目录/空白区右键面板的上下文动作。首期支持当前焦点单项；多选操作仅在浏览器提供明确的 selection-set 契约后启用。
+- 用户入口：右键面板里的 打开/在资源管理器中显示/重命名/复制到文件夹/移动到文件夹/移到回收站（贡献到 `browser.list.item`、`browser.grid.item`），以及空白区的 新建文件夹。**多选已经启用**：来源取 `context.targetRef` 与 `context.selectedRefs` 的去重并集——右键命中已选项时保留整个选择，命中未选项时浏览器已把选择收敛为该项（P7-12 规则），所以插件不需要自己的选区状态。收藏/标签 surface 故意不贡献条目动作：那里没有跨插件的失效契约，改名/删除后别的面板不会收敛。操作进行中（busy）所有条目动作即刻退出菜单，状态行只跟踪一个在途批次。
 - 操作参数仍由应用收集：选择目标目录、输入新名称、选中来源、确认是否继续。Tauri dialog 用于系统文件/目录选择；名称输入和操作列表是应用 UI，但不自行执行 filesystem mutation。
 
 ## 系统调用方式
@@ -28,7 +28,7 @@
 
 - 普通操作流程：idle → collect-input → validating → native-operation → completed/partial-failure/cancelled/failed。创建/重命名表单验证空名、非法字符和既存同名；实际冲突处理交 Windows 对话框。
 - 删除前应用 UI 显示数量和路径并确认；随后 Windows 仍可显示系统确认/访问错误提示。取消对话框返回 cancelled，界面还原，不发成功通知。
-- Native progress 对话框由 Windows 管理；应用状态栏显示简短“正在由 Windows 处理”及最终成功/部分失败结果。若 progress sink 不可用，显示不确定状态，不伪造百分比。
+- 冲突处理不是第二套 UI 而是**一次偏好选择**：modal 里的 同名时保留两者 / 覆盖同名项 / 同名时停止 映射到 Shell 的 conflict flags，因此后台线程不会被系统对话框阻塞；落点名仍由 Shell 决定，界面如实报"其中 N 项自动改名"（`outcome: renamed`）。`IFileOperation` 不给我们可信百分比，状态栏因此恒为**不确定进度**（共 N 项 + 当前项名），不画伪造的百分比；取消时先转"正在取消"，终态区分"完成 X 项 / 取消 Y 项"。
 - 操作按钮禁用重复提交并显示 busy；成功/失败状态轻量淡入，约 120–180ms；系统对话框自身动效不由应用覆盖。ESC/取消含义遵循系统操作返回值；应用表单可由 ESC 关闭且焦点返回触发器。
 - 文件打开失败按文件不存在、没有默认应用、权限拒绝等显示可恢复信息；不捕获后假装打开成功。系统服务不可用或线程初始化失败时返回明确错误，不退化为自写拷贝实现。
 
@@ -36,9 +36,9 @@
 
 - 本插件从 file-browser 当前焦点/明确 selection-set 获取源 Ref。Ref 仅用于选择；真正操作提交时发送经过验证的路径参数到 host capability，不把文件记录、组件或可变 selection store 写入基座。
 - 通过 `host.contextMenu.registerItem` 注册适用于文件/目录条目和目录空白区的“打开”“在资源管理器中显示”“复制”“移动”“重命名”“移到回收站”“新建文件夹”等菜单项；`when/enabled` 按 target kind、selection 数和平台过滤。具体操作仍由本插件组织参数并调用自己的 Windows capability。
-- 拟新增 Rust/SDK 能力：`shell.fileOperation`（copy/move/rename/delete/createFolder）、`shell.openPath`、`shell.revealItemInDir`、`shell.pickFile`、`shell.pickDirectory`。名称与 DTO 在实现前须冻结并同步 `contracts`、SDK、host 命令、默认 ACL 和本插件 manifest。
-- 操作完成返回 operation id、结果类别、affected parent paths 和逐项错误摘要。需要后台或长任务通知时使用拟议 `file:operation:progress` / `file:operation:complete`；事件不得传文件内容或敏感错误堆栈。
-- `plugin-file-browser` 根据受影响目录刷新可见列表；watcher 的 `file:changed` 供 `plugin-file-history` 等订阅者处理。操作插件不直接刷新或修改其他插件内部状态。
+- 已冻结的 Rust/SDK 能力：`shell.fileOperation`（`op`: copy/move/rename/create/delete，`toRecycleBin` 默认真）、`shell.cancelFileOperation`、`shell.openPath`、`shell.revealItemInDir`、`shell.pickFile`、`shell.pickDirectory`，以及同期冻结的 `file.kind`。DTO 在 `core-shared/contracts`（`FileOperationIn/Out/Progress/Item/Result`、`PickIn/PickOut`），经 `contract:check` 与 SDK 对齐。
+- `shell.fileOperation` **只回执**（`operationId` + `queued` + `total` + `indeterminate: true`），真相一律走 `shell:operation:progress` / `shell:operation:done`：一次批量 Shell 调用可以活过任何合理的请求超时，所以调用本身不假装知道结果。终态载荷给逐项 `FileOperationItem`（`completed/renamed/skipped/failed/cancelled` + `reason` + Shell 原文 `message`）和 `crossVolumeMove`。
+- `plugin-file-browser` 按 `file:changed` 重读可见列表；**该事件的载荷口径是条目路径**（与 watcher 同一说法），不是目录——每个订阅者自己判断这条路径是否落在自己正在显示的东西里。watcher 继续发布外部变更，供 `plugin-file-history` 等订阅者处理。操作插件不直接刷新或修改其他插件内部状态。
 - 当前基座没有通用命令注册接口，命令面板入口暂不列为已实现功能；注册 API 完成后再接入。
 - 右键动作通过 `host.contextMenu.registerItem` 注册，handler 仍由本插件调用自身能力；菜单框架只负责显示/派发，不复制 file-ops 业务逻辑。
 

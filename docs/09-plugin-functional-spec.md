@@ -191,7 +191,7 @@
 
 ## 8. 插件功能规格清单
 
-下列条目将每个插件的范围定到可独立开发的边界。✅/🟡/🔵 描述代码现状，后续完整验收按“目标交互和状态”逐项补齐；开发排序见 [04 roadmap](04-roadmap.md) 和 [08 插件目录](08-plugin-catalog.md)。
+下列条目将每个插件的范围定到可独立开发的边界。✅/🟡/🔵 描述代码现状，后续完整验收按“目标交互和状态”逐项补齐；**逐批开发排期与难度分级见 [04 roadmap](04-roadmap.md) 的 Phase 7（P7-1~34，含代码现状核对表）**，插件的库分布见 [08 插件目录](08-plugin-catalog.md)。
 
 ### 8.1 基础容器与系统插件
 
@@ -214,7 +214,7 @@
 | `plugin-file-details` 文件详情 | ✅ `detail-info-zone` 基础属性与 BLAKE3 | 按当前焦点展示文件名、路径、大小、类型、修改时间、哈希；文件夹展示适用的目录信息；可复制路径；慢 hash 单独 loading/error | `fs.stat/hash.compute/fs.home/fs.readText`（按实现权限）；订 selection 兼容事件。每个异步响应核验 ref；大文件哈希如未有进度契约显示 indeterminate；二进制不强行 readText |
 | `plugin-file-history` Lore 文件历史与版本操作 | 🟡 `detail-tab:history`，当前是旧式 hash/元数据快照 | Lore 仓库内版本查询、dirty、显式创建、只读查看、diff、安全恢复；版本行展示由独立 metadata 插件贡献 | `file:changed` 仅刷新 Lore 工作区状态；用户操作经 Lore 适配层。消费 metadata 插件发出的 restore request 并负责确认/执行；自身不保存版本缩略图属性 |
 | `plugin-history-metadata` 历史版本信息 | 🔵 规划；贡献 `history-record:metadata` 子插槽 | 按 revision 保存 Windows 系统缩略图、文件大小/类型、图片尺寸和采集状态；供历史版本行展示；点击切换只发送 restore request | 订 Lore revision 创建生命周期，采集属性并写独占 `db.historyMetadata.*`/blob；不拥有 Lore capabilities，不提交、不恢复、不读取 Lore 私有存储 |
-| `plugin-preview` 统一预览 | 规划；整合现有 `plugin-preview-text`；`preview-zone` + 自有设置页；Open File Viewer React SDK | 预览区提供“缩略图 / 文件预览”切换；新焦点默认只显示 Windows 缩略图，不加载 viewer、不读取正文；用户主动点击后才统一分派文本/代码/Markdown、图片、PDF、音视频、Office、压缩包等；加载/不支持/损坏/加密/超限状态可恢复 | `file.kind` + 授权预览资源句柄/range 通道；`fm.preview.prefs.v1` 仅存格式偏好，不存模式。切回缩略图/焦点变化取消读取、撤销句柄并释放 media/worker；不暴露裸路径 |
+| `plugin-preview` 统一预览 | ✅ 已交付（批次 6）；`preview-zone` + `settings-page:preview`；Open File Viewer React SDK | 预览区提供“缩略图 / 文件预览”切换；新焦点默认只显示 Windows 缩略图，不加载 viewer、不读取正文；用户主动点击后才统一分派文本/代码/Markdown、图片、PDF、音视频、Office、压缩包等；加载/不支持/损坏/加密/超限状态可恢复 | `file.kind` + 授权预览资源句柄/range 通道；`fm.preview.prefs.v1` 仅存格式偏好，不存模式。切回缩略图/焦点变化取消读取、撤销句柄并释放 media/worker；不暴露裸路径 |
 | `plugin-mock-data` 模拟数据（dev） | ✅ dev only 活动栏 + `nav-panel:stress` | 选择 1K/10K/100K/500K/空目录/读取失败数据，驱动真实浏览与详情链路 | 仅浏览器开发 mock 索引存在，发布宿主不得发现；发 Ref，不将 stress 文件逻辑塞进业务插件；用于性能、空态和失败态回归 |
 
 ### 8.3 后续业务插件（规划，不得误认为已提供）
